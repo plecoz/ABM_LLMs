@@ -1,15 +1,15 @@
 import osmnx as ox
 
-def fetch_pois(graph, place_name="Paris, France"):
-    """Fetch Points of Interest (POIs) from OpenStreetMap."""
+def fetch_pois(graph, place_name="Macau"):  
+    """Fetch POIs in Macau from OpenStreetMap."""
     tags = {
         "shop": True,
-        "amenity": ["school", "hospital"],
+        "amenity": ["school", "hospital", "restaurant"],
         "leisure": ["park"],
     }
     pois = {k: [] for k in ["shop", "school", "park"]}
     
-    gdf = ox.geometries_from_place(place_name, tags)
+    gdf = ox.features_from_place(place_name, tags)
     for _, row in gdf.iterrows():
         nearest_node = ox.distance.nearest_nodes(graph, row.geometry.x, row.geometry.y)
         if "shop" in row:
