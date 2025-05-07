@@ -1,5 +1,7 @@
 import random
 import mesa
+from mesa.agent import Agent
+import networkx as nx
 
 class Resident(mesa.Agent):
     """An agent representing a resident in the 15-minute city."""
@@ -27,8 +29,10 @@ class Resident(mesa.Agent):
         except nx.NetworkXNoPath:
             pass
         return False
+    
 
     def step(self):
-        """Agent behavior: Visit a random POI."""
-        poi_type = random.choice(["shop", "school", "park"])
-        self.move_to_poi(poi_type)
+        """Move to a random POI type (school/shop/park)"""
+        poi_type = random.choice(["school", "shop", "park"])
+        if poi_type in self.model.pois:
+            self.move_to_poi(poi_type)

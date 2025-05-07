@@ -1,15 +1,16 @@
 import mesa
+import random
 from agents.resident import Resident
 from agents.poi import POI
 
 class FifteenMinuteCity(mesa.Model):
     """Mesa model for the 15-minute city simulation."""
-    def __init__(self, graph, pois):
-        super().__init__()
-        self.graph = graph
-        self.pois = pois
-        self.schedule = mesa.time.RandomActivation(self)
-        self.grid = mesa.space.NetworkGrid(self.graph)
+    def __init__(self, graph, pois, num_agents=10):  # Add num_agents parameter
+        # ... (existing code)
+        for i in range(num_agents):  # Use parameter instead of hardcoded 100
+            home_node = random.choice(list(graph.nodes()))
+            resident = Resident(i, self, home_node)
+            self.schedule.add(resident)
         
         # Create residents
         for i in range(100):

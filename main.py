@@ -3,7 +3,7 @@ from environment.pois import fetch_pois
 from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
 
-def run_simulation(num_agents=10, steps=50):
+def run_simulation(num_agents=5, steps=5):
     # 1. Load Macau's infrastructure
     print("⏳ Loading Macau's street network...")
     graph = load_city_network("Macau, China")
