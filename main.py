@@ -3,9 +3,8 @@ from environment import load_city_network, fetch_pois
 from simulation import FifteenMinuteCity
 
 
-# Initialize city and POIs
-graph = load_city_network(place_name="Paris, France")
-pois = fetch_pois(graph)
+graph = load_city_network(place_name="Macau")  # Explicitly set Macau
+pois = fetch_pois(graph, place_name="Macau")
 
 # Run simulation
 model = FifteenMinuteCity(graph, pois)
