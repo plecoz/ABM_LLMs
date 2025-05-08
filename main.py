@@ -2,6 +2,7 @@ from environment.city_network import load_city_network
 from environment.pois import fetch_pois
 from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
+import matplotlib.pyplot as plt
 
 def run_simulation(num_agents=5, steps=5):
     # 1. Load Macau's infrastructure
