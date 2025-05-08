@@ -19,5 +19,6 @@ class BaseMap:
     def clear_artists(self):
         """Clear all dynamic elements."""
         for artist in self.ax.lines + self.ax.collections:
-            if artist not in self.ax._edges:  # Preserve base map edges
+            #if artist not in self.ax._edges:
+            if artist.axes is not None:  # Preserve base map edges
                 artist.remove()
