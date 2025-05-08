@@ -5,21 +5,21 @@ from visualization import SimulationAnimator
 
 def run_simulation(num_agents=5, steps=5):
     # 1. Load Macau's infrastructure
-    print("⏳ Loading Macau's street network...")
+    print("Loading Macau's street network...")
     graph = load_city_network("Macau, China")
     pois = fetch_pois(graph)
     
     # 2. Initialize model with 10 agents
-    print(f"🚶 Spawning {num_agents} residents...")
+    print(f"Spawning {num_agents} residents...")
     model = FifteenMinuteCity(graph, pois, num_agents=num_agents)
     
     # 3. Run with visualization
-    print("🌆 Starting simulation...")
+    print("Starting simulation...")
     animator = SimulationAnimator(model, graph)
     for step in range(steps):
         model.step()
         animator.update(step)
-        print(f"⏱️ Step {step + 1}/{steps}", end="\r")
+        print(f"Step {step + 1}/{steps}", end="\r")
     
     plt.show()  # Keep window open
 
