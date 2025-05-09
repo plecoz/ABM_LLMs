@@ -51,9 +51,9 @@ class SimulationAnimator:
     
     def _plot_agents(self):
         """Plot all agents as colored dots"""
-        for agent in [a for a in self.model.schedule.agents if hasattr(a, 'current_node')]:
+        for agent in [a for a in self.model.agents if hasattr(a, 'current_node')]:
             x, y = self.graph.nodes[agent.current_node]['x'], self.graph.nodes[agent.current_node]['y']
-            dot = self.ax.plot(x, y, 'o', color='blue', markersize=8)[0]
+            dot = self.ax.plot(x, y, 'o', color='blue', markersize=2)[0]
             self.agent_dots.append(dot)
     
     def _plot_pois(self):
@@ -61,5 +61,5 @@ class SimulationAnimator:
         for poi_type, nodes in self.model.pois.items():
             for node in nodes:
                 x, y = self.graph.nodes[node]['x'], self.graph.nodes[node]['y']
-                marker = self.ax.plot(x, y, 's', color='red', markersize=10)[0]
+                marker = self.ax.plot(x, y, 's', color='red', markersize=3)[0]
                 self.poi_markers.append(marker)

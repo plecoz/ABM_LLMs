@@ -3,7 +3,7 @@ import random
 import networkx as nx
 
 class Resident(Agent):
-    def __init__(self, unique_id, model, home_node):
+    def __init__(self, unique_id, model, home_node, accessible_nodes):
         """
         Proper initialization for Mesa 3.x:
         - model MUST be the first argument to parent class
@@ -18,6 +18,7 @@ class Resident(Agent):
         # Custom attributes
         self.home_node = home_node
         self.current_node = home_node
+        self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
         
@@ -27,6 +28,12 @@ class Resident(Agent):
     def move_to_poi(self, poi_type):
         """Improved movement with distance check"""
         if not self.model.pois.get(poi_type):
+            return False
+        
+        valid_pois = [n for n in self.model.pois[poi_type] 
+                     if n in self.accessible_nodes]
+        
+        if not valid_pois:
             return False
             
         try:
