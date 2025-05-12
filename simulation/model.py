@@ -8,7 +8,7 @@ from agents.poi import POI
 import networkx as nx
 
 class FifteenMinuteCity(Model):
-    def __init__(self, graph, pois, num_agents=10):
+    def __init__(self, graph, pois, num_residents, num_organizations):
         super().__init__()  # Mesa 3.x model initialization
         
         self.graph = graph
@@ -18,15 +18,15 @@ class FifteenMinuteCity(Model):
         self.grid = NetworkGrid(graph)
         
         # Create agents
-        for i in range(num_agents):
+        for i in range(num_residents):
             home_node = random.choice(list(graph.nodes()))
                         # Calculate all nodes within 1km
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 graph, home_node, cutoff=1000, weight='length'
             ))
             resident = Resident(
-                unique_id=i,  # Can be integer in Mesa 3.x
                 model=self,
+                unique_id=i,  # Can be integer in Mesa 3.x
                 home_node=home_node,
                 accessible_nodes=accessible_nodes
             )

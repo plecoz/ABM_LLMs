@@ -4,15 +4,16 @@ from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
 
-def run_simulation(num_agents, steps):
+def run_simulation(num_residents, num_organizations, steps):
 
     print("Loading Macau's street network...")
     graph = load_city_network("Macau, China")
     pois = fetch_pois(graph)
     
 
-    print(f"Spawning {num_agents} residents...")
-    model = FifteenMinuteCity(graph, pois, num_agents=num_agents)
+    print(f"Spawning {num_residents} residents...")
+    print(f"Spawning {num_organizations} organizations...")
+    model = FifteenMinuteCity(graph, pois, num_residents=num_residents, num_organizations=num_organizations)
     
 
     print("Starting simulation...")
@@ -33,4 +34,4 @@ def run_simulation(num_agents, steps):
       # Keep window open
 
 if __name__ == "__main__":
-    run_simulation(num_agents=10, steps=50)
+    run_simulation(num_residents=10, num_organizations=0, steps=50)

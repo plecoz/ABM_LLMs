@@ -1,19 +1,17 @@
 from mesa.agent import Agent
+from agents.base_agent import BaseAgent
 import random
 import networkx as nx
 
-class Resident(Agent):
-    def __init__(self, unique_id, model, home_node, accessible_nodes):
+class Resident(BaseAgent):
+    def __init__(self, model, unique_id, home_node, accessible_nodes, **kwargs):
         """
         Proper initialization for Mesa 3.x:
         - model MUST be the first argument to parent class
         - unique_id is set separately
         """
         # Parent class gets model only
-        super().__init__(model)
-        
-        # Then we set our unique_id
-        self.unique_id = unique_id
+        super().__init__(model, unique_id, **kwargs)
         
         # Custom attributes
         self.home_node = home_node
@@ -21,6 +19,15 @@ class Resident(Agent):
         self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
+                # Person-specific attributes
+        self.family_id = kwargs.get('family_id', None)
+        self.household_members = kwargs.get('household_members', [])
+        self.social_network = kwargs.get('social_network', [])
+        self.daily_schedule = kwargs.get('daily_schedule', {})
+        self.personality_traits = kwargs.get('personality_traits', {})
+        
+        # Health attributes
+        self.health_status = kwargs.get('health_status', 'healthy')
         
         # Register with model (automatic in Mesa, but explicit here)
         #model.register_agent(self)
@@ -58,5 +65,41 @@ class Resident(Agent):
         return False
 
     def step(self):
+        super().step()
         if self.model.pois:
             self.move_to_poi(random.choice(list(self.model.pois.keys())))
+        self._update_health_status()
+        self._maintain_social_network()
+
+
+    def _update_health_status(self):
+        """
+        Update the agent's health status based on interactions and environment.
+        This is a placeholder for more complex health models.
+        """
+        # Check if we have scenario-specific health features
+        if 'health' in self.features:
+            health_features = self.features['health']
+            
+            # Example: Simple infectious disease logic
+            if health_features.get('infectious_disease_enabled', False):
+                if self.health_status == 'infected':
+                    # Recovery chance
+                    recovery_probability = health_features.get('recovery_probability', 0.1)
+                    if self.model.random.random() < recovery_probability:
+                        self.health_status = 'recovered'
+                        self.logger.info(f"Agent {self.unique_id} recovered at step {self.model.schedule.steps}")
+    
+    def _maintain_social_network(self):
+        """
+        Maintain the agent's social network through regular contact.
+        """
+        # Random chance to communicate with someone in social network
+        if self.social_network and self.model.random.random() < 0.1:  # 10% chance
+            contact_id = self.model.random.choice(self.social_network)
+            contact_agent = self.model.get_agent_by_id(contact_id)
+            
+            if contact_agent:
+                # Random choice between online and offline communication
+                online = self.model.random.random() < 0.7  # 70% chance for online
+                self._communicate_with(contact_agent, online=online)
