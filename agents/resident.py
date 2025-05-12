@@ -37,7 +37,9 @@ class Resident(Agent):
             return False
             
         try:
-            target = random.choice(self.model.pois[poi_type])
+           #target = random.choice(self.model.pois[poi_type])
+            target = random.choice(valid_pois)
+            """
             distance = nx.shortest_path_length(
                 self.model.graph,
                 self.current_node,
@@ -48,6 +50,9 @@ class Resident(Agent):
                 self.current_node = target
                 self.visited_pois.append(target)
                 return True
+            """
+            self.current_node = target
+            self.visited_pois.append(target)
         except (nx.NetworkXNoPath, KeyError):
             pass
         return False
