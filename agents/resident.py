@@ -7,11 +7,17 @@ import logging
 class Resident(BaseAgent):
     def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
         """
-        Proper initialization for Mesa 3.x:
-        - model MUST be the first argument to parent class
-        - unique_id is set separately
+        Initialize a resident agent.
+        
+        Args:
+            model: Model instance the agent belongs to
+            unique_id: Unique identifier for the agent
+            geometry: Shapely geometry object representing the agent's location
+            home_node: The agent's home node in the network
+            accessible_nodes: Dictionary of nodes accessible to the agent
+            **kwargs: Additional agent properties that can be customized
         """
-        # Parent class gets model only
+        # Pass parameters in the correct order to parent class
         super().__init__(model, unique_id, geometry, **kwargs)
         
         # Custom attributes
@@ -96,13 +102,14 @@ class Resident(BaseAgent):
         if self.social_network and hasattr(self.model, 'random') and self.model.random.random() < 0.1:  # 10% chance
             contact_id = self.model.random.choice(self.social_network)
             
-            # Check if model has get_agent_by_id method
-            if hasattr(self.model, 'get_agent_by_id'):
-                contact_agent = self.model.get_agent_by_id(contact_id)
-                
-                if contact_agent:
-                    # Random choice between online and offline communication
-                    online = self.model.random.random() < 0.7  # 70% chance for online
+            # Get the contact agent
+            contact_agent = self.model.get_agent_by_id(contact_id)
+            
+            if contact_agent:
+                # Random choice between online and offline communication
+                online = self.model.random.random() < 0.7  # 70% chance for online
+                # Use the _communicate_with method from BaseAgent
+                if hasattr(self, '_communicate_with'):
                     self._communicate_with(contact_agent, online=online)
     
     def set_activity_preferences(self, preferences):

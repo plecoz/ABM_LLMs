@@ -11,9 +11,13 @@ class BaseAgent(GeoAgent):
         Args:
             model: Model instance the agent belongs to
             unique_id: Unique identifier for the agent
+            geometry: Shapely geometry object
+            crs: Coordinate reference system (included in kwargs if needed)
             **kwargs: Additional agent properties that can be customized
         """
-        super().__init__(model, geometry, crs=None)
+        # Initialize GeoAgent (parent class) with correct order for Mesa-geo
+        # Mesa-geo expects (model, geometry, crs) in that order
+        super().__init__(model, geometry, crs)
         self.unique_id = unique_id
         
         # Basic agent properties with defaults that can be overridden
@@ -54,9 +58,8 @@ class BaseAgent(GeoAgent):
         Advance the agent one step in the simulation.
         """
         # Update current position in location history
-        # Use a step counter from model if available, otherwise use None
-        step_count = getattr(self.model, 'schedule', None)
-        step_count = step_count.steps if step_count is not None else 0
+        # Use step_count from model
+        step_count = getattr(self.model, 'step_count', 0)
         
         self.location_history.append((step_count, self.geometry))
         
@@ -112,7 +115,7 @@ class BaseAgent(GeoAgent):
         Plan a route to the destination using Google Maps API or simple path.
         In this initial implementation, we'll use a simplified straight path.
         """
-        if self.model.route_planner:
+        if hasattr(self.model, 'route_planner') and self.model.route_planner:
             # Use the model's route planner (could be Google Maps API wrapper)
             self.movement_path = self.model.route_planner.get_route(
                 origin=self.geometry, 
@@ -161,9 +164,8 @@ class BaseAgent(GeoAgent):
             other_agent: The agent to communicate with
             online: Whether this is an online or offline interaction
         """
-        # Get step count safely
-        step_count = getattr(self.model, 'schedule', None)
-        step_count = step_count.steps if step_count is not None else 0
+        # Get step count from model.step_count
+        step_count = getattr(self.model, 'step_count', 0)
         
         # Generate a simple random message (can be replaced with LLM-generated content)
         message_content = f"Message from {self.unique_id} to {other_agent.unique_id} at step {step_count}"
