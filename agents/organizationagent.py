@@ -88,14 +88,14 @@ class OrganizationAgent(BaseAgent):
                 for agent in influenced_agents:
                     if isinstance(agent, Resident):
                         self._communicate_with(agent, online=config.get('online', False))
-"""    
+    
     def add_employee(self, agent_id):
-        
+        """
         Add an employee to this organization.
         
         Args:
             agent_id: ID of the agent to add as employee
-        
+        """
         if agent_id not in self.employees:
             self.employees.append(agent_id)
             
@@ -106,12 +106,12 @@ class OrganizationAgent(BaseAgent):
                 agent.work_location = self.geometry
     
     def remove_employee(self, agent_id):
-        
+        """
         Remove an employee from this organization.
         
         Args:
             agent_id: ID of the agent to remove
-        
+        """
         if agent_id in self.employees:
             self.employees.remove(agent_id)
             
@@ -120,6 +120,9 @@ class OrganizationAgent(BaseAgent):
             if agent and isinstance(agent, Resident) and agent.work_location == self.geometry:
                 agent.occupation = "unemployed"
                 agent.work_location = None
+    
+
+"""
     
     def set_policy(self, policy_name, config):
         
