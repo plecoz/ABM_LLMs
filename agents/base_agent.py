@@ -1,8 +1,8 @@
 from mesa.agent import Agent
+from mesa_geo.geoagent import GeoAgent
 
-
-class BaseAgent(Agent):
-    def __init__(self, model, unique_id, **kwargs):
+class BaseAgent(GeoAgent):
+    def __init__(self, model, unique_id, geometry, crs=None, **kwargs):
         """
         Initialize a base agent with modular properties.
     
@@ -11,7 +11,7 @@ class BaseAgent(Agent):
             unique_id: Unique identifier for the agent
             **kwargs: Additional agent properties that can be customized
         """
-        super().__init__(model)
+        super().__init__(model, geometry, crs=None)
         self.unique_id = unique_id
         
         # Basic agent properties with defaults that can be overridden
@@ -20,7 +20,7 @@ class BaseAgent(Agent):
         self.income = kwargs.get('income', 50000)
         self.education = kwargs.get('education', 'high_school')
         self.occupation = kwargs.get('occupation', 'unspecified')
-        #self.home_location = kwargs.get('home_location', home_node)
+        self.home_location = kwargs.get('home_location', geometry)
         #self.current_node = home_node
         self.work_location = kwargs.get('work_location', None)
     

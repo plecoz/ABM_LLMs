@@ -6,6 +6,7 @@ import random
 from agents.resident import Resident
 from agents.poi import POI
 import networkx as nx
+from shapely.geometry import Point
 
 class FifteenMinuteCity(Model):
     def __init__(self, graph, pois, num_residents, num_organizations):
@@ -20,13 +21,19 @@ class FifteenMinuteCity(Model):
         # Create agents
         for i in range(num_residents):
             home_node = random.choice(list(graph.nodes()))
-                        # Calculate all nodes within 1km
+            # Get coordinates from the node
+            node_coords = self.graph.nodes[home_node]
+            # Create a Point geometry from the coordinates
+            point_geometry = Point(node_coords['x'], node_coords['y'])
+            
+            # Calculate all nodes within 1km
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 graph, home_node, cutoff=1000, weight='length'
             ))
             resident = Resident(
                 model=self,
-                unique_id=i,  # Can be integer in Mesa 3.x
+                unique_id=i,
+                geometry=point_geometry,
                 home_node=home_node,
                 accessible_nodes=accessible_nodes
             )

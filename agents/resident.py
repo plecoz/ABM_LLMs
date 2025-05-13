@@ -4,14 +4,14 @@ import random
 import networkx as nx
 
 class Resident(BaseAgent):
-    def __init__(self, model, unique_id, home_node, accessible_nodes, **kwargs):
+    def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
         """
         Proper initialization for Mesa 3.x:
         - model MUST be the first argument to parent class
         - unique_id is set separately
         """
         # Parent class gets model only
-        super().__init__(model, unique_id, **kwargs)
+        super().__init__(model, unique_id, geometry, **kwargs)
         
         # Custom attributes
         self.home_node = home_node

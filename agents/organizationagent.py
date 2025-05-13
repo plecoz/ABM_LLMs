@@ -60,7 +60,7 @@ class OrganizationAgent(BaseAgent):
         """
         # Clear previous visitors
         self.visitors = set()
-        """
+        
         # Get agents at this location
         nearby_agents = self.model.get_nearby_agents(self, distance=0.01)
         
@@ -68,7 +68,7 @@ class OrganizationAgent(BaseAgent):
             if isinstance(agent, Resident):
                 self.visitors.add(agent.unique_id)
                 
-        """
+        
     
     def _implement_policies(self):
         """
@@ -122,15 +122,14 @@ class OrganizationAgent(BaseAgent):
                 agent.work_location = None
     
 
-"""
+
     
     def set_policy(self, policy_name, config):
-        
+        """
         Set or update a policy for this organization.
         
         Args:
             policy_name: Name of the policy
             config: Policy configuration dictionary
-        
+        """
         self.policies[policy_name] = config
-"""
