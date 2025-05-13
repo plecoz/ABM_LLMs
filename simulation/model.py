@@ -22,6 +22,7 @@ class FifteenMinuteCity(Model):
         # Initialize lists to track agents
         self.residents = []
         self.organizations = []
+        self.agents = []
         
         # Create agents
         for i in range(num_residents):
@@ -44,6 +45,7 @@ class FifteenMinuteCity(Model):
             )
             self.grid.place_agent(resident, home_node)
             self.residents.append(resident)
+            self.agents.append(resident)
         
         for i in range(num_organizations):
             home_node = random.choice(list(graph.nodes()))
@@ -62,6 +64,7 @@ class FifteenMinuteCity(Model):
             )
             self.grid.place_agent(organization, home_node)
             self.organizations.append(organization)
+            self.agents.append(organization)
 
 
     def step(self):
