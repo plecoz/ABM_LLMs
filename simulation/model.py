@@ -1,6 +1,5 @@
 import mesa
 from mesa import Model
-#from mesa.time import RandomActivation
 from mesa.space import NetworkGrid
 import random
 from agents.resident import Resident
@@ -22,7 +21,7 @@ class FifteenMinuteCity(Model):
         # Initialize lists to track agents
         self.residents = []
         self.organizations = []
-        self.agents = []
+        self.all_agents = []
         
         # Create agents
         for i in range(num_residents):
@@ -45,7 +44,7 @@ class FifteenMinuteCity(Model):
             )
             self.grid.place_agent(resident, home_node)
             self.residents.append(resident)
-            self.agents.append(resident)
+            self.all_agents.append(resident)
         
         for i in range(num_organizations):
             home_node = random.choice(list(graph.nodes()))
@@ -64,7 +63,7 @@ class FifteenMinuteCity(Model):
             )
             self.grid.place_agent(organization, home_node)
             self.organizations.append(organization)
-            self.agents.append(organization)
+            self.all_agents.append(organization)
 
 
     def step(self):
@@ -91,9 +90,8 @@ class FifteenMinuteCity(Model):
         nearby_agents = []
         
         # Check all residents and organizations
-        all_agents = self.residents + self.organizations
         
-        for other in all_agents:
+        for other in self.all_agents:
             if other.unique_id != agent.unique_id:
                 if agent.geometry.distance(other.geometry) <= distance:
                     nearby_agents.append(other)
