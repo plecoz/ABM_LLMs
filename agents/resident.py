@@ -2,6 +2,7 @@ from mesa.agent import Agent
 from agents.base_agent import BaseAgent
 import random
 import networkx as nx
+import logging
 
 class Resident(BaseAgent):
     def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
@@ -19,18 +20,20 @@ class Resident(BaseAgent):
         self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
-                # Person-specific attributes
+        # Person-specific attributes
         self.family_id = kwargs.get('family_id', None)
         self.household_members = kwargs.get('household_members', [])
         self.social_network = kwargs.get('social_network', [])
         self.daily_schedule = kwargs.get('daily_schedule', {})
         self.personality_traits = kwargs.get('personality_traits', {})
+        self.activity_preferences = kwargs.get('activity_preferences', {})
         
         # Health attributes
         self.health_status = kwargs.get('health_status', 'healthy')
         
-        # Register with model (automatic in Mesa, but explicit here)
-        #model.register_agent(self)
+        # Initialize logger if not provided
+        if not hasattr(self, 'logger'):
+            self.logger = logging.getLogger(f"Resident-{unique_id}")
 
     def move_to_poi(self, poi_type):
         """Improved movement with distance check"""
@@ -44,33 +47,25 @@ class Resident(BaseAgent):
             return False
             
         try:
-           #target = random.choice(self.model.pois[poi_type])
             target = random.choice(valid_pois)
-            """
-            distance = nx.shortest_path_length(
-                self.model.graph,
-                self.current_node,
-                target,
-                weight="length"
-            )
-            if distance <= 1000:  # 15-min walk threshold (~1km)
-                self.current_node = target
-                self.visited_pois.append(target)
-                return True
-            """
             self.current_node = target
             self.visited_pois.append(target)
+            return True
         except (nx.NetworkXNoPath, KeyError):
             pass
         return False
 
     def step(self):
-        super().step()
-        if self.model.pois:
-            self.move_to_poi(random.choice(list(self.model.pois.keys())))
-        self._update_health_status()
-        self._maintain_social_network()
-
+        """Advance the agent one step"""
+        try:
+            super().step()
+            if hasattr(self.model, 'pois') and self.model.pois:
+                self.move_to_poi(random.choice(list(self.model.pois.keys())))
+            self._update_health_status()
+            self._maintain_social_network()
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error in resident step: {e}")
 
     def _update_health_status(self):
         """
@@ -78,7 +73,7 @@ class Resident(BaseAgent):
         This is a placeholder for more complex health models.
         """
         # Check if we have scenario-specific health features
-        if 'health' in self.features:
+        if hasattr(self, 'features') and 'health' in self.features:
             health_features = self.features['health']
             
             # Example: Simple infectious disease logic
@@ -86,7 +81,7 @@ class Resident(BaseAgent):
                 if self.health_status == 'infected':
                     # Recovery chance
                     recovery_probability = health_features.get('recovery_probability', 0.1)
-                    if self.model.random.random() < recovery_probability:
+                    if hasattr(self.model, 'random') and self.model.random.random() < recovery_probability:
                         self.health_status = 'recovered'
                         # Get step count safely
                         step_count = getattr(self.model, 'schedule', None)
@@ -109,3 +104,32 @@ class Resident(BaseAgent):
                     # Random choice between online and offline communication
                     online = self.model.random.random() < 0.7  # 70% chance for online
                     self._communicate_with(contact_agent, online=online)
+    
+    def set_activity_preferences(self, preferences):
+        """
+        Update the agent's activity preferences.
+        
+        Args:
+            preferences: Dictionary of activity types and their weights
+        """
+        self.activity_preferences = preferences
+    
+    def add_to_social_network(self, agent_id):
+        """
+        Add an agent to this agent's social network.
+        
+        Args:
+            agent_id: ID of the agent to add
+        """
+        if agent_id != self.unique_id and agent_id not in self.social_network:
+            self.social_network.append(agent_id)
+    
+    def remove_from_social_network(self, agent_id):
+        """
+        Remove an agent from this agent's social network.
+        
+        Args:
+            agent_id: ID of the agent to remove
+        """
+        if agent_id in self.social_network:
+            self.social_network.remove(agent_id)
