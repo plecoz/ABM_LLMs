@@ -4,6 +4,7 @@ from mesa import Model
 from mesa.space import NetworkGrid
 import random
 from agents.resident import Resident
+from agents.organizationagent import OrganizationAgent
 from agents.poi import POI
 import networkx as nx
 from shapely.geometry import Point
@@ -17,6 +18,10 @@ class FifteenMinuteCity(Model):
         #self.schedule = RandomActivation(self)
         #self.agents.shuffle_do("step")
         self.grid = NetworkGrid(graph)
+        
+        # Initialize lists to track agents
+        self.residents = []
+        self.organizations = []
         
         # Create agents
         for i in range(num_residents):
@@ -38,12 +43,59 @@ class FifteenMinuteCity(Model):
                 accessible_nodes=accessible_nodes
             )
             self.grid.place_agent(resident, home_node)
+            self.residents.append(resident)
+        
+        for i in range(num_organizations):
+            home_node = random.choice(list(graph.nodes()))
+            # Get coordinates from the node
+            node_coords = self.graph.nodes[home_node]
+            # Create a Point geometry from the coordinates
+            point_geometry = Point(node_coords['x'], node_coords['y'])
+            
+            # Calculate all nodes within 1km
+
+            organization = OrganizationAgent(
+                model=self,
+                unique_id=i,
+                geometry=point_geometry,
+                current_node=home_node  # Pass the home_node as current_node
+            )
+            self.grid.place_agent(organization, home_node)
+            self.organizations.append(organization)
 
 
     def step(self):
         """Advance the model by one step"""
-        #self.schedule.step()
-        self.agents.shuffle_do("step")  # This calls step() on all agents
+        # Step all residents
+        for resident in self.residents:
+            resident.step()
+        
+        # Step all organizations
+        for organization in self.organizations:
+            organization.step()
+
+    def get_nearby_agents(self, agent, distance=1.0):
+        """
+        Get agents within a certain distance of the given agent.
+        
+        Args:
+            agent: The agent to find nearby agents for
+            distance: The maximum distance to search
+            
+        Returns:
+            List of agents within the specified distance
+        """
+        nearby_agents = []
+        
+        # Check all residents and organizations
+        all_agents = self.residents + self.organizations
+        
+        for other in all_agents:
+            if other.unique_id != agent.unique_id:
+                if agent.geometry.distance(other.geometry) <= distance:
+                    nearby_agents.append(other)
+        
+        return nearby_agents
 """
     def register_agent(self, agent):
         #Explicit registration (optional but recommended)

@@ -1,4 +1,3 @@
-
 from agents.base_agent import BaseAgent
 from agents.resident import Resident
 
@@ -8,17 +7,20 @@ class OrganizationAgent(BaseAgent):
     This class extends BaseAgent with organization-specific attributes and behaviors.
     """
     
-    def __init__(self, unique_id, model, geometry, **kwargs):
+    def __init__(self, model, unique_id, geometry, **kwargs):
         """
         Initialize an organization agent.
         
         Args:
-            unique_id: Unique identifier for the agent
             model: Model instance the agent belongs to
+            unique_id: Unique identifier for the agent
             geometry: Shapely geometry representing the agent's location
             **kwargs: Additional agent properties that can be customized
         """
-        super().__init__(unique_id, model, geometry, **kwargs)
+        super().__init__(model, unique_id, geometry, **kwargs)
+        
+        # Location attributes
+        self.current_node = kwargs.get('current_node', None)
         
         # Organization-specific attributes
         self.org_type = kwargs.get('org_type', 'business')  # business, government, school, etc.

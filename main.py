@@ -34,4 +34,4 @@ def run_simulation(num_residents, num_organizations, steps):
       # Keep window open
 
 if __name__ == "__main__":
-    run_simulation(num_residents=10, num_organizations=0, steps=50)
+    run_simulation(num_residents=10, num_organizations=3, steps=50)

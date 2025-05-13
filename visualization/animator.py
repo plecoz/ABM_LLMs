@@ -32,7 +32,8 @@ class SimulationAnimator:
     def initialize(self):
         """Draw initial state"""
         self._plot_pois()
-        self._plot_agents()
+        self._plot_residents()
+        self._plot_organizations()
         plt.draw()
     
     def update(self, step):
@@ -43,16 +44,17 @@ class SimulationAnimator:
         self.agent_dots = []
         
         # Redraw agents
-        self._plot_agents()
+        self._plot_residents()
+        self._plot_organizations()
         
         # Refresh display
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
     
-    def _plot_agents(self):
+    def _plot_residents(self):
         """Plot all agents as colored dots"""
-        for agent in [a for a in self.model.agents if hasattr(a, 'current_node')]:
-            x, y = self.graph.nodes[agent.current_node]['x'], self.graph.nodes[agent.current_node]['y']
+        for resident in [r for r in self.model.residents if hasattr(r, 'current_node')]:
+            x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
             dot = self.ax.plot(x, y, 'o', color='blue', markersize=2)[0]
             self.agent_dots.append(dot)
     
@@ -63,3 +65,11 @@ class SimulationAnimator:
                 x, y = self.graph.nodes[node]['x'], self.graph.nodes[node]['y']
                 marker = self.ax.plot(x, y, 's', color='red', markersize=3)[0]
                 self.poi_markers.append(marker)
+    
+    def _plot_organizations(self):
+        """Plot all organizations as colored dots (called once, organizations don't move)"""
+        for organization in [o for o in self.model.organizations if hasattr(o, 'current_node')]:
+            if organization.current_node is not None:
+                x, y = self.graph.nodes[organization.current_node]['x'], self.graph.nodes[organization.current_node]['y']
+                dot = self.ax.plot(x, y, 's', color='lime', markersize=6)[0]
+                self.agent_dots.append(dot)
