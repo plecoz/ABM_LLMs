@@ -18,6 +18,9 @@ class FifteenMinuteCity(Model):
         #self.agents.shuffle_do("step")
         self.grid = NetworkGrid(graph)
         
+        # Add a step counter
+        self.step_count = 0
+        
         # Initialize lists to track agents
         self.residents = []
         self.organizations = []
@@ -68,6 +71,9 @@ class FifteenMinuteCity(Model):
 
     def step(self):
         """Advance the model by one step"""
+        # Increment step counter
+        self.step_count += 1
+        
         # Step all residents
         for resident in self.residents:
             resident.step()
@@ -101,4 +107,19 @@ class FifteenMinuteCity(Model):
     def register_agent(self, agent):
         #Explicit registration (optional but recommended)
         self.schedule.add(agent)
+"""
+"""
+    def record_communication(self, message):
+        
+        Record a communication between agents.
+        
+        Args:
+            message: The message object to record
+        
+        # In a full implementation, this would store the message in a database or log
+        # For now, we'll just print it
+        if hasattr(self, 'communications'):
+            self.communications.append(message)
+        else:
+            self.communications = [message]
 """

@@ -88,18 +88,24 @@ class Resident(BaseAgent):
                     recovery_probability = health_features.get('recovery_probability', 0.1)
                     if self.model.random.random() < recovery_probability:
                         self.health_status = 'recovered'
-                        self.logger.info(f"Agent {self.unique_id} recovered at step {self.model.schedule.steps}")
+                        # Get step count safely
+                        step_count = getattr(self.model, 'schedule', None)
+                        step_count = step_count.steps if step_count is not None else 0
+                        self.logger.info(f"Agent {self.unique_id} recovered at step {step_count}")
     
     def _maintain_social_network(self):
         """
         Maintain the agent's social network through regular contact.
         """
         # Random chance to communicate with someone in social network
-        if self.social_network and self.model.random.random() < 0.1:  # 10% chance
+        if self.social_network and hasattr(self.model, 'random') and self.model.random.random() < 0.1:  # 10% chance
             contact_id = self.model.random.choice(self.social_network)
-            contact_agent = self.model.get_agent_by_id(contact_id)
             
-            if contact_agent:
-                # Random choice between online and offline communication
-                online = self.model.random.random() < 0.7  # 70% chance for online
-                self._communicate_with(contact_agent, online=online)
+            # Check if model has get_agent_by_id method
+            if hasattr(self.model, 'get_agent_by_id'):
+                contact_agent = self.model.get_agent_by_id(contact_id)
+                
+                if contact_agent:
+                    # Random choice between online and offline communication
+                    online = self.model.random.random() < 0.7  # 70% chance for online
+                    self._communicate_with(contact_agent, online=online)

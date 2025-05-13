@@ -54,23 +54,24 @@ class BaseAgent(GeoAgent):
         Advance the agent one step in the simulation.
         """
         # Update current position in location history
-        #self.location_history.append((self.model.schedule.steps, self.geometry))
+        # Use a step counter from model if available, otherwise use None
+        step_count = getattr(self.model, 'schedule', None)
+        step_count = step_count.steps if step_count is not None else 0
+        
+        self.location_history.append((step_count, self.geometry))
         
         # Make decisions about next actions
-        #self._decide_next_action()
+        self._decide_next_action()
         
         # Move along planned path if available
-        #self._move()
+        self._move()
         
         # Interact with other agents
-        #self._interact()
+        self._interact()
         
         # Execute current activity
-        #self._perform_activity()
+        self._perform_activity()
         
-        # Initialize logger
-        #self.logger = logging.getLogger(f"Agent-{unique_id}")
-        pass
 
     def _decide_next_action(self):
         """
@@ -81,9 +82,9 @@ class BaseAgent(GeoAgent):
             action = self.decision_module.decide_next_action(self, self.model)
             if action:
                 self.planned_activities.append(action)
-        else:
+        elif hasattr(self.model, 'random'):
             # Default simple random behavior
-            if not self.planned_activities and self.model.random.random() < 0.2:
+            if not self.planned_activities and self.model.random.random() < 0.2:  # 20% chance
                 # 20% chance to add a new random activity
                 poi = self._select_random_poi()
                 if poi:
@@ -136,6 +137,10 @@ class BaseAgent(GeoAgent):
         """
         Interact with nearby agents.
         """
+        # Check if the model has the get_nearby_agents method
+        if not hasattr(self.model, 'get_nearby_agents'):
+            return
+            
         # Find nearby agents
         nearby_agents = self.model.get_nearby_agents(self)
         
@@ -145,7 +150,7 @@ class BaseAgent(GeoAgent):
             agent.contacts.add(self.unique_id)
             
             # Random chance to communicate (can be replaced with more complex logic)
-            if self.model.random.random() < 0.3:  # 30% chance
+            if hasattr(self.model, 'random') and self.model.random.random() < 0.3:  # 30% chance
                 self._communicate_with(agent, online=False)
     
     def _communicate_with(self, other_agent, online=False):
@@ -156,15 +161,19 @@ class BaseAgent(GeoAgent):
             other_agent: The agent to communicate with
             online: Whether this is an online or offline interaction
         """
+        # Get step count safely
+        step_count = getattr(self.model, 'schedule', None)
+        step_count = step_count.steps if step_count is not None else 0
+        
         # Generate a simple random message (can be replaced with LLM-generated content)
-        message_content = f"Message from {self.unique_id} to {other_agent.unique_id} at step {self.model.schedule.steps}"
+        message_content = f"Message from {self.unique_id} to {other_agent.unique_id} at step {step_count}"
         
         # Create message object
         message = {
             'sender': self.unique_id,
             'receiver': other_agent.unique_id,
             'content': message_content,
-            'timestamp': self.model.schedule.steps,
+            'timestamp': step_count,
             'online': online
         }
         
@@ -173,14 +182,15 @@ class BaseAgent(GeoAgent):
         other_agent.message_history.append(message)
         
         # Record in model's global communication history
-        self.model.record_communication(message)
+        if hasattr(self.model, 'record_communication'):
+            self.model.record_communication(message)
         
         # Add to interaction history
         interaction = {
             'type': 'communication',
             'agent_ids': [self.unique_id, other_agent.unique_id],
             'online': online,
-            'timestamp': self.model.schedule.steps,
+            'timestamp': step_count,
             'content': message_content
         }
         
@@ -221,6 +231,9 @@ class BaseAgent(GeoAgent):
         """
         Select a random point of interest to visit.
         """
+        if not hasattr(self.model, 'random'):
+            return None
+            
         if hasattr(self.model, 'poi_selector') and self.model.poi_selector:
             # Use the model's POI selector if available
             return self.model.poi_selector.select_poi(self)
