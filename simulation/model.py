@@ -78,6 +78,11 @@ class FifteenMinuteCity(Model):
         # Add a step counter
         self.step_count = 0
         
+        # Add time simulation
+        self.hour_of_day = kwargs.get('start_hour', 8)  # Start at 8 AM by default
+        self.day_of_week = kwargs.get('start_day', 0)  # Start on Monday (0) by default
+        self.day_count = 0
+        
         # Initialize lists to track agents
         self.residents = []
         self.organizations = []
@@ -196,6 +201,14 @@ class FifteenMinuteCity(Model):
         """Advance the model by one step"""
         # Increment step counter
         self.step_count += 1
+        
+        # Advance time (each step is 1 hour)
+        self.hour_of_day = (self.hour_of_day + 1) % 24
+        if self.hour_of_day == 0:
+            # New day
+            self.day_of_week = (self.day_of_week + 1) % 7
+            self.day_count += 1
+            self.logger.info(f"Day {self.day_count}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
         
         # Use the scheduler to step all agents
         self.schedule.step()

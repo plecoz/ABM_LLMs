@@ -46,8 +46,15 @@ class Resident(BaseAgent):
         if not self.model.pois.get(poi_type):
             return False
         
-        valid_pois = [n for n in self.model.pois[poi_type] 
-                     if n in self.accessible_nodes]
+        valid_pois = []
+        for poi_entry in self.model.pois[poi_type]:
+            if isinstance(poi_entry, tuple):
+                node_id, _ = poi_entry  # Unpack node and type
+            else:
+                node_id = poi_entry  # If it's just a node ID
+                
+            if node_id in self.accessible_nodes:
+                valid_pois.append(node_id)
         
         if not valid_pois:
             return False
@@ -57,8 +64,9 @@ class Resident(BaseAgent):
             self.current_node = target
             self.visited_pois.append(target)
             return True
-        except (nx.NetworkXNoPath, KeyError):
-            pass
+        except (nx.NetworkXNoPath, KeyError, IndexError) as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error moving to POI: {e}")
         return False
 
     def step(self):
