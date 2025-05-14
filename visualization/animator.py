@@ -78,7 +78,7 @@ class SimulationAnimator:
         """Plot all agents as colored dots"""
         for resident in [r for r in self.model.residents if hasattr(r, 'current_node')]:
             x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
-            dot = self.ax.plot(x, y, 'o', color='#2196F3', markersize=4, alpha=0.7)[0]
+            dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=8, alpha=0.7)[0]  # Bright deep sky blue
             self.agent_dots.append(dot)
     
     def _plot_pois(self):
@@ -104,25 +104,42 @@ class SimulationAnimator:
     
     def _plot_organizations(self):
         """Plot all organizations as colored dots"""
-        for organization in [o for o in self.model.organizations if hasattr(o, 'current_node')]:
+        print(f"Total organizations in model: {len(self.model.organizations)}")
+        for i, organization in enumerate([o for o in self.model.organizations if hasattr(o, 'current_node')]):
+            print(f"Organization {i}: ID={organization.unique_id}, current_node={organization.current_node}, org_type={organization.org_type}")
             if organization.current_node is not None:
-                x, y = self.graph.nodes[organization.current_node]['x'], self.graph.nodes[organization.current_node]['y']
-                
-                # Use different color based on organization type
-                if hasattr(organization, 'org_type'):
-                    if organization.org_type == 'school':
-                        color = self.poi_colors['education']
-                    elif organization.org_type == 'hospital':
-                        color = self.poi_colors['healthcare']
-                    elif organization.org_type == 'business':
-                        color = self.poi_colors['shopping']
-                    else:
-                        color = '#009688'  # Default teal
-                else:
-                    color = '#009688'  # Default teal
+                try:
+                    x, y = self.graph.nodes[organization.current_node]['x'], self.graph.nodes[organization.current_node]['y']
                     
-                dot = self.ax.plot(x, y, 'o', color=color, markersize=8, alpha=0.9)[0]
-                self.agent_dots.append(dot)
+                    # Always use black for organizations, with different marker shapes for types
+                    color = '#000000'  # Black for all organizations
+                    
+                    # Use different marker shapes based on organization type
+                    if hasattr(organization, 'org_type'):
+                        if organization.org_type == 'school':
+                            marker = 's'  # square
+                        elif organization.org_type == 'hospital':
+                            marker = 'h'  # hexagon
+                        elif organization.org_type == 'business':
+                            marker = 'd'  # diamond
+                        else:
+                            marker = 'o'  # circle
+                    else:
+                        marker = 'o'  # circle
+                    
+                    # Make organizations extremely visible
+                    dot = self.ax.plot(x, y, marker, color=color, markersize=20, alpha=1.0, 
+                                      markeredgewidth=2, markeredgecolor='white')[0]
+                    self.agent_dots.append(dot)
+                    print(f"  - Successfully plotted at ({x}, {y})")
+                    
+                    # Add a text label
+                    self.ax.text(x, y, f"Org {organization.unique_id}", fontsize=10, 
+                                ha='center', va='bottom', color='white',
+                                bbox=dict(facecolor='black', alpha=0.7, boxstyle='round,pad=0.2'))
+                    
+                except Exception as e:
+                    print(f"  - Error plotting organization {organization.unique_id}: {e}")
     
     def _create_legend(self):
         """Create a legend for the visualization"""
@@ -138,8 +155,18 @@ class SimulationAnimator:
         
         # Agent legends
         agent_legend_elements = [
-            mpatches.Patch(facecolor='#2196F3', edgecolor='black', label='Residents'),
-            mpatches.Patch(facecolor='#009688', edgecolor='black', label='Organizations')
+            mpatches.Patch(facecolor='#00BFFF', edgecolor='black', label='Residents'),
+            mpatches.Patch(facecolor='#000000', edgecolor='black', label='Organizations')
+        ]
+        
+        # Organization type markers
+        org_markers = [
+            plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='#000000', 
+                      markersize=10, label='School'),
+            plt.Line2D([0], [0], marker='h', color='w', markerfacecolor='#000000', 
+                      markersize=10, label='Hospital'),
+            plt.Line2D([0], [0], marker='d', color='w', markerfacecolor='#000000', 
+                      markersize=10, label='Business'),
         ]
         
         # Create the legend
@@ -151,12 +178,20 @@ class SimulationAnimator:
         
         # Add the second legend
         self.ax.add_artist(legend1)
-        self.ax.legend(handles=agent_legend_elements, 
+        legend2 = self.ax.legend(handles=agent_legend_elements, 
                      loc='upper left', 
                      title="Agents",
                      framealpha=0.8,
                      bbox_to_anchor=(1.01, 0.6))
         
+        # Add the third legend for organization types
+        self.ax.add_artist(legend2)
+        self.ax.legend(handles=org_markers,
+                     loc='upper left',
+                     title="Organization Types",
+                     framealpha=0.8,
+                     bbox_to_anchor=(1.01, 0.3))
+        
         # Adjust figure to make room for legend
         self.fig.tight_layout()
-        self.fig.subplots_adjust(right=0.85)
+        self.fig.subplots_adjust(right=0.75)
