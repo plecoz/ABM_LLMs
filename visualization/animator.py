@@ -38,6 +38,26 @@ class SimulationAnimator:
             "services": "D",            # Diamond for services
             "food": "*"                 # Star for food
         }
+        
+        # Define specific colors and symbols for selected POI types
+        self.specific_poi_colors = {
+            "hospital": "#FF0000",      # Bright red
+            "school": "#0000FF",        # Bright blue
+            "bank": "#FFD700",          # Gold
+            "police": "#800080",        # Purple
+            "fire_station": "#FF4500",  # Orange-red
+        }
+        
+        self.specific_poi_symbols = {
+            "hospital": "H",            # Hospital symbol
+            "school": "s",              # Square
+            "bank": "^",                # Dollar sign
+            "police": "P",              # P for police
+            "fire_station": "X",        # X for fire station
+        }
+        
+        # Flag to determine whether to use specific POI styling
+        self.use_specific_poi_styling = True
     
     def _create_base_plot(self):
         """Draw the static map background"""
@@ -78,26 +98,45 @@ class SimulationAnimator:
         """Plot all agents as colored dots"""
         for resident in [r for r in self.model.residents if hasattr(r, 'current_node')]:
             x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
-            dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=8, alpha=0.7)[0]  # Bright deep sky blue
+            dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=3, alpha=0.7)[0]  # Bright deep sky blue
             self.agent_dots.append(dot)
     
     def _plot_pois(self):
         """Plot all POIs with category-specific colors and shapes"""
         for category, poi_list in self.model.pois.items():
-            color = self.poi_colors.get(category, "#000000")
-            symbol = self.poi_symbols.get(category, "o")
-            
             for poi_entry in poi_list:
                 if isinstance(poi_entry, tuple):
-                    node, _ = poi_entry  # Unpack node and type
+                    node, poi_type = poi_entry  # Unpack node and type
                 else:
                     node = poi_entry  # If it's just a node ID
+                    poi_type = category
                 
                 try:
                     x, y = self.graph.nodes[node]['x'], self.graph.nodes[node]['y']
-                    marker = self.ax.plot(x, y, symbol, color=color, 
-                                         markersize=8, markeredgecolor='black',
-                                         markeredgewidth=0.5)[0]
+                    
+                    # Use specific styling for selected POI types if enabled
+                    if self.use_specific_poi_styling and poi_type in self.specific_poi_colors:
+                        color = self.specific_poi_colors[poi_type]
+                        symbol = self.specific_poi_symbols[poi_type]
+                        
+                        # Make selected POIs more prominent
+                        marker = self.ax.plot(x, y, symbol, color=color, 
+                                             markersize=12, markeredgecolor='black',
+                                             markeredgewidth=1.0, alpha=0.9)[0]
+                        
+                        # Add a text label for important POIs
+                        #self.ax.text(x, y + 0.0001, f"{poi_type}", fontsize=8, 
+                        #            ha='center', va='bottom', color='black',
+                        #            bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.1'))
+                    else:
+                        # Use category-based styling for other POIs
+                        color = self.poi_colors.get(category, "#000000")
+                        symbol = self.poi_symbols.get(category, "o")
+                        
+                        marker = self.ax.plot(x, y, symbol, color=color, 
+                                             markersize=8, markeredgecolor='black',
+                                             markeredgewidth=0.5)[0]
+                    
                     self.poi_markers.append(marker)
                 except (KeyError, TypeError) as e:
                     print(f"Error plotting POI at node {node}: {e}")
@@ -106,7 +145,7 @@ class SimulationAnimator:
         """Plot all organizations as colored dots"""
         print(f"Total organizations in model: {len(self.model.organizations)}")
         for i, organization in enumerate([o for o in self.model.organizations if hasattr(o, 'current_node')]):
-            print(f"Organization {i}: ID={organization.unique_id}, current_node={organization.current_node}, org_type={organization.org_type}")
+            #print(f"Organization {i}: ID={organization.unique_id}, current_node={organization.current_node}, org_type={organization.org_type}")
             if organization.current_node is not None:
                 try:
                     x, y = self.graph.nodes[organization.current_node]['x'], self.graph.nodes[organization.current_node]['y']
@@ -143,55 +182,69 @@ class SimulationAnimator:
     
     def _create_legend(self):
         """Create a legend for the visualization"""
-        # POI category legends
-        poi_legend_elements = []
-        for category, color in self.poi_colors.items():
-            symbol = self.poi_symbols.get(category, 'o')
-            # Create patch for legend
-            poi_legend_elements.append(
-                mpatches.Patch(facecolor=color, edgecolor='black',
-                               label=f"{category.capitalize()}")
-            )
+        legend_elements = []
+        
+        # Add specific POI types to legend if enabled
+        if self.use_specific_poi_styling:
+            for poi_type, color in self.specific_poi_colors.items():
+                symbol = self.specific_poi_symbols.get(poi_type, 'o')
+                legend_elements.append(
+                    plt.Line2D([0], [0], marker=symbol, color='w', 
+                              markerfacecolor=color, markersize=10,
+                              markeredgecolor='black', markeredgewidth=1.0,
+                              label=poi_type.replace('_', ' ').title())
+                )
+        
+        # Add category-based POIs if any aren't covered by specific styling
+        if not self.use_specific_poi_styling:
+            for category, color in self.poi_colors.items():
+                symbol = self.poi_symbols.get(category, 'o')
+                legend_elements.append(
+                    plt.Line2D([0], [0], marker=symbol, color='w',
+                              markerfacecolor=color, markersize=10,
+                              label=category.capitalize())
+                )
         
         # Agent legends
-        agent_legend_elements = [
-            mpatches.Patch(facecolor='#00BFFF', edgecolor='black', label='Residents'),
-            mpatches.Patch(facecolor='#000000', edgecolor='black', label='Organizations')
-        ]
+        legend_elements.append(
+            plt.Line2D([0], [0], marker='o', color='w',
+                      markerfacecolor='#00BFFF', markersize=10,
+                      label='Residents')
+        )
         
         # Organization type markers
-        org_markers = [
-            plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='#000000', 
-                      markersize=10, label='School'),
-            plt.Line2D([0], [0], marker='h', color='w', markerfacecolor='#000000', 
-                      markersize=10, label='Hospital'),
-            plt.Line2D([0], [0], marker='d', color='w', markerfacecolor='#000000', 
-                      markersize=10, label='Business'),
-        ]
+        org_types = {
+            'School': 's',
+            'Hospital': 'h',
+            'Business': 'd',
+            'Other': 'o'
+        }
+        
+        for org_type, marker in org_types.items():
+            legend_elements.append(
+                plt.Line2D([0], [0], marker=marker, color='w',
+                          markerfacecolor='#000000', markersize=10,
+                          markeredgecolor='white', markeredgewidth=1.0,
+                          label=org_type)
+            )
         
         # Create the legend
-        legend1 = self.ax.legend(handles=poi_legend_elements, 
-                               loc='upper left', 
-                               title="Points of Interest",
-                               framealpha=0.8,
-                               bbox_to_anchor=(1.01, 1))
-        
-        # Add the second legend
-        self.ax.add_artist(legend1)
-        legend2 = self.ax.legend(handles=agent_legend_elements, 
+        self.ax.legend(handles=legend_elements, 
                      loc='upper left', 
-                     title="Agents",
+                     title="Map Elements",
                      framealpha=0.8,
-                     bbox_to_anchor=(1.01, 0.6))
-        
-        # Add the third legend for organization types
-        self.ax.add_artist(legend2)
-        self.ax.legend(handles=org_markers,
-                     loc='upper left',
-                     title="Organization Types",
-                     framealpha=0.8,
-                     bbox_to_anchor=(1.01, 0.3))
+                     bbox_to_anchor=(1.01, 1))
         
         # Adjust figure to make room for legend
         self.fig.tight_layout()
         self.fig.subplots_adjust(right=0.75)
+        
+    def set_poi_styling(self, use_specific_styling=True):
+        """
+        Set whether to use specific POI styling.
+        
+        Args:
+            use_specific_styling: If True, use specific styling for selected POI types.
+                                 If False, use category-based styling.
+        """
+        self.use_specific_poi_styling = use_specific_styling
