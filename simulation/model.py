@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from mesa_geo import GeoSpace
 from mesa.datacollection import DataCollector
+import geopandas as gpd
 
 
 # Set up logging
@@ -109,6 +110,17 @@ class FifteenMinuteCity(Model):
         if demographics_path:
             self._load_demographics(demographics_path)
 
+        # Load parish-specific demographics if provided
+        self.parish_demographics = kwargs.get('parish_demographics', {})
+        
+        # Load parishes GeoDataFrame if provided
+        self.parishes_gdf = kwargs.get('parishes_gdf', None)
+        
+        # Create a mapping of nodes to parishes if parishes data is available
+        self.node_to_parish = {}
+        if self.parishes_gdf is not None:
+            self._map_nodes_to_parishes()
+        
         self.random = random.Random(kwargs.get('seed', None))
         
         # Set up scheduler and spatial environment
@@ -124,7 +136,8 @@ class FifteenMinuteCity(Model):
             },
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
-                "Type": lambda a: a.__class__.__name__
+                "Type": lambda a: a.__class__.__name__,
+                "Parish": lambda a: getattr(a, 'parish', None)
             }
         )
         
@@ -141,7 +154,11 @@ class FifteenMinuteCity(Model):
                 graph, home_node, cutoff=1000, weight='length'
             ))
 
-            agent_props = self._generate_agent_properties()
+            # Determine the parish this agent belongs to
+            parish = self._get_parish_for_node(home_node)
+            
+            # Generate agent properties based on parish if available
+            agent_props = self._generate_agent_properties(parish)
 
             resident = Resident(
                 model=self,
@@ -149,6 +166,7 @@ class FifteenMinuteCity(Model):
                 geometry=point_geometry,
                 home_node=home_node,
                 accessible_nodes=accessible_nodes,
+                parish=parish,
                 **agent_props
             )
             self.grid.place_agent(resident, home_node)
@@ -167,13 +185,17 @@ class FifteenMinuteCity(Model):
             point_geometry = Point(node_coords['x'], node_coords['y'])
             
             org_type = self.random.choice(org_types)
+            
+            # Determine the parish this organization belongs to
+            parish = self._get_parish_for_node(home_node)
 
             organization = OrganizationAgent(
                 model=self,
                 unique_id=i + num_residents,  # Ensure unique IDs
                 geometry=point_geometry,
                 current_node=home_node,
-                org_type=org_type
+                org_type=org_type,
+                parish=parish
             )
             self.grid.place_agent(organization, home_node)
             self.schedule.add(organization)  # Add to our custom scheduler
@@ -183,6 +205,49 @@ class FifteenMinuteCity(Model):
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {num_organizations} organization agents")
 
+    def _map_nodes_to_parishes(self):
+        """
+        Create a mapping from graph nodes to parishes.
+        This allows quick lookup of which parish a node belongs to.
+        """
+        if self.parishes_gdf is None:
+            self.logger.warning("No parishes data provided. Parish mapping not created.")
+            return
+            
+        self.logger.info("Mapping network nodes to parishes...")
+        nodes_count = len(self.graph.nodes())
+        mapped_count = 0
+        
+        # Convert nodes to Points and check which parish they fall within
+        for node_id, node_attrs in self.graph.nodes(data=True):
+            if 'x' in node_attrs and 'y' in node_attrs:
+                point = Point(node_attrs['x'], node_attrs['y'])
+                
+                # Check which parish contains this point
+                for idx, parish in self.parishes_gdf.iterrows():
+                    if parish.geometry.contains(point):
+                        self.node_to_parish[node_id] = parish['name']
+                        mapped_count += 1
+                        break
+        
+        self.logger.info(f"Mapped {mapped_count} out of {nodes_count} nodes to parishes")
+        
+        # Check if we have too few mapped nodes
+        if mapped_count < nodes_count * 0.5:  # If less than 50% mapped
+            self.logger.warning("Many nodes could not be mapped to parishes. Check coordinate systems.")
+    
+    def _get_parish_for_node(self, node_id):
+        """
+        Get the parish name for a given node ID.
+        
+        Args:
+            node_id: The ID of the node to look up
+            
+        Returns:
+            String parish name or None if not found
+        """
+        return self.node_to_parish.get(node_id, None)
+    
     # Add a method to get agent by ID
     def get_agent_by_id(self, agent_id):
         """Get an agent by its ID"""
@@ -196,6 +261,18 @@ class FifteenMinuteCity(Model):
         if agent_type is None:
             return len(self.all_agents)
         return sum(1 for agent in self.all_agents if isinstance(agent, agent_type))
+    
+    def get_agents_by_parish(self, parish_name):
+        """
+        Get all agents in a specific parish.
+        
+        Args:
+            parish_name: Name of the parish to filter by
+            
+        Returns:
+            List of agents in the specified parish
+        """
+        return [agent for agent in self.all_agents if getattr(agent, 'parish', None) == parish_name]
 
     def step(self):
         """Advance the model by one step"""
@@ -255,20 +332,30 @@ class FifteenMinuteCity(Model):
             }
     
 
-    def _generate_agent_properties(self):
+    def _generate_agent_properties(self, parish=None):
         """
         Generate agent properties based on demographic distributions.
+        If a parish is specified and parish-specific demographics exist,
+        use those instead of the global demographics.
         
+        Args:
+            parish: The parish name to use for demographics (optional)
+            
         Returns:
             Dictionary of agent properties
         """
-        if not self.demographics:
+        # Use parish-specific demographics if available
+        demographics = self.demographics
+        if parish and parish in self.parish_demographics:
+            demographics = self.parish_demographics[parish]
+        
+        if not demographics:
             return {}
         
         props = {}
         
         # Generate age
-        age_dist = self.demographics.get('age_distribution', {})
+        age_dist = demographics.get('age_distribution', {})
         age_group = self._sample_from_distribution(age_dist)
         
         # Convert age group to actual age
@@ -282,24 +369,38 @@ class FifteenMinuteCity(Model):
             props['age'] = self.random.randint(65, 90)
         
         # Generate gender
-        gender_dist = self.demographics.get('gender_distribution', {})
+        gender_dist = demographics.get('gender_distribution', {})
         props['gender'] = self._sample_from_distribution(gender_dist)
         
         # Generate income
-        income_dist = self.demographics.get('income_distribution', {})
+        income_dist = demographics.get('income_distribution', {})
         income_level = self._sample_from_distribution(income_dist)
         
-        # Convert income level to actual income
-        if income_level == "low":
-            props['income'] = self.random.randint(10000, 30000)
-        elif income_level == "medium":
-            props['income'] = self.random.randint(30001, 100000)
-        else:  # high
-            props['income'] = self.random.randint(100001, 500000)
+        # Convert income level to actual income - use parish-specific ranges if available
+        income_ranges = demographics.get('income_ranges', {
+            "low": (10000, 30000),
+            "medium": (30001, 100000),
+            "high": (100001, 500000)
+        })
+        
+        if income_level in income_ranges:
+            min_val, max_val = income_ranges[income_level]
+            props['income'] = self.random.randint(min_val, max_val)
+        else:
+            # Fallback to default ranges
+            if income_level == "low":
+                props['income'] = self.random.randint(10000, 30000)
+            elif income_level == "medium":
+                props['income'] = self.random.randint(30001, 100000)
+            else:  # high
+                props['income'] = self.random.randint(100001, 500000)
         
         # Generate education
-        education_dist = self.demographics.get('education_distribution', {})
+        education_dist = demographics.get('education_distribution', {})
         props['education'] = self._sample_from_distribution(education_dist)
+        
+        # We no longer add parish to props since it's passed separately
+        # This avoids the "got multiple values for keyword argument 'parish'" error
         
         return props
     

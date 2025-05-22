@@ -37,6 +37,15 @@ class Resident(BaseAgent):
         # Health attributes
         self.health_status = kwargs.get('health_status', 'healthy')
         
+        # Parish information
+        self.parish = kwargs.get('parish', None)
+        
+        # Demographic attributes from model (may vary by parish)
+        self.age = kwargs.get('age', 30)  # Default age
+        self.gender = kwargs.get('gender', 'male')  # Default gender
+        self.income = kwargs.get('income', 50000)  # Default income
+        self.education = kwargs.get('education', 'high_school')  # Default education level
+        
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
@@ -148,3 +157,24 @@ class Resident(BaseAgent):
         """
         if agent_id in self.social_network:
             self.social_network.remove(agent_id)
+            
+    def get_parish_info(self):
+        """
+        Get information about the agent's parish.
+        
+        Returns:
+            Dictionary with parish details or None if no parish assigned
+        """
+        if not self.parish:
+            return None
+            
+        return {
+            "parish_name": self.parish,
+            "home_location": (self.geometry.x, self.geometry.y),
+            "demographic_info": {
+                "age": self.age,
+                "gender": self.gender,
+                "income": self.income,
+                "education": self.education
+            }
+        }

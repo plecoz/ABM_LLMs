@@ -5,14 +5,17 @@ import osmnx as ox
 from .base_plot import BaseMap  # Relative import from same package
 from .agent_plot import AgentPlotter
 import numpy as np
+import geopandas as gpd
+import os
 
 
 class SimulationAnimator:
-    def __init__(self, model, graph, ax=None):
+    def __init__(self, model, graph, ax=None, parishes_gdf=None):
         self.model = model
         self.graph = graph
         self.fig = ax.figure if ax else plt.figure(figsize=(12, 10))
         self.ax = ax if ax else self.fig.add_subplot(111)
+        self.parishes_gdf = parishes_gdf  # GeoDataFrame containing parishes
         
         # Initialize plot elements
         self.base_plot = self._create_base_plot()
@@ -60,15 +63,37 @@ class SimulationAnimator:
         self.use_specific_poi_styling = True
     
     def _create_base_plot(self):
-        """Draw the static map background"""
+        """Draw the static map background with parishes if available"""
+        # First plot parishes if available
+        if self.parishes_gdf is not None:
+            self.parishes_gdf.plot(
+                ax=self.ax,
+                column='name',
+                cmap='tab20',
+                alpha=0.5,
+                edgecolor='black',
+                legend=True,
+                legend_kwds={'title': 'Parishes', 'loc': 'lower left'}
+            )
+            
+            # Add parish labels
+            for x, y, label in zip(
+                self.parishes_gdf.geometry.centroid.x,
+                self.parishes_gdf.geometry.centroid.y,
+                self.parishes_gdf['name']
+            ):
+                self.ax.text(x, y, label, fontsize=8, ha='center')
+        
+        # Then plot the street network on top
         return ox.plot_graph(
             self.graph,
             ax=self.ax,
             show=False,
             close=False,
-            bgcolor="#f5f5f5",
+            bgcolor="#f5f5f5" if self.parishes_gdf is None else None,  # Only use bgcolor if no parishes
             node_size=0,
-            edge_color="lightgray"
+            edge_color="gray",
+            edge_linewidth=0.7
         )
     
     def initialize(self):
@@ -77,6 +102,13 @@ class SimulationAnimator:
         self._plot_residents()
         self._plot_organizations()
         self._create_legend()
+        
+        # Set title with parishes information
+        if self.parishes_gdf is not None:
+            self.ax.set_title("Macau 15-Minute City with Parishes", fontsize=16)
+        else:
+            self.ax.set_title("Macau 15-Minute City", fontsize=16)
+            
         plt.draw()
     
     def update(self, step):
