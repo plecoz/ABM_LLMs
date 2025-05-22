@@ -51,7 +51,40 @@ class Resident(BaseAgent):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
 
     def move_to_poi(self, poi_type):
-        """Improved movement with distance check"""
+        """
+        Move to a POI of the specified type.
+        
+        This updated version first tries to find POI agents of the specified type,
+        and if found, moves to one of them. If no POI agents are found, falls back
+        to the original behavior of using POI nodes.
+        
+        Args:
+            poi_type: The type of POI to move to
+            
+        Returns:
+            Boolean indicating if the move was successful
+        """
+        # First try to find POI agents of the specified type
+        poi_agents = [agent for agent in self.model.poi_agents if agent.poi_type == poi_type]
+        
+        if poi_agents:
+            # Filter POIs to only those at accessible nodes
+            accessible_pois = [poi for poi in poi_agents if poi.node_id in self.accessible_nodes]
+            
+            if accessible_pois:
+                # Choose a random accessible POI
+                target_poi = random.choice(accessible_pois)
+                self.current_node = target_poi.node_id
+                self.geometry = target_poi.geometry  # Update geometry to POI location
+                self.visited_pois.append(target_poi.node_id)
+                
+                # Add resident to POI's visitors
+                if hasattr(target_poi, 'visitors'):
+                    target_poi.visitors.add(self.unique_id)
+                    
+                return True
+        
+        # Fall back to original behavior if no POI agents are found
         if not self.model.pois.get(poi_type):
             return False
         
@@ -72,6 +105,13 @@ class Resident(BaseAgent):
             target = random.choice(valid_pois)
             self.current_node = target
             self.visited_pois.append(target)
+            
+            # Update geometry based on the node coordinates
+            node_coords = self.model.graph.nodes[target]
+            if 'x' in node_coords and 'y' in node_coords:
+                from shapely.geometry import Point
+                self.geometry = Point(node_coords['x'], node_coords['y'])
+                
             return True
         except (nx.NetworkXNoPath, KeyError, IndexError) as e:
             if hasattr(self, 'logger'):
@@ -82,8 +122,17 @@ class Resident(BaseAgent):
         """Advance the agent one step"""
         try:
             super().step()
-            if hasattr(self.model, 'pois') and self.model.pois:
+            
+            # Try to move to a POI agent
+            if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
+                # Get all unique POI types
+                poi_types = list(set(poi.poi_type for poi in self.model.poi_agents))
+                if poi_types:
+                    self.move_to_poi(random.choice(poi_types))
+            # Fall back to old method if POI agents aren't available
+            elif hasattr(self.model, 'pois') and self.model.pois:
                 self.move_to_poi(random.choice(list(self.model.pois.keys())))
+                
             self._update_health_status()
             self._maintain_social_network()
         except Exception as e:

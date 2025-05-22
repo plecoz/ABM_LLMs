@@ -144,13 +144,12 @@ def create_example_parish_demographics(parishes_gdf, output_path='config/parish_
     
     return parish_demographics
 
-def run_simulation(num_residents, num_organizations, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False):
     """
     Run the 15-minute city simulation.
     
     Args:
         num_residents: Number of resident agents to create
-        num_organizations: Number of organization agents to create
         steps: Number of simulation steps to run
         selected_pois: List of POI types to include (e.g., ['bank', 'police', 'school', 'hospital', 'fire_station'])
                       If None, all POIs will be included
@@ -184,12 +183,10 @@ def run_simulation(num_residents, num_organizations, steps, selected_pois=None, 
     pois = fetch_pois(graph, selected_pois=selected_pois)
     
     print(f"Spawning {num_residents} residents...")
-    print(f"Spawning {num_organizations} organizations...")
     model = FifteenMinuteCity(
         graph, 
         pois, 
-        num_residents=num_residents, 
-        num_organizations=num_organizations,
+        num_residents=num_residents,
         parishes_gdf=parishes_gdf,
         parish_demographics=parish_demographics
     )
@@ -226,7 +223,6 @@ if __name__ == "__main__":
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
     parser.add_argument('--residents', type=int, default=100, help='Number of resident agents')
-    parser.add_argument('--organizations', type=int, default=3, help='Number of organization agents')
     parser.add_argument('--steps', type=int, default=50, help='Number of simulation steps')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
@@ -250,7 +246,6 @@ if __name__ == "__main__":
     
     run_simulation(
         num_residents=args.residents, 
-        num_organizations=args.organizations, 
         steps=args.steps, 
         selected_pois=selected_pois,
         parishes_path=args.parishes_path,

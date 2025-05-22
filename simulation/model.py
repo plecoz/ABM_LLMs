@@ -3,7 +3,6 @@ from mesa import Model
 from mesa.space import NetworkGrid
 import random
 from agents.resident import Resident
-from agents.organizationagent import OrganizationAgent
 from agents.poi import POI
 import networkx as nx
 from shapely.geometry import Point
@@ -66,7 +65,7 @@ class GeometryEncoder(json.JSONEncoder):
         return super().default(obj)
 
 class FifteenMinuteCity(Model):
-    def __init__(self, graph, pois, num_residents, num_organizations, **kwargs):
+    def __init__(self, graph, pois, num_residents, **kwargs):
         super().__init__()  # Mesa 3.x model initialization
         
         # Initialize logger
@@ -86,7 +85,7 @@ class FifteenMinuteCity(Model):
         
         # Initialize lists to track agents
         self.residents = []
-        self.organizations = []
+        self.poi_agents = []  # List to store POI agents
         self.all_agents = []
         self.communications = []  # Store communications
 
@@ -132,7 +131,7 @@ class FifteenMinuteCity(Model):
             model_reporters={
                 "Total Agents": lambda m: m.get_agent_count(),
                 "Person Agents": lambda m: m.get_agent_count(agent_type=Resident),
-                "Organization Agents": lambda m: m.get_agent_count(agent_type=OrganizationAgent)
+                "POI Agents": lambda m: m.get_agent_count(agent_type=POI)
             },
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
@@ -141,7 +140,7 @@ class FifteenMinuteCity(Model):
             }
         )
         
-        # Create agents
+        # Create resident agents
         for i in range(num_residents):
             home_node = random.choice(list(graph.nodes()))
             # Get coordinates from the node
@@ -174,36 +173,42 @@ class FifteenMinuteCity(Model):
             self.residents.append(resident)
             self.all_agents.append(resident)
 
-            org_types = kwargs.get('org_types', ['business', 'government', 'school'])
-        
-        for i in range(num_organizations):
-            home_node = random.choice(list(graph.nodes()))
-            # Get coordinates from the node
-            node_coords = self.graph.nodes[home_node]
-
-            # Create a Point geometry from the coordinates
-            point_geometry = Point(node_coords['x'], node_coords['y'])
-            
-            org_type = self.random.choice(org_types)
-            
-            # Determine the parish this organization belongs to
-            parish = self._get_parish_for_node(home_node)
-
-            organization = OrganizationAgent(
-                model=self,
-                unique_id=i + num_residents,  # Ensure unique IDs
-                geometry=point_geometry,
-                current_node=home_node,
-                org_type=org_type,
-                parish=parish
-            )
-            self.grid.place_agent(organization, home_node)
-            self.schedule.add(organization)  # Add to our custom scheduler
-            self.organizations.append(organization)
-            self.all_agents.append(organization)
+        # Create POI agents from the pois dictionary
+        poi_id = num_residents  # Start POI IDs after resident IDs
+        for poi_type, poi_list in pois.items():
+            for poi_data in poi_list:
+                if isinstance(poi_data, tuple):
+                    node_id, _ = poi_data  # Unpack node and type
+                else:
+                    node_id = poi_data  # If it's just a node ID
+                
+                # Get coordinates from the node
+                node_coords = self.graph.nodes[node_id]
+                
+                # Create a Point geometry from the coordinates
+                point_geometry = Point(node_coords['x'], node_coords['y'])
+                
+                # Determine the parish this POI belongs to
+                parish = self._get_parish_for_node(node_id)
+                
+                # Create the POI agent
+                poi_agent = POI(
+                    model=self,
+                    unique_id=poi_id,
+                    geometry=point_geometry,
+                    node_id=node_id,
+                    poi_type=poi_type,
+                    parish=parish
+                )
+                
+                self.grid.place_agent(poi_agent, node_id)
+                self.schedule.add(poi_agent)
+                self.poi_agents.append(poi_agent)
+                self.all_agents.append(poi_agent)
+                poi_id += 1
 
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
-        self.logger.info(f"Generated {num_residents} resident agents and {num_organizations} organization agents")
+        self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
 
     def _map_nodes_to_parishes(self):
         """
@@ -476,9 +481,3 @@ class FifteenMinuteCity(Model):
         # In a full implementation, this would store the message in a database or log
         # For now, we'll just store it in the communications list
         self.communications.append(message)
-
-    """
-    def register_agent(self, agent):
-        #Explicit registration (optional but recommended)
-        self.schedule.add(agent)
-    """

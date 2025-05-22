@@ -94,6 +94,9 @@ class POI(BaseAgent):
             for resident in self.model.residents:
                 if hasattr(resident, 'current_node') and resident.current_node == self.node_id:
                     self.visitors.add(resident.unique_id)
+                # Also check for residents who have moved directly to this POI's location
+                elif hasattr(resident, 'geometry') and self.geometry.distance(resident.geometry) < 0.001:
+                    self.visitors.add(resident.unique_id)
     
     def is_open(self, hour):
         """
