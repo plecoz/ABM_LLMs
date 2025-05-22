@@ -19,7 +19,7 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "C:/Users/pierr/OneDrive/Documents/Stage Macau/shapefiles/macau_shapefiles/macau_districts.gpkg"
+DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
 
 def load_parishes(shapefile_path=None):
     """
