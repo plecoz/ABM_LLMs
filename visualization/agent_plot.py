@@ -19,21 +19,29 @@ class AgentPlotter:
             self.resident_markers.append(m)
             
     def plot_poi_agents(self, poi_agents):
-        """Plot POI agents as colored markers based on their category."""
-        # Define colors for different POI categories
-        category_colors = {
-            'healthcare': 'red',
-            'education': 'blue',
-            'shopping': 'yellow',
-            'recreation': 'green',
-            'services': 'purple',
-            'food': 'orange',
-            'other': 'gray'
+        """Plot POI agents with colors and shapes based on their categories."""
+        # Define colors and shapes for different POI categories
+        category_styles = {
+            'daily_living': {'color': '#FF9800', 'marker': 's'},  # Orange square
+            'healthcare': {'color': '#F44336', 'marker': 'h'},    # Red hexagon
+            'education': {'color': '#2196F3', 'marker': '^'},     # Blue triangle
+            'entertainment': {'color': '#4CAF50', 'marker': '*'}, # Green star
+            'transportation': {'color': '#000000', 'marker': 'd'}, # Black diamond
+            'other': {'color': '#9E9E9E', 'marker': 'o'}          # Gray circle
         }
         
         for poi in poi_agents:
             category = poi.category if hasattr(poi, 'category') else 'other'
-            color = category_colors.get(category, 'gray')
+            style = category_styles.get(category, category_styles['other'])
+            
             x, y = poi.geometry.x, poi.geometry.y
-            m = self.base.ax.plot(x, y, 's', color=color, markersize=8)[0]
+            
+            # Special case for transportation (bus stops)
+            if category == 'transportation':
+                size = 4  # Smaller size for bus stops
+            else:
+                size = 6  # Standard size for other POIs
+                
+            m = self.base.ax.plot(x, y, style['marker'], color=style['color'], 
+                                 markersize=size, alpha=0.8)[0]
             self.poi_markers.append(m)

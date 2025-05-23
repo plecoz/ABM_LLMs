@@ -1,6 +1,47 @@
 import osmnx as ox
 import numpy as np
 from shapely.geometry import Point, Polygon
+import geopandas as gpd
+
+def get_pois_for_category(graph, place_name, tags, poi_type):
+    """
+    Safely retrieve POIs for a specific category and handle empty results.
+    
+    Args:
+        graph: NetworkX graph of the area
+        place_name: Name of the place to fetch POIs from
+        tags: Tags to use for OSM query
+        poi_type: Type of POI to fetch
+        
+    Returns:
+        List of (node_id, poi_type) tuples
+    """
+    poi_nodes = []
+    try:
+        gdf = ox.features_from_place(place_name, tags)
+        if len(gdf) > 0:
+            print(f"- Found {len(gdf)} {poi_type}")
+            
+            # Process each POI
+            for _, row in gdf.iterrows():
+                # Handle both Point and Polygon geometries
+                if isinstance(row.geometry, Point):
+                    x, y = row.geometry.x, row.geometry.y
+                elif isinstance(row.geometry, Polygon):
+                    # Use polygon's centroid if it's an area
+                    x, y = row.geometry.centroid.x, row.geometry.centroid.y
+                else:
+                    continue  # Skip other geometry types
+                    
+                # Find nearest node
+                nearest_node = ox.distance.nearest_nodes(graph, x, y)
+                poi_nodes.append((nearest_node, poi_type))
+        else:
+            print(f"- No {poi_type} found")
+    except Exception as e:
+        print(f"- Error fetching {poi_type}: {e}")
+    
+    return poi_nodes
 
 def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
     """
@@ -12,87 +53,79 @@ def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
         selected_pois: List of POI types to include (e.g., ['bank', 'police', 'school', 'hospital', 'fire_station'])
                       If None, all POIs will be included
     """
-    # Define all available POI categories
-    all_poi_tags = {
-        "shop": ["supermarket", "convenience", "bakery", "butcher", "mall", "department_store"],
-        "amenity": ["school", "hospital", "clinic", "pharmacy", "library", "restaurant", "cafe", 
-                   "bank", "police", "fire_station", "post_office", "university"],
-        "leisure": ["park", "sports_centre", "garden", "playground", "fitness_centre"],
-        "office": ["government", "insurance", "company", "lawyer", "financial", "coworking"]
-    }
-    
-    # If selected_pois is provided, filter the tags to only include those POIs
-    if selected_pois:
-        tags = {}
-        for category, poi_types in all_poi_tags.items():
-            filtered_types = [poi_type for poi_type in poi_types if poi_type in selected_pois]
-            if filtered_types:
-                tags[category] = filtered_types
-    else:
-        # Use all POI tags if no selection is provided
-        tags = all_poi_tags
-    
-    # Initialize POI dictionary with categorization
+    # Initialize POI dictionary with the requested categories
     pois = {
-        # Healthcare
-        "healthcare": [],  # hospitals, clinics, pharmacies
-        
-        # Education
-        "education": [],   # schools, libraries, universities
-        
-        # Shopping
-        "shopping": [],    # supermarkets, convenience stores, etc.
-        
-        # Recreation
-        "recreation": [],  # parks, sports centers, etc.
-        
-        # Services
-        "services": [],    # banks, post offices, government, police, fire stations
-        
-        # Food
-        "food": []         # restaurants, cafes
+        "daily_living": [],   # Grocery stores, banks, restaurants, barber shops, post offices
+        "healthcare": [],     # Hospitals, clinics, pharmacies
+        "education": [],      # Kindergartens, primary schools, secondary schools
+        "entertainment": [],  # Parks, libraries, museums, etc.
+        "transportation": [], # Bus stops
     }
     
     try:
-        # Fetch POIs from OSM
-        gdf = ox.features_from_place(place_name, tags)
+        # 1. Daily Living POIs
+        print("\nFetching daily living points of interest...")
+        tags_groceries = {'shop': ['supermarket', 'grocery', 'convenience']}
+        tags_banks = {'amenity': 'bank'}
+        tags_restaurants = {'amenity': ['restaurant', 'cafe']}
+        tags_barber_shops = {'shop': 'hairdresser'}
+        tags_post_offices = {'amenity': 'post_office'}
+        tags_laundries = {'amenity': 'laundry', 'shop': 'laundry'}
         
-        for _, row in gdf.iterrows():
-            # Handle both Point and Polygon geometries
-            if isinstance(row.geometry, Point):
-                x, y = row.geometry.x, row.geometry.y
-            elif isinstance(row.geometry, Polygon):
-                # Use polygon's centroid if it's an area
-                x, y = row.geometry.centroid.x, row.geometry.centroid.y
-            else:
-                continue  # Skip other geometry types
-                
-            # Vectorized nearest node search (faster than looping)
-            nearest_node = ox.distance.nearest_nodes(graph, x, y)
-            
-            # Map POI to appropriate category
-            if "amenity" in row:
-                amenity_type = row["amenity"]
-                if amenity_type in ["hospital", "clinic", "pharmacy"]:
-                    pois["healthcare"].append((nearest_node, amenity_type))
-                elif amenity_type in ["school", "library", "university"]:
-                    pois["education"].append((nearest_node, amenity_type))
-                elif amenity_type in ["restaurant", "cafe"]:
-                    pois["food"].append((nearest_node, amenity_type))
-                elif amenity_type in ["bank", "police", "fire_station", "post_office"]:
-                    pois["services"].append((nearest_node, amenity_type))
-            
-            elif "shop" in row:
-                shop_type = row["shop"] if isinstance(row["shop"], str) else "shop"
-                pois["shopping"].append((nearest_node, shop_type))
-            
-            elif "leisure" in row:
-                leisure_type = row["leisure"] if isinstance(row["leisure"], str) else "leisure"
-                pois["recreation"].append((nearest_node, leisure_type))
-            
-            elif "office" in row:
-                office_type = row["office"] if isinstance(row["office"], str) else "office"
-                pois["services"].append((nearest_node, office_type))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_groceries, 'supermarket'))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_banks, 'bank'))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_restaurants, 'restaurant'))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_barber_shops, 'barber'))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_post_offices, 'post_office'))
+        pois["daily_living"].extend(get_pois_for_category(graph, place_name, tags_laundries, 'laundry'))
+        
+        # 2. Healthcare POIs
+        print("\nFetching healthcare points of interest...")
+        tags_hospitals = {'amenity': 'hospital'}
+        tags_clinics = {'amenity': 'clinic', 'healthcare': 'clinic'}
+        tags_pharmacies = {'amenity': 'pharmacy'}
+        tags_health_centers = {'healthcare': 'centre'}
+        
+        pois["healthcare"].extend(get_pois_for_category(graph, place_name, tags_hospitals, 'hospital'))
+        pois["healthcare"].extend(get_pois_for_category(graph, place_name, tags_clinics, 'clinic'))
+        pois["healthcare"].extend(get_pois_for_category(graph, place_name, tags_pharmacies, 'pharmacy'))
+        pois["healthcare"].extend(get_pois_for_category(graph, place_name, tags_health_centers, 'healthcare'))
+        
+        # 3. Education POIs
+        print("\nFetching education points of interest...")
+        tags_kindergartens = {'amenity': 'kindergarten'}
+        tags_schools = {'amenity': 'school'}
+        
+        pois["education"].extend(get_pois_for_category(graph, place_name, tags_kindergartens, 'kindergarten'))
+        pois["education"].extend(get_pois_for_category(graph, place_name, tags_schools, 'school'))
+        
+        # 4. Entertainment POIs
+        print("\nFetching entertainment points of interest...")
+        tags_parks = {'leisure': 'park'}
+        tags_squares = {'place': 'square'}
+        tags_libraries = {'amenity': 'library'}
+        tags_museums = {'tourism': 'museum'}
+        tags_art_galleries = {'tourism': 'gallery'}
+        tags_cultural_centers = {'amenity': 'arts_centre'}
+        tags_theaters = {'amenity': ['theatre', 'cinema']}
+        tags_gyms = {'leisure': ['fitness_centre', 'sports_centre']}
+        tags_stadiums = {'leisure': 'stadium'}
+        
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_parks, 'park'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_squares, 'square'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_libraries, 'library'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_museums, 'museum'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_art_galleries, 'gallery'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_cultural_centers, 'cultural_center'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_theaters, 'theater'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_gyms, 'gym'))
+        pois["entertainment"].extend(get_pois_for_category(graph, place_name, tags_stadiums, 'stadium'))
+        
+        # 5. Transportation POIs
+        print("\nFetching transportation points of interest...")
+        tags_bus_stops = {'highway': 'bus_stop'}
+        
+        pois["transportation"].extend(get_pois_for_category(graph, place_name, tags_bus_stops, 'bus_stop'))
         
         # Remove duplicates (some POIs might share nearest nodes)
         for category in pois:
@@ -102,15 +135,13 @@ def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
                     unique_nodes[node] = poi_type
             pois[category] = [(node, poi_type) for node, poi_type in unique_nodes.items()]
             
-        print(f"Found POIs: {', '.join(f'{len(pois[k])} {k}' for k in pois)}")
+        print(f"\nFound POIs: {', '.join(f'{len(pois[k])} {k}' for k in pois)}")
         
     except Exception as e:
         print(f"Error fetching POIs: {e}")
         # Create some dummy POIs if real data fetching fails
         # This ensures the simulation can still run
-        for category in pois:
-            random_nodes = np.random.choice(list(graph.nodes()), size=min(10, len(graph.nodes())), replace=False)
-            pois[category] = [(int(node), category) for node in random_nodes]
+        pois = create_dummy_pois(graph)
     
     return pois
 
@@ -140,3 +171,59 @@ def filter_pois(pois, poi_types=None):
                     filtered_pois[category].append(poi_entry)
     
     return filtered_pois
+
+def create_dummy_pois(graph, num_per_category=5):
+    """
+    Create dummy POIs for testing, with examples for each category.
+    
+    Args:
+        graph: NetworkX graph of the area
+        num_per_category: Number of POIs to create per category
+        
+    Returns:
+        Dictionary of POIs by category
+    """
+    print("Creating dummy POIs for testing...")
+    
+    # Initialize POI dictionary with the requested categories
+    pois = {
+        "daily_living": [],   # Grocery stores, banks, restaurants, barber shops, post offices
+        "healthcare": [],     # Hospitals, clinics, pharmacies
+        "education": [],      # Kindergartens, primary schools, secondary schools
+        "entertainment": [],  # Parks, libraries, museums, etc.
+        "transportation": [], # Bus stops
+    }
+    
+    # Sample POI types for each category
+    category_examples = {
+        "daily_living": ['supermarket', 'bank', 'restaurant', 'cafe', 'post_office'],
+        "healthcare": ['hospital', 'clinic', 'pharmacy', 'doctor', 'dentist'],
+        "education": ['school', 'kindergarten', 'primary_school', 'secondary_school', 'university'],
+        "entertainment": ['park', 'library', 'museum', 'theater', 'gym'],
+        "transportation": ['bus_stop', 'bus_station', 'station', 'platform', 'stop_position'],
+    }
+    
+    # Get random nodes from the graph
+    all_nodes = list(graph.nodes())
+    num_nodes_needed = num_per_category * len(pois)
+    
+    if len(all_nodes) < num_nodes_needed:
+        # If not enough nodes, allow reuse
+        selected_nodes = [all_nodes[i % len(all_nodes)] for i in range(num_nodes_needed)]
+    else:
+        # If enough nodes, select without replacement
+        selected_nodes = np.random.choice(all_nodes, size=num_nodes_needed, replace=False)
+    
+    node_index = 0
+    
+    # Create POIs for each category
+    for category, example_types in category_examples.items():
+        for i in range(num_per_category):
+            poi_type = example_types[i % len(example_types)]
+            node_id = selected_nodes[node_index]
+            node_index += 1
+            
+            pois[category].append((node_id, poi_type))
+            print(f"Added dummy {poi_type} to {category}")
+    
+    return pois

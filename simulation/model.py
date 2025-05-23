@@ -175,12 +175,15 @@ class FifteenMinuteCity(Model):
 
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
-        for poi_type, poi_list in pois.items():
+        print("\nCreating POI agents from POI dictionary:")
+        for category, poi_list in pois.items():
+            print(f"Category: {category} - {len(poi_list)} POIs")
             for poi_data in poi_list:
                 if isinstance(poi_data, tuple):
-                    node_id, _ = poi_data  # Unpack node and type
+                    node_id, poi_type = poi_data  # Unpack node and type
                 else:
                     node_id = poi_data  # If it's just a node ID
+                    poi_type = category
                 
                 # Get coordinates from the node
                 node_coords = self.graph.nodes[node_id]
@@ -191,15 +194,19 @@ class FifteenMinuteCity(Model):
                 # Determine the parish this POI belongs to
                 parish = self._get_parish_for_node(node_id)
                 
-                # Create the POI agent
+                # Create the POI agent with explicit category
                 poi_agent = POI(
                     model=self,
                     unique_id=poi_id,
                     geometry=point_geometry,
                     node_id=node_id,
                     poi_type=poi_type,
+                    category=category,  # Explicitly pass the category
                     parish=parish
                 )
+                
+                # Debug: Print the POI agent's category
+                print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
                 
                 self.grid.place_agent(poi_agent, node_id)
                 self.schedule.add(poi_agent)

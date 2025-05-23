@@ -25,7 +25,14 @@ class POI(BaseAgent):
         
         self.node_id = node_id
         self.poi_type = poi_type
-        self.category = kwargs.get('category', self._determine_category(poi_type))
+        
+        # If category is explicitly provided, use it, otherwise determine it from poi_type
+        if 'category' in kwargs:
+            self.category = kwargs['category']
+            print(f"Using provided category for POI {unique_id}: {self.category}")
+        else:
+            self.category = self._determine_category(poi_type)
+        
         self.visitors = set()  # Set of agent IDs currently visiting
         self.capacity = kwargs.get('capacity', 50)
         self.open_hours = kwargs.get('open_hours', {'start': 8, 'end': 20})  # Default 8am-8pm
@@ -48,27 +55,70 @@ class POI(BaseAgent):
         Returns:
             Category string
         """
-        healthcare_types = ['hospital', 'clinic', 'pharmacy']
-        education_types = ['school', 'university', 'library', 'kindergarten']
-        shopping_types = ['supermarket', 'convenience', 'mall', 'department_store', 'grocery']
-        recreation_types = ['park', 'sports_centre', 'garden', 'playground', 'fitness_centre']
-        services_types = ['bank', 'police', 'fire_station', 'post_office', 'government']
-        food_types = ['restaurant', 'cafe']
+        # Daily Living: Grocery stores, banks, restaurants, barber shops, post offices
+        daily_living_types = [
+            'supermarket', 'convenience', 'grocery', 'bank', 'restaurant', 
+            'cafe', 'barber', 'post_office', 'atm', 'marketplace', 'bakery', 
+            'butcher', 'laundry', 'convenience_store'
+        ]
         
-        if poi_type in healthcare_types:
-            return 'healthcare'
-        elif poi_type in education_types:
-            return 'education'
-        elif poi_type in shopping_types:
-            return 'shopping'
-        elif poi_type in recreation_types:
-            return 'recreation'
-        elif poi_type in services_types:
-            return 'services'
-        elif poi_type in food_types:
-            return 'food'
+        # Healthcare: Hospitals, clinics, pharmacies
+        healthcare_types = [
+            'hospital', 'clinic', 'pharmacy', 'doctor', 'dentist', 
+            'healthcare', 'medical_center', 'emergency'
+        ]
+        
+        # Education: Kindergartens, primary schools, and secondary schools
+        education_types = [
+            'school', 'kindergarten', 'primary_school', 'secondary_school',
+            'high_school', 'university', 'college', 'educational_institution'
+        ]
+        
+        # Entertainment: Parks, public squares, libraries, museums, art galleries, 
+        # cultural centers, theaters, gyms, and stadiums
+        entertainment_types = [
+            'park', 'square', 'public_square', 'library', 'museum', 'gallery', 'art_gallery',
+            'cultural_center', 'theater', 'cinema', 'gym', 'fitness_centre', 
+            'sports_centre', 'stadium', 'recreation', 'playground', 'garden', 
+            'entertainment', 'community_center'
+        ]
+        
+        # Public Transportation: Bus stops
+        transportation_types = [
+            'bus_stop', 'bus_station', 'transit_stop', 'public_transport',
+            'transport', 'station', 'transit', 'platform', 'stop_position'
+        ]
+        
+        # Print debugging info
+        print(f"Determining category for POI type: {poi_type}")
+        
+        # Exact match check first
+        if poi_type.lower() in daily_living_types:
+            category = 'daily_living'
+        elif poi_type.lower() in healthcare_types:
+            category = 'healthcare'
+        elif poi_type.lower() in education_types:
+            category = 'education'
+        elif poi_type.lower() in entertainment_types:
+            category = 'entertainment'
+        elif poi_type.lower() in transportation_types:
+            category = 'transportation'
+        # If no exact match, check for partial matches
+        elif any(t in poi_type.lower() for t in ['bus', 'stop', 'station', 'transit']):
+            category = 'transportation'
+        elif any(t in poi_type.lower() for t in ['hospital', 'clinic', 'doctor', 'pharmacy']):
+            category = 'healthcare'
+        elif any(t in poi_type.lower() for t in ['school', 'education', 'university', 'college']):
+            category = 'education'
+        elif any(t in poi_type.lower() for t in ['park', 'museum', 'theater', 'library', 'recreation']):
+            category = 'entertainment'
+        elif any(t in poi_type.lower() for t in ['market', 'shop', 'store', 'bank', 'restaurant']):
+            category = 'daily_living'
         else:
-            return 'other'
+            category = 'other'
+            
+        print(f"  Result: {poi_type} → {category}")
+        return category
     
     def step(self):
         """

@@ -1,5 +1,5 @@
 from environment.city_network import load_city_network
-from environment.pois import fetch_pois, filter_pois
+from environment.pois import fetch_pois, filter_pois, create_dummy_pois
 from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
@@ -144,7 +144,7 @@ def create_example_parish_demographics(parishes_gdf, output_path='config/parish_
     
     return parish_demographics
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False):
     """
     Run the 15-minute city simulation.
     
@@ -156,6 +156,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         parishes_path: Path to the shapefile with Macau parishes/districts
         parish_demographics_path: Path to JSON file with parish-specific demographics
         create_example_demographics: Whether to create example demographics based on parishes
+        use_dummy_pois: Whether to use dummy POIs instead of fetching from OSM
+        hide_daily_living: Whether to hide daily living POIs in the visualization
     """
     print("Loading Macau's street network...")
     graph = load_city_network("Macau, China")
@@ -179,8 +181,18 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     else:
         print("Using all available POI types")
     
-    # Fetch POIs with selected types
-    pois = fetch_pois(graph, selected_pois=selected_pois)
+    # Fetch POIs - either dummy or from OSM
+    if use_dummy_pois:
+        print("Using dummy POIs for testing...")
+        pois = create_dummy_pois(graph, num_per_category=5)
+    else:
+        # Fetch POIs with selected types
+        pois = fetch_pois(graph, selected_pois=selected_pois)
+    
+    # If hiding daily living POIs, remove them from the POIs dictionary
+    if hide_daily_living:
+        print("Hiding daily living POIs from visualization")
+        pois["daily_living"] = []
     
     print(f"Spawning {num_residents} residents...")
     model = FifteenMinuteCity(
@@ -227,6 +239,8 @@ if __name__ == "__main__":
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
     parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
+    parser.add_argument('--use-dummy-pois', action='store_true', help='Use dummy POIs for testing')
+    parser.add_argument('--hide-daily-living', action='store_true', help='Hide daily living POIs in visualization')
     
     args = parser.parse_args()
     
@@ -250,5 +264,7 @@ if __name__ == "__main__":
         selected_pois=selected_pois,
         parishes_path=args.parishes_path,
         parish_demographics_path=args.parish_demographics,
-        create_example_demographics=args.create_example_demographics
+        create_example_demographics=args.create_example_demographics,
+        use_dummy_pois=args.use_dummy_pois,
+        hide_daily_living=args.hide_daily_living
     )
