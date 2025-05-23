@@ -1,6 +1,7 @@
 from agents.base_agent import BaseAgent
 from shapely.geometry import Point
 import logging
+import random
 
 class POI(BaseAgent):
     """
@@ -41,9 +42,64 @@ class POI(BaseAgent):
         self.service_quality = kwargs.get('service_quality', 3)  # 1-5 scale
         self.popularity = kwargs.get('popularity', 0)  # Increases as more agents visit
         
+        # Waiting time attributes
+        self.has_waiting_time = self._has_waiting_time()
+        self.base_service_time = self._get_base_service_time()  # Minutes per customer
+        self.current_waiting_time = 0  # Current waiting time in minutes
+        
+        # Peak hour definitions (24-hour format)
+        self.peak_hours = {
+            'morning': (7, 9),    # 7-9 AM
+            'lunch': (12, 14),    # 12-2 PM
+            'evening': (17, 19)   # 5-7 PM
+        }
+        
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"POI-{unique_id}")
+    
+    def _has_waiting_time(self):
+        """
+        Determine if this POI type should have waiting times.
+        
+        Returns:
+            Boolean indicating if this POI should have waiting times
+        """
+        # POI types that have waiting times: grocery stores, banks, restaurants, barber shops, pharmacies
+        waiting_time_types = [
+            'supermarket', 'grocery', 'bank', 'restaurant', 'cafe', 
+            'barber', 'pharmacy', 'convenience', 'marketplace'
+        ]
+        
+        return any(wt_type in self.poi_type.lower() for wt_type in waiting_time_types)
+    
+    def _get_base_service_time(self):
+        """
+        Get the base service time in minutes for this POI type.
+        
+        Returns:
+            Base service time in minutes
+        """
+        # Define base service times for different POI types (in minutes)
+        service_times = {
+            'supermarket': 15,
+            'grocery': 10,
+            'bank': 20,
+            'restaurant': 45,
+            'cafe': 15,
+            'barber': 30,
+            'pharmacy': 10,
+            'convenience': 5,
+            'marketplace': 20
+        }
+        
+        # Find the matching POI type
+        for poi_type, time in service_times.items():
+            if poi_type in self.poi_type.lower():
+                return time
+        
+        # Default service time
+        return 15
     
     def _determine_category(self, poi_type):
         """
@@ -127,6 +183,9 @@ class POI(BaseAgent):
         # Update visitors
         self._update_visitors()
         
+        # Update waiting time
+        self._update_waiting_time()
+        
         # Update popularity based on visitor count
         if len(self.visitors) > 0:
             # Increment popularity (with a cap)
@@ -148,6 +207,42 @@ class POI(BaseAgent):
                 elif hasattr(resident, 'geometry') and self.geometry.distance(resident.geometry) < 0.001:
                     self.visitors.add(resident.unique_id)
     
+    def _update_waiting_time(self):
+        """
+        Update the waiting time based on time of day and number of visitors.
+        """
+        if not self.has_waiting_time:
+            self.current_waiting_time = 0
+            return
+            
+        # Get current hour from model
+        current_hour = self.model.hour_of_day if hasattr(self.model, 'hour_of_day') else 12
+        
+        # Check if current hour is a peak hour
+        is_peak_hour = False
+        for peak_period, (start, end) in self.peak_hours.items():
+            if start <= current_hour < end:
+                is_peak_hour = True
+                break
+        
+        # Calculate base waiting time based on visitors
+        visitor_count = len(self.visitors)
+        
+        # Calculate waiting time (minutes)
+        if visitor_count == 0:
+            self.current_waiting_time = 0
+        else:
+            # Base calculation: service time * number of visitors / capacity
+            base_wait = self.base_service_time * visitor_count / max(1, self.capacity)
+            
+            # Apply peak hour multiplier if needed
+            peak_multiplier = 1.5 if is_peak_hour else 1.0
+            
+            # Add some randomness (±20%)
+            randomness = random.uniform(0.8, 1.2)
+            
+            self.current_waiting_time = base_wait * peak_multiplier * randomness
+    
     def is_open(self, hour):
         """
         Check if the POI is open at the given hour.
@@ -160,6 +255,18 @@ class POI(BaseAgent):
         """
         return self.open_hours['start'] <= hour < self.open_hours['end']
     
+    def get_waiting_time(self):
+        """
+        Get the current waiting time in minutes.
+        
+        Returns:
+            Current waiting time in minutes, or 0 if no waiting time applies
+        """
+        if not self.has_waiting_time:
+            return 0
+        
+        return max(0, round(self.current_waiting_time))
+    
     def get_info(self):
         """
         Get information about this POI.
@@ -167,7 +274,7 @@ class POI(BaseAgent):
         Returns:
             Dictionary with POI details
         """
-        return {
+        info = {
             "id": self.unique_id,
             "type": self.poi_type,
             "category": self.category,
@@ -178,4 +285,11 @@ class POI(BaseAgent):
             "current_visitors": len(self.visitors),
             "popularity": self.popularity,
             "service_quality": self.service_quality
-        } 
+        }
+        
+        # Add waiting time information if applicable
+        if self.has_waiting_time:
+            info["waiting_time"] = self.get_waiting_time()
+            info["base_service_time"] = self.base_service_time
+        
+        return info 
