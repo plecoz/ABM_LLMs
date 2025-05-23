@@ -39,8 +39,8 @@ class POI(BaseAgent):
         self.open_hours = kwargs.get('open_hours', {'start': 8, 'end': 20})  # Default 8am-8pm
         
         # POI-specific attributes
-        self.service_quality = kwargs.get('service_quality', 3)  # 1-5 scale
-        self.popularity = kwargs.get('popularity', 0)  # Increases as more agents visit
+        #self.service_quality = kwargs.get('service_quality', 3)  # 1-5 scale
+        #self.popularity = kwargs.get('popularity', 0)  # Increases as more agents visit
         
         # Waiting time attributes
         self.has_waiting_time = self._has_waiting_time()
@@ -187,9 +187,13 @@ class POI(BaseAgent):
         self._update_waiting_time()
         
         # Update popularity based on visitor count
+        POIs are mostly static but can update visitor information and popularity.
+        """
         if len(self.visitors) > 0:
             # Increment popularity (with a cap)
             self.popularity = min(5, self.popularity + 0.01 * len(self.visitors))
+        POIs are mostly static but can update visitor information and popularity.
+        """
     
     def _update_visitors(self):
         """
@@ -283,8 +287,8 @@ class POI(BaseAgent):
             "open_hours": self.open_hours,
             "capacity": self.capacity,
             "current_visitors": len(self.visitors),
-            "popularity": self.popularity,
-            "service_quality": self.service_quality
+            #"popularity": self.popularity,
+            #"service_quality": self.service_quality
         }
         
         # Add waiting time information if applicable
