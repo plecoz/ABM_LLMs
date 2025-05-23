@@ -218,12 +218,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     
     animator.initialize()  # Draw initial state
     
-    for step in range(steps):
-        model.step()
-        animator.update(step)
-        
-        plt.pause(0.1)
-        print(f"Step {step + 1}/{steps}", end="\r")
+    # Start the animation loop
+    animator.start_animation(steps, interval=50)  # 50ms between frames
     
     plt.ioff()  # Turn off interactive mode
     plt.show()  # Keep window open at end

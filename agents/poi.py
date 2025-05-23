@@ -187,7 +187,7 @@ class POI(BaseAgent):
         self._update_waiting_time()
         
         # Update popularity based on visitor count
-        POIs are mostly static but can update visitor information and popularity.
+        #POIs are mostly static but can update visitor information and popularity.
         """
         if len(self.visitors) > 0:
             # Increment popularity (with a cap)

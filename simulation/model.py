@@ -136,7 +136,15 @@ class FifteenMinuteCity(Model):
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
                 "Type": lambda a: a.__class__.__name__,
-                "Parish": lambda a: getattr(a, 'parish', None)
+                "Parish": lambda a: getattr(a, 'parish', None),
+                "Age": lambda a: getattr(a, 'age', None),
+                "Income": lambda a: getattr(a, 'income', None),
+                "Employment": lambda a: getattr(a, 'employment_status', None),
+                "Household": lambda a: getattr(a, 'household_type', None),
+                "Energy": lambda a: getattr(a, 'energy', None),
+                "Speed": lambda a: getattr(a, 'speed', None),
+                "Traveling": lambda a: getattr(a, 'traveling', False),
+                "Travel_Time_Remaining": lambda a: getattr(a, 'travel_time_remaining', 0)
             }
         )
         
@@ -410,6 +418,11 @@ class FifteenMinuteCity(Model):
         # Generate education
         education_dist = demographics.get('education_distribution', {})
         props['education'] = self._sample_from_distribution(education_dist)
+
+        # Default values for employment status and household type
+        # These will be initialized later with sociodemographic data
+        props['employment_status'] = "employed"
+        props['household_type'] = "single"
         
         # We no longer add parish to props since it's passed separately
         # This avoids the "got multiple values for keyword argument 'parish'" error
