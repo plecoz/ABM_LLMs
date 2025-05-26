@@ -25,7 +25,7 @@ class SimulationAnimator:
         
         # Animation state
         self.current_step = 0
-        self.frames_per_step = 10  # Number of frames to interpolate between steps
+        self.frames_per_step = 5  # Number of frames to interpolate between steps
         self.animation = None
         
         # Define color schemes for POI categories

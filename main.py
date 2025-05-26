@@ -7,6 +7,8 @@ import sys
 import os
 import geopandas as gpd
 import json
+import re
+import unicodedata
 
 # Import POI configuration
 try:
@@ -144,26 +146,170 @@ def create_example_parish_demographics(parishes_gdf, output_path='config/parish_
     
     return parish_demographics
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False):
+def clean_parish_name(name):
     """
-    Run the 15-minute city simulation.
+    Remove Chinese characters and accents from parish name for easier matching.
     
     Args:
-        num_residents: Number of resident agents to create
-        steps: Number of simulation steps to run
-        selected_pois: List of POI types to include (e.g., ['bank', 'police', 'school', 'hospital', 'fire_station'])
-                      If None, all POIs will be included
-        parishes_path: Path to the shapefile with Macau parishes/districts
-        parish_demographics_path: Path to JSON file with parish-specific demographics
-        create_example_demographics: Whether to create example demographics based on parishes
-        use_dummy_pois: Whether to use dummy POIs instead of fetching from OSM
-        hide_daily_living: Whether to hide daily living POIs in the visualization
+        name: Original parish name (may contain Chinese characters and accents)
+        
+    Returns:
+        Cleaned parish name with only Latin characters (no accents)
+    """
+    if not name:
+        return name
+    
+    # Remove Chinese characters (keep only Latin characters, numbers, spaces, and basic punctuation)
+    cleaned = re.sub(r'[^\w\s\-\.\(\)]', '', name, flags=re.ASCII)
+    
+    # Remove accents from letters using Unicode normalization
+    # NFD decomposes characters into base + combining marks, then we filter out combining marks
+    normalized = unicodedata.normalize('NFD', cleaned)
+    without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+    
+    # Clean up extra spaces
+    final_cleaned = ' '.join(without_accents.split())
+    
+    return final_cleaned.strip()
+
+def print_available_parishes(parishes_gdf):
+    """
+    Print all available parish names in both original and cleaned formats.
+    
+    Args:
+        parishes_gdf: GeoDataFrame with parish data
+    """
+    if parishes_gdf is None:
+        print("No parishes data available.")
+        return
+    
+    print("\nAvailable Parishes:")
+    print("=" * 50)
+    print(f"{'Original Name':<30} | {'Cleaned Name'}")
+    print("-" * 50)
+    
+    for idx, parish in parishes_gdf.iterrows():
+        original = parish['name']
+        cleaned = clean_parish_name(original)
+        print(f"{original:<30} | {cleaned}")
+    
+    print("=" * 50)
+    print(f"Total parishes: {len(parishes_gdf)}")
+    print("\nTo use in simulation, copy the 'Cleaned Name' values:")
+    cleaned_names = [clean_parish_name(parish['name']) for _, parish in parishes_gdf.iterrows()]
+    print(f"--parishes {' '.join([f'\"{name}\"' for name in cleaned_names if name])}")
+    print()
+
+def filter_graph_by_parishes(graph, parishes_gdf, selected_parishes):
+    """
+    Filter the graph to only include nodes within selected parishes.
+    """
+    if not selected_parishes or parishes_gdf is None:
+        return graph
+    
+    # Clean the selected parish names for matching
+    cleaned_selected = [clean_parish_name(name) for name in selected_parishes]
+    
+    # Create a mapping of cleaned names to original geometries
+    parish_geometries = []
+    matched_parishes = []
+    
+    for idx, parish in parishes_gdf.iterrows():
+        cleaned_name = clean_parish_name(parish['name'])
+        if cleaned_name in cleaned_selected:
+            parish_geometries.append(parish['geometry'])
+            matched_parishes.append(f"{parish['name']} -> {cleaned_name}")
+    
+    if not parish_geometries:
+        print(f"Warning: No parishes matched the selected names: {selected_parishes}")
+        print("Available parishes:")
+        for _, parish in parishes_gdf.iterrows():
+            print(f"  - Original: '{parish['name']}' -> Cleaned: '{clean_parish_name(parish['name'])}'")
+        return graph
+    
+    print(f"Matched parishes: {matched_parishes}")
+    
+    # Find nodes within selected parishes
+    nodes_to_keep = []
+    for node_id, node_attrs in graph.nodes(data=True):
+        if 'x' in node_attrs and 'y' in node_attrs:
+            from shapely.geometry import Point
+            point = Point(node_attrs['x'], node_attrs['y'])
+            
+            # Check if point is in any selected parish
+            for geometry in parish_geometries:
+                if geometry.contains(point):
+                    nodes_to_keep.append(node_id)
+                    break
+    
+    if not nodes_to_keep:
+        print("Warning: No nodes found in selected parishes. Check parish names or coordinate systems.")
+        return graph
+    
+    # Create subgraph with only nodes in selected parishes
+    filtered_graph = graph.subgraph(nodes_to_keep).copy()
+    print(f"Filtered graph: {len(nodes_to_keep)} nodes (from {len(graph.nodes())} total)")
+    
+    return filtered_graph
+
+def filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes):
+    """
+    Filter POIs to only include those within selected parishes.
+    """
+    if not selected_parishes or parishes_gdf is None:
+        return pois
+    
+    # Get all nodes in the filtered graph
+    graph_nodes = set(graph.nodes())
+    
+    # Filter POIs to only include those in the filtered graph
+    filtered_pois = {}
+    total_original = 0
+    total_filtered = 0
+    
+    for category, poi_list in pois.items():
+        filtered_poi_list = []
+        total_original += len(poi_list)
+        
+        for poi_data in poi_list:
+            if isinstance(poi_data, tuple):
+                node_id, poi_type = poi_data
+            else:
+                node_id = poi_data
+            
+            # Only keep POIs that are in the filtered graph
+            if node_id in graph_nodes:
+                filtered_poi_list.append(poi_data)
+        
+        filtered_pois[category] = filtered_poi_list
+        total_filtered += len(filtered_poi_list)
+    
+    print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
+    return filtered_pois
+
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False):
+    """
+    Run the 15-minute city simulation.
     """
     print("Loading Macau's street network...")
     graph = load_city_network("Macau, China")
     
     # Load parishes data
     parishes_gdf = load_parishes(parishes_path)
+    
+    # If user wants to list parishes, do that and exit
+    if list_parishes:
+        print_available_parishes(parishes_gdf)
+        return
+    
+    # Filter graph by selected parishes if specified
+    if selected_parishes and parishes_gdf is not None:
+        print(f"Filtering simulation to parishes: {', '.join(selected_parishes)}")
+        graph = filter_graph_by_parishes(graph, parishes_gdf, selected_parishes)
+        
+        # Also filter parishes_gdf to only selected parishes
+        cleaned_selected = [clean_parish_name(name) for name in selected_parishes]
+        parishes_gdf = parishes_gdf[parishes_gdf['name'].apply(clean_parish_name).isin(cleaned_selected)]
     
     # Load or create parish-specific demographics
     parish_demographics = {}
@@ -188,6 +334,10 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     else:
         # Fetch POIs with selected types
         pois = fetch_pois(graph, selected_pois=selected_pois)
+    
+    # Filter POIs by selected parishes
+    if selected_parishes and parishes_gdf is not None:
+        pois = filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes)
     
     # If hiding daily living POIs, remove them from the POIs dictionary
     if hide_daily_living:
@@ -237,6 +387,10 @@ if __name__ == "__main__":
     parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
     parser.add_argument('--use-dummy-pois', action='store_true', help='Use dummy POIs for testing')
     parser.add_argument('--hide-daily-living', action='store_true', help='Hide daily living POIs in visualization')
+    parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
+    #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
+    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     
     args = parser.parse_args()
     
@@ -262,5 +416,7 @@ if __name__ == "__main__":
         parish_demographics_path=args.parish_demographics,
         create_example_demographics=args.create_example_demographics,
         use_dummy_pois=args.use_dummy_pois,
-        hide_daily_living=args.hide_daily_living
+        hide_daily_living=args.hide_daily_living,
+        selected_parishes=args.parishes,
+        list_parishes=args.list_parishes
     )
