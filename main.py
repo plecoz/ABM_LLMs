@@ -23,6 +23,21 @@ except ImportError:
 # Shapefile path for Macau parishes
 DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
 
+# Macau parish population proportions (based on real demographics)
+MACAU_PARISH_PROPORTIONS = {
+    "Santo Antnio": 0.203,      # 20.3%
+    "So Lzaro": 0.05,          # 5%
+    "So Loureno": 0.082,       # 8.2%
+    "S": 0.083,                 # 8.3%
+    "Nossa Senhora de Ftima": 0.368,  # 36.8%
+    "Nossa Senhora do Carmo": 0.155,   # 15.5%
+    "So Francisco Xavier": 0.054,     # 5.4%
+    "Zona do Aterro de Cotai": 0.005   # 0.5%
+}
+
+    #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
+    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+
 def load_parishes(shapefile_path=None):
     """
     Load Macau parishes from shapefile.
@@ -287,7 +302,89 @@ def filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes):
     print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
     return filtered_pois
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False):
+def calculate_proportional_distribution(selected_parishes, total_residents, random_distribution=False):
+    """
+    Calculate the number of residents to place in each selected parish.
+    
+    Args:
+        selected_parishes: List of parish names to include
+        total_residents: Total number of residents to distribute
+        random_distribution: If True, distribute randomly; if False, use proportional distribution
+        
+    Returns:
+        Dictionary mapping parish names to number of residents
+    """
+    if random_distribution or not selected_parishes:
+        # Random distribution - equal number in each parish
+        if selected_parishes:
+            residents_per_parish = total_residents // len(selected_parishes)
+            remainder = total_residents % len(selected_parishes)
+            
+            distribution = {}
+            for i, parish in enumerate(selected_parishes):
+                distribution[parish] = residents_per_parish + (1 if i < remainder else 0)
+            return distribution
+        else:
+            return {}
+    
+    # Proportional distribution based on real demographics
+    # Clean parish names for matching
+    cleaned_selected = [clean_parish_name(name) for name in selected_parishes]
+    
+    # Get proportions for selected parishes
+    selected_proportions = {}
+    total_proportion = 0
+    
+    for parish in cleaned_selected:
+        if parish in MACAU_PARISH_PROPORTIONS:
+            selected_proportions[parish] = MACAU_PARISH_PROPORTIONS[parish]
+            total_proportion += MACAU_PARISH_PROPORTIONS[parish]
+    
+    if total_proportion == 0:
+        print(f"Warning: No matching parishes found in proportions. Available: {list(MACAU_PARISH_PROPORTIONS.keys())}")
+        # Fall back to equal distribution
+        residents_per_parish = total_residents // len(selected_parishes)
+        remainder = total_residents % len(selected_parishes)
+        
+        distribution = {}
+        for i, parish in enumerate(selected_parishes):
+            distribution[parish] = residents_per_parish + (1 if i < remainder else 0)
+        return distribution
+    
+    # Normalize proportions to sum to 1 for selected parishes
+    normalized_proportions = {parish: prop / total_proportion 
+                            for parish, prop in selected_proportions.items()}
+    
+    # Calculate number of residents per parish
+    distribution = {}
+    assigned_residents = 0
+    
+    # Assign residents based on proportions
+    for parish, proportion in normalized_proportions.items():
+        num_residents = round(total_residents * proportion)
+        distribution[parish] = num_residents
+        assigned_residents += num_residents
+    
+    # Handle rounding differences
+    difference = total_residents - assigned_residents
+    if difference != 0:
+        # Add/subtract residents from the parish with the largest proportion
+        largest_parish = max(normalized_proportions.keys(), 
+                           key=lambda x: normalized_proportions[x])
+        distribution[largest_parish] += difference
+    
+    # Print distribution summary
+    print("\nResident Distribution by Parish:")
+    print("=" * 40)
+    for parish, count in distribution.items():
+        percentage = (count / total_residents) * 100
+        print(f"{parish:<25}: {count:>3} residents ({percentage:>5.1f}%)")
+    print("=" * 40)
+    print(f"Total: {sum(distribution.values())} residents")
+    
+    return distribution
+
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False):
     """
     Run the 15-minute city simulation.
     """
@@ -310,6 +407,25 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Also filter parishes_gdf to only selected parishes
         cleaned_selected = [clean_parish_name(name) for name in selected_parishes]
         parishes_gdf = parishes_gdf[parishes_gdf['name'].apply(clean_parish_name).isin(cleaned_selected)]
+    
+    # Calculate proportional distribution
+    parish_distribution = None
+    if parishes_gdf is not None and not random_distribution:
+        # If specific parishes are selected, use only those
+        if selected_parishes:
+            parish_distribution = calculate_proportional_distribution(
+                selected_parishes, num_residents, random_distribution
+            )
+        else:
+            # If no specific parishes selected, use all available parishes with proportional distribution
+            all_parish_names = [clean_parish_name(parish['name']) for _, parish in parishes_gdf.iterrows()]
+            # Filter out empty names
+            all_parish_names = [name for name in all_parish_names if name]
+            if all_parish_names:
+                print("Using proportional distribution across all Macau parishes")
+                parish_distribution = calculate_proportional_distribution(
+                    all_parish_names, num_residents, random_distribution
+                )
     
     # Load or create parish-specific demographics
     parish_demographics = {}
@@ -350,7 +466,9 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         pois, 
         num_residents=num_residents,
         parishes_gdf=parishes_gdf,
-        parish_demographics=parish_demographics
+        parish_demographics=parish_demographics,
+        parish_distribution=parish_distribution,
+        random_distribution=random_distribution
     )
     
 
@@ -391,6 +509,7 @@ if __name__ == "__main__":
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
     #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
+    parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
     
     args = parser.parse_args()
     
@@ -418,5 +537,6 @@ if __name__ == "__main__":
         use_dummy_pois=args.use_dummy_pois,
         hide_daily_living=args.hide_daily_living,
         selected_parishes=args.parishes,
-        list_parishes=args.list_parishes
+        list_parishes=args.list_parishes,
+        random_distribution=args.random_distribution
     )

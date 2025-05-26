@@ -115,6 +115,10 @@ class FifteenMinuteCity(Model):
         # Load parishes GeoDataFrame if provided
         self.parishes_gdf = kwargs.get('parishes_gdf', None)
         
+        # Get parish distribution and random distribution settings
+        self.parish_distribution = kwargs.get('parish_distribution', None)
+        self.random_distribution = kwargs.get('random_distribution', False)
+        
         # Create a mapping of nodes to parishes if parishes data is available
         self.node_to_parish = {}
         if self.parishes_gdf is not None:
@@ -148,38 +152,8 @@ class FifteenMinuteCity(Model):
             }
         )
         
-        # Create resident agents
-        for i in range(num_residents):
-            home_node = random.choice(list(graph.nodes()))
-            # Get coordinates from the node
-            node_coords = self.graph.nodes[home_node]
-            # Create a Point geometry from the coordinates
-            point_geometry = Point(node_coords['x'], node_coords['y'])
-            
-            # Calculate all nodes within 1km
-            accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                graph, home_node, cutoff=1000, weight='length'
-            ))
-
-            # Determine the parish this agent belongs to
-            parish = self._get_parish_for_node(home_node)
-            
-            # Generate agent properties based on parish if available
-            agent_props = self._generate_agent_properties(parish)
-
-            resident = Resident(
-                model=self,
-                unique_id=i,
-                geometry=point_geometry,
-                home_node=home_node,
-                accessible_nodes=accessible_nodes,
-                parish=parish,
-                **agent_props
-            )
-            self.grid.place_agent(resident, home_node)
-            self.schedule.add(resident)  # Add to our custom scheduler
-            self.residents.append(resident)
-            self.all_agents.append(resident)
+        # Create resident agents with proportional distribution
+        self._create_residents_with_distribution(num_residents)
 
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
@@ -501,3 +475,141 @@ class FifteenMinuteCity(Model):
         # In a full implementation, this would store the message in a database or log
         # For now, we'll just store it in the communications list
         self.communications.append(message)
+
+    def _create_residents_with_distribution(self, num_residents):
+        """
+        Create resident agents with proportional distribution across parishes.
+        
+        Args:
+            num_residents: Total number of residents to create
+        """
+        if self.parish_distribution and not self.random_distribution:
+            # Use proportional distribution
+            self._create_residents_proportionally(num_residents)
+        else:
+            # Use random distribution (original method)
+            self._create_residents_randomly(num_residents)
+
+    def _create_residents_proportionally(self, num_residents):
+        """
+        Create residents with proportional distribution across parishes.
+        
+        Args:
+            num_residents: Total number of residents to create
+        """
+        agent_id = 0
+        
+        for parish_name, num_parish_residents in self.parish_distribution.items():
+            if num_parish_residents <= 0:
+                continue
+                
+            # Get nodes in this parish
+            parish_nodes = [node_id for node_id, parish in self.node_to_parish.items() 
+                          if parish and self._clean_parish_name_for_matching(parish) == parish_name]
+            
+            if not parish_nodes:
+                self.logger.warning(f"No nodes found for parish {parish_name}. Skipping residents for this parish.")
+                continue
+            
+            # Create residents for this parish
+            for i in range(num_parish_residents):
+                home_node = random.choice(parish_nodes)
+                
+                # Get coordinates from the node
+                node_coords = self.graph.nodes[home_node]
+                # Create a Point geometry from the coordinates
+                point_geometry = Point(node_coords['x'], node_coords['y'])
+                
+                # Calculate all nodes within 1km
+                accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                    self.graph, home_node, cutoff=1000, weight='length'
+                ))
+
+                # Determine the parish this agent belongs to
+                parish = self._get_parish_for_node(home_node)
+                
+                # Generate agent properties based on parish if available
+                agent_props = self._generate_agent_properties(parish)
+
+                resident = Resident(
+                    model=self,
+                    unique_id=agent_id,
+                    geometry=point_geometry,
+                    home_node=home_node,
+                    accessible_nodes=accessible_nodes,
+                    parish=parish,
+                    **agent_props
+                )
+                self.grid.place_agent(resident, home_node)
+                self.schedule.add(resident)  # Add to our custom scheduler
+                self.residents.append(resident)
+                self.all_agents.append(resident)
+                agent_id += 1
+
+    def _create_residents_randomly(self, num_residents):
+        """
+        Create residents with random distribution (original method).
+        
+        Args:
+            num_residents: Total number of residents to create
+        """
+        for i in range(num_residents):
+            home_node = random.choice(list(self.graph.nodes()))
+            # Get coordinates from the node
+            node_coords = self.graph.nodes[home_node]
+            # Create a Point geometry from the coordinates
+            point_geometry = Point(node_coords['x'], node_coords['y'])
+            
+            # Calculate all nodes within 1km
+            accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                self.graph, home_node, cutoff=1000, weight='length'
+            ))
+
+            # Determine the parish this agent belongs to
+            parish = self._get_parish_for_node(home_node)
+            
+            # Generate agent properties based on parish if available
+            agent_props = self._generate_agent_properties(parish)
+
+            resident = Resident(
+                model=self,
+                unique_id=i,
+                geometry=point_geometry,
+                home_node=home_node,
+                accessible_nodes=accessible_nodes,
+                parish=parish,
+                **agent_props
+            )
+            self.grid.place_agent(resident, home_node)
+            self.schedule.add(resident)  # Add to our custom scheduler
+            self.residents.append(resident)
+            self.all_agents.append(resident)
+
+    def _clean_parish_name_for_matching(self, parish_name):
+        """
+        Clean parish name for matching with distribution dictionary.
+        This should match the cleaning function in main.py.
+        
+        Args:
+            parish_name: Original parish name
+            
+        Returns:
+            Cleaned parish name
+        """
+        if not parish_name:
+            return parish_name
+        
+        import re
+        import unicodedata
+        
+        # Remove Chinese characters (keep only Latin characters, numbers, spaces, and basic punctuation)
+        cleaned = re.sub(r'[^\w\s\-\.\(\)]', '', parish_name, flags=re.ASCII)
+        
+        # Remove accents from letters using Unicode normalization
+        normalized = unicodedata.normalize('NFD', cleaned)
+        without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+        
+        # Clean up extra spaces
+        final_cleaned = ' '.join(without_accents.split())
+        
+        return final_cleaned.strip()
