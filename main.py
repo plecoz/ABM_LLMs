@@ -384,7 +384,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random'):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based'):
     """
     Run the 15-minute city simulation.
     """
@@ -469,7 +469,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         parish_demographics=parish_demographics,
         parish_distribution=parish_distribution,
         random_distribution=random_distribution,
-        needs_selection=needs_selection
+        needs_selection=needs_selection,
+        movement_behavior=movement_behavior
     )
     
 
@@ -512,6 +513,7 @@ if __name__ == "__main__":
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
     parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
+    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random'], default='need-based', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) (default: need-based)')
     
     args = parser.parse_args()
     
@@ -541,5 +543,6 @@ if __name__ == "__main__":
         selected_parishes=args.parishes,
         list_parishes=args.list_parishes,
         random_distribution=args.random_distribution,
-        needs_selection=args.needs_selection
+        needs_selection=args.needs_selection,
+        movement_behavior=args.movement_behavior
     )

@@ -122,6 +122,9 @@ class FifteenMinuteCity(Model):
         # Get needs selection method
         self.needs_selection = kwargs.get('needs_selection', 'random')
         
+        # Get movement behavior setting
+        self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        
         # Create a mapping of nodes to parishes if parishes data is available
         self.node_to_parish = {}
         if self.parishes_gdf is not None:
@@ -542,6 +545,7 @@ class FifteenMinuteCity(Model):
                     accessible_nodes=accessible_nodes,
                     parish=parish,
                     needs_selection=self.needs_selection,
+                    movement_behavior=self.movement_behavior,
                     **agent_props
                 )
                 self.grid.place_agent(resident, home_node)
@@ -583,6 +587,7 @@ class FifteenMinuteCity(Model):
                 accessible_nodes=accessible_nodes,
                 parish=parish,
                 needs_selection=self.needs_selection,
+                movement_behavior=self.movement_behavior,
                 **agent_props
             )
             self.grid.place_agent(resident, home_node)

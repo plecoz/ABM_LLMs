@@ -41,6 +41,12 @@ class Resident(BaseAgent):
         # Needs selection method
         self.needs_selection = kwargs.get('needs_selection', 'random')
         
+        # Movement behavior setting
+        self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        
+        # Current needs (will be updated each step)
+        self.current_needs = self.dynamic_needs.copy()
+        
         # Demographic attributes from model (may vary by parish)
         self.age = kwargs.get('age', 30)  # Default age
         self.gender = kwargs.get('gender', 'male')  # Default gender
@@ -242,10 +248,164 @@ class Resident(BaseAgent):
                 self.logger.error(f"Error moving to POI: {e}")
         return False
 
+    def get_need_to_poi_mapping(self):
+        """
+        Map needs to POI types that can satisfy them.
+        
+        Returns:
+            Dictionary mapping need types to lists of POI types
+        """
+        return {
+            "hunger": ["restaurant", "cafe", "fast_food", "food_court", "bar", "pub"],
+            "social": ["restaurant", "cafe", "bar", "pub", "community_centre", "place_of_worship", "park"],
+            "recreation": ["park", "cinema", "theatre", "sports_centre", "museum", "library", "tourist_attraction"],
+            "shopping": ["shop", "supermarket", "mall", "marketplace", "department_store"],
+            "healthcare": ["hospital", "clinic", "pharmacy", "dentist", "doctor"],
+            "education": ["school", "university", "college", "library", "training_centre"]
+        }
+
+    def find_highest_need(self):
+        """
+        Find the need with the highest value.
+        
+        Returns:
+            Tuple of (need_type, need_value) for the highest need
+        """
+        if not self.current_needs:
+            return None, 0
+        
+        highest_need = max(self.current_needs.items(), key=lambda x: x[1])
+        return highest_need
+
+    def find_poi_for_need(self, need_type):
+        """
+        Find available POI types that can satisfy a specific need.
+        
+        Args:
+            need_type: The type of need to satisfy
+            
+        Returns:
+            List of available POI types that can satisfy the need
+        """
+        need_mapping = self.get_need_to_poi_mapping()
+        possible_poi_types = need_mapping.get(need_type, [])
+        
+        # Filter to only POI types that actually exist in the model
+        available_poi_types = []
+        
+        # Check POI agents first
+        if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
+            existing_poi_types = set(poi.poi_type for poi in self.model.poi_agents)
+            available_poi_types.extend([poi_type for poi_type in possible_poi_types if poi_type in existing_poi_types])
+        
+        # Fall back to POI dictionary if no POI agents
+        if not available_poi_types and hasattr(self.model, 'pois') and self.model.pois:
+            existing_poi_types = set(self.model.pois.keys())
+            available_poi_types.extend([poi_type for poi_type in possible_poi_types if poi_type in existing_poi_types])
+        
+        return available_poi_types
+
+    def satisfy_need_at_poi(self, need_type, satisfaction_amount=30):
+        """
+        Reduce a need when visiting a POI that satisfies it.
+        
+        Args:
+            need_type: The type of need being satisfied
+            satisfaction_amount: How much the need is reduced (default: 30)
+        """
+        if need_type in self.current_needs:
+            self.current_needs[need_type] = max(0, self.current_needs[need_type] - satisfaction_amount)
+
+    def choose_movement_target(self):
+        """
+        Choose where to move based on movement behavior setting.
+        
+        Returns:
+            POI type to move to, or None if no movement should occur
+        """
+        if self.movement_behavior == 'need-based':
+            return self._choose_need_based_target()
+        else:  # random movement
+            return self._choose_random_target()
+
+    def _choose_need_based_target(self):
+        """
+        Choose movement target based on current needs.
+        
+        Returns:
+            POI type to move to, or None if no suitable POI found
+        """
+        # Update current needs
+        self.current_needs = self.generate_needs()
+        
+        # Find the highest need
+        highest_need_type, highest_need_value = self.find_highest_need()
+        
+        # Only move if the need is above a threshold (e.g., 50)
+        if highest_need_value < 50:
+            return None
+        
+        # Find POI types that can satisfy this need
+        available_poi_types = self.find_poi_for_need(highest_need_type)
+        
+        if available_poi_types:
+            # Choose a random POI type from available options
+            return random.choice(available_poi_types)
+        
+        return None
+
+    def _choose_random_target(self):
+        """
+        Choose a random POI type for movement.
+        
+        Returns:
+            Random POI type, or None if no POIs available
+        """
+        # Get all available POI types
+        available_poi_types = []
+        
+        if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
+            available_poi_types = list(set(poi.poi_type for poi in self.model.poi_agents))
+        elif hasattr(self.model, 'pois') and self.model.pois:
+            available_poi_types = list(self.model.pois.keys())
+        
+        if available_poi_types:
+            return random.choice(available_poi_types)
+        
+        return None
+
+    def _satisfy_needs_at_poi(self, poi_type):
+        """
+        Satisfy needs when visiting a POI of a specific type.
+        
+        Args:
+            poi_type: The type of POI being visited
+        """
+        need_mapping = self.get_need_to_poi_mapping()
+        
+        # Find which needs this POI type can satisfy
+        for need_type, poi_types in need_mapping.items():
+            if poi_type in poi_types:
+                # Satisfy this need
+                satisfaction_amount = random.randint(20, 40)  # Random satisfaction between 20-40
+                self.satisfy_need_at_poi(need_type, satisfaction_amount)
+
+    def increase_needs_over_time(self):
+        """
+        Gradually increase needs over time to simulate natural need accumulation.
+        """
+        for need_type in self.current_needs:
+            # Increase each need by a small random amount (1-5 points per step)
+            increase = random.randint(1, 5)
+            self.current_needs[need_type] = min(100, self.current_needs[need_type] + increase)
+
     def step(self):
         """Advance the agent one step"""
         try:
             super().step()
+            
+            # Increase needs over time
+            self.increase_needs_over_time()
             
             # Update energy levels
             if self.current_node != self.home_node:
@@ -287,9 +447,11 @@ class Resident(BaseAgent):
                     self.visited_pois.append(self.destination_node)
                     
                     # Add resident to POI's visitors if it's a POI agent
+                    visited_poi_type = None
                     for poi in self.model.poi_agents:
                         if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
                             poi.visitors.add(self.unique_id)
+                            visited_poi_type = poi.poi_type
                             # --- MEMORY MODULE: Record visit ---
                             self.memory['visited_pois'].append({
                                 'step': getattr(self.model, 'step_count', None),
@@ -298,6 +460,11 @@ class Resident(BaseAgent):
                                 'category': getattr(poi, 'category', None),
                                 'income': self.income
                             })
+                            break
+                    
+                    # Satisfy needs if we're using need-based movement and visited a POI
+                    if self.movement_behavior == 'need-based' and visited_poi_type:
+                        self._satisfy_needs_at_poi(visited_poi_type)
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -308,15 +475,11 @@ class Resident(BaseAgent):
             
             # Regular movement behavior - only if energy is not depleted and not traveling
             if self.energy > 0 and not self.traveling:
-                # Try to move to a POI agent
-                if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
-                    # Get all unique POI types
-                    poi_types = list(set(poi.poi_type for poi in self.model.poi_agents))
-                    if poi_types:
-                        self.move_to_poi(random.choice(poi_types))
-                # Fall back to old method if POI agents aren't available
-                elif hasattr(self.model, 'pois') and self.model.pois:
-                    self.move_to_poi(random.choice(list(self.model.pois.keys())))
+                # Choose movement target based on behavior setting
+                target_poi_type = self.choose_movement_target()
+                
+                if target_poi_type:
+                    self.move_to_poi(target_poi_type)
                 
         except Exception as e:
             if hasattr(self, 'logger'):
