@@ -384,7 +384,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random'):
     """
     Run the 15-minute city simulation.
     """
@@ -468,7 +468,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         parishes_gdf=parishes_gdf,
         parish_demographics=parish_demographics,
         parish_distribution=parish_distribution,
-        random_distribution=random_distribution
+        random_distribution=random_distribution,
+        needs_selection=needs_selection
     )
     
 
@@ -510,6 +511,7 @@ if __name__ == "__main__":
     #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
+    parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
     
     args = parser.parse_args()
     
@@ -538,5 +540,6 @@ if __name__ == "__main__":
         hide_daily_living=args.hide_daily_living,
         selected_parishes=args.parishes,
         list_parishes=args.list_parishes,
-        random_distribution=args.random_distribution
+        random_distribution=args.random_distribution,
+        needs_selection=args.needs_selection
     )

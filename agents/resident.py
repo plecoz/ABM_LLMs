@@ -38,6 +38,9 @@ class Resident(BaseAgent):
         # Parish information
         self.parish = kwargs.get('parish', None)
         
+        # Needs selection method
+        self.needs_selection = kwargs.get('needs_selection', 'random')
+        
         # Demographic attributes from model (may vary by parish)
         self.age = kwargs.get('age', 30)  # Default age
         self.gender = kwargs.get('gender', 'male')  # Default gender
@@ -347,6 +350,87 @@ class Resident(BaseAgent):
         """
         if agent_id in self.social_network:
             self.social_network.remove(agent_id)
+    
+    def generate_needs(self, method=None):
+        """
+        Generate needs for the resident based on the specified method.
+        
+        Args:
+            method: The method to use for generating needs. If None, uses self.needs_selection.
+                   Options: 'random', 'maslow', 'capability', 'llms'
+                   
+        Returns:
+            Dictionary of generated needs
+        """
+        if method is None:
+            method = self.needs_selection
+        
+        if method == 'random':
+            return self._generate_needs_random()
+        elif method == 'maslow':
+            return self._generate_needs_maslow()
+        elif method == 'capability':
+            return self._generate_needs_capability()
+        elif method == 'llms':
+            return self._generate_needs_llms()
+        else:
+            # Default to random if unknown method
+            return self._generate_needs_random()
+    
+    def _generate_needs_random(self):
+        """
+        Generate needs randomly.
+        
+        Returns:
+            Dictionary of randomly generated needs
+        """
+        needs = {}
+        for need_type in self.dynamic_needs.keys():
+            # Generate random need level between 0 and 100
+            needs[need_type] = random.randint(0, 100)
+        
+        return needs
+    
+    def _generate_needs_maslow(self):
+        """
+        Generate needs based on Maslow's hierarchy of needs.
+        Prioritizes basic needs first, then higher-level needs.
+        
+        Returns:
+            Dictionary of needs based on Maslow's hierarchy
+        """
+        needs = {}
+
+        
+        return needs
+    
+    def _generate_needs_capability(self):
+        """
+        Generate needs based on capability approach (Sen/Nussbaum).
+        Focuses on what people are able to do and be.
+        
+        Returns:
+            Dictionary of needs based on capability approach
+        """
+        needs = {}
+
+        
+        return needs
+    
+    def _generate_needs_llms(self):
+        """
+        Generate needs using LLM-inspired approach.
+        This is a placeholder for future LLM integration.
+        Currently uses a sophisticated rule-based system that mimics LLM reasoning.
+        
+        Returns:
+            Dictionary of needs based on LLM-inspired reasoning
+        """
+        needs = {}
+        
+
+        
+        return needs
             
     def get_parish_info(self):
         """

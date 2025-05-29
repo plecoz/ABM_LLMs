@@ -119,6 +119,9 @@ class FifteenMinuteCity(Model):
         self.parish_distribution = kwargs.get('parish_distribution', None)
         self.random_distribution = kwargs.get('random_distribution', False)
         
+        # Get needs selection method
+        self.needs_selection = kwargs.get('needs_selection', 'random')
+        
         # Create a mapping of nodes to parishes if parishes data is available
         self.node_to_parish = {}
         if self.parishes_gdf is not None:
@@ -538,6 +541,7 @@ class FifteenMinuteCity(Model):
                     home_node=home_node,
                     accessible_nodes=accessible_nodes,
                     parish=parish,
+                    needs_selection=self.needs_selection,
                     **agent_props
                 )
                 self.grid.place_agent(resident, home_node)
@@ -578,6 +582,7 @@ class FifteenMinuteCity(Model):
                 home_node=home_node,
                 accessible_nodes=accessible_nodes,
                 parish=parish,
+                needs_selection=self.needs_selection,
                 **agent_props
             )
             self.grid.place_agent(resident, home_node)
