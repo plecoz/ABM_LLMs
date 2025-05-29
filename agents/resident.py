@@ -87,6 +87,12 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
+        # Memory module
+        self.memory = {
+            'income': self.income,
+            'visited_pois': []  # List of dicts: {step, poi_id, poi_type, category, income}
+        }
+        
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
@@ -281,6 +287,14 @@ class Resident(BaseAgent):
                     for poi in self.model.poi_agents:
                         if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
                             poi.visitors.add(self.unique_id)
+                            # --- MEMORY MODULE: Record visit ---
+                            self.memory['visited_pois'].append({
+                                'step': getattr(self.model, 'step_count', None),
+                                'poi_id': poi.unique_id,
+                                'poi_type': poi.poi_type,
+                                'category': getattr(poi, 'category', None),
+                                'income': self.income
+                            })
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -356,3 +370,7 @@ class Resident(BaseAgent):
                 "household_type": self.household_type
             }
         }
+
+    def get_memory(self):
+        """Return the resident's memory (income and visited POIs)."""
+        return self.memory
