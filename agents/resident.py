@@ -44,6 +44,17 @@ class Resident(BaseAgent):
         # Movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
         
+
+        # Dynamic needs (placeholder - to be implemented later)
+        self.dynamic_needs = {
+            "hunger": 0,
+            "social": 0,
+            "recreation": 0,
+            "shopping": 0,
+            "healthcare": 0,
+            "education": 0
+        }
+
         # Current needs (will be updated each step)
         self.current_needs = self.dynamic_needs.copy()
         
@@ -58,15 +69,7 @@ class Resident(BaseAgent):
         self.employment_status = kwargs.get('employment_status', "employed")
         self.household_type = kwargs.get('household_type', "single")
         
-        # Dynamic needs (placeholder - to be implemented later)
-        self.dynamic_needs = {
-            "hunger": 0,
-            "social": 0,
-            "recreation": 0,
-            "shopping": 0,
-            "healthcare": 0,
-            "education": 0
-        }
+
         
         # Energy levels and mobility constraints
         self.max_energy = 100
