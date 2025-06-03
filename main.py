@@ -1,5 +1,5 @@
-from environment.city_network import load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois
+from environment.city_network import load_city_network, get_or_load_city_network
+from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois
 from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
@@ -384,12 +384,25 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based'):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None):
     """
     Run the 15-minute city simulation.
+    
+    Args:
+        save_network: Path to save the network after loading from OSM
+        load_network: Path to load the network from (instead of OSM)
+        save_pois: Path to save the POIs after fetching from OSM
+        load_pois: Path to load the POIs from (instead of OSM)
     """
     print("Loading Macau's street network...")
-    graph = load_city_network("Macau, China")
+    
+    # Use the new save/load functionality for the network
+    graph = get_or_load_city_network(
+        place_name="Macau, China",
+        mode="walk",
+        save_path=save_network,
+        load_path=load_network
+    )
     
     # Load parishes data
     parishes_gdf = load_parishes(parishes_path)
@@ -443,13 +456,19 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     else:
         print("Using all available POI types")
     
-    # Fetch POIs - either dummy or from OSM
+    # Fetch POIs - either dummy, from file, or from OSM
     if use_dummy_pois:
         print("Using dummy POIs for testing...")
         pois = create_dummy_pois(graph, num_per_category=5)
     else:
-        # Fetch POIs with selected types
-        pois = fetch_pois(graph, selected_pois=selected_pois)
+        # Use the new save/load functionality for POIs
+        pois = get_or_fetch_pois(
+            graph=graph,
+            place_name="Macau, China",
+            selected_pois=selected_pois,
+            save_path=save_pois,
+            load_path=load_pois
+        )
     
     # Filter POIs by selected parishes
     if selected_parishes and parishes_gdf is not None:
@@ -512,6 +531,14 @@ if __name__ == "__main__":
     parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
     parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random'], default='random', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) (default: need-based)')
     
+    # Save/Load arguments for faster testing
+    parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
+    #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
+    parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
+    #python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl
+    parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
+    parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
+    
     args = parser.parse_args()
     
     # Get POI configuration
@@ -540,5 +567,9 @@ if __name__ == "__main__":
         list_parishes=args.list_parishes,
         random_distribution=args.random_distribution,
         needs_selection=args.needs_selection,
-        movement_behavior=args.movement_behavior
+        movement_behavior=args.movement_behavior,
+        save_network=args.save_network,
+        load_network=args.load_network,
+        save_pois=args.save_pois,
+        load_pois=args.load_pois
     )

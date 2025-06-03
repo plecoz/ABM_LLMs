@@ -2,6 +2,8 @@ import osmnx as ox
 import numpy as np
 from shapely.geometry import Point, Polygon
 import geopandas as gpd
+import pickle
+import os
 
 def get_pois_for_category(graph, place_name, tags, poi_type):
     """
@@ -42,6 +44,84 @@ def get_pois_for_category(graph, place_name, tags, poi_type):
         print(f"- Error fetching {poi_type}: {e}")
     
     return poi_nodes
+
+def save_pois(pois, filepath):
+    """
+    Save POIs dictionary to a file using pickle.
+    
+    Args:
+        pois: Dictionary of POIs by category
+        filepath: Path where to save the POIs file
+    """
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        with open(filepath, 'wb') as f:
+            pickle.dump(pois, f)
+        
+        total_pois = sum(len(poi_list) for poi_list in pois.values())
+        print(f"POIs saved to {filepath}")
+        print(f"Saved {total_pois} POIs across {len(pois)} categories")
+    except Exception as e:
+        print(f"Error saving POIs: {e}")
+
+def load_pois_from_file(filepath):
+    """
+    Load POIs dictionary from a saved file.
+    
+    Args:
+        filepath: Path to the saved POIs file
+        
+    Returns:
+        Dictionary of POIs by category or None if loading fails
+    """
+    try:
+        if not os.path.exists(filepath):
+            print(f"POIs file not found: {filepath}")
+            return None
+            
+        with open(filepath, 'rb') as f:
+            pois = pickle.load(f)
+        
+        total_pois = sum(len(poi_list) for poi_list in pois.values())
+        print(f"POIs loaded from {filepath}")
+        print(f"Loaded {total_pois} POIs across {len(pois)} categories")
+        return pois
+    except Exception as e:
+        print(f"Error loading POIs from file: {e}")
+        return None
+
+def get_or_fetch_pois(graph, place_name="Macau, China", selected_pois=None, save_path=None, load_path=None):
+    """
+    Load POIs from file if available, otherwise fetch from OSM and optionally save.
+    
+    Args:
+        graph: NetworkX graph of the area
+        place_name: Name of the place to fetch POIs from
+        selected_pois: List of POI types to include (optional)
+        save_path: Path to save the POIs after fetching (optional)
+        load_path: Path to load the POIs from (optional)
+        
+    Returns:
+        Dictionary of POIs by category
+    """
+    # Try to load from file first if path is provided
+    if load_path:
+        pois = load_pois_from_file(load_path)
+        if pois is not None:
+            return pois
+        else:
+            print("Failed to load POIs from file, fetching from OpenStreetMap...")
+    
+    # Fetch from OpenStreetMap
+    pois = fetch_pois(graph, place_name, selected_pois)
+    
+    # Save to file if path is provided
+    if save_path:
+        save_pois(pois, save_path)
+    
+    return pois
 
 def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
     """

@@ -25,7 +25,8 @@ class SimulationAnimator:
         
         # Animation state
         self.current_step = 0
-        self.frames_per_step = 5  # Number of frames to interpolate between steps
+        # Commented out frame interpolation since we now use 1-minute time steps
+        # self.frames_per_step = 5  # Number of frames to interpolate between steps
         self.animation = None
         
         # Define color schemes for POI categories
@@ -88,7 +89,7 @@ class SimulationAnimator:
     def initialize(self):
         """Draw initial state"""
         self._plot_poi_agents()
-        self._plot_residents(0.0)
+        self._plot_residents()
         self._create_legend()
         
         # Set title with parishes information
@@ -100,24 +101,33 @@ class SimulationAnimator:
         plt.draw()
     
     def animate(self, frame):
-        """Animation function for FuncAnimation"""
-        # Calculate which simulation step we're on and the progress within that step
-        sim_step = frame // self.frames_per_step
-        progress = (frame % self.frames_per_step) / self.frames_per_step
+        """Animation function for FuncAnimation - now updates every step (1 minute)"""
+        # Advance the simulation every frame since we no longer use frame interpolation
+        self.model.step()
+        self.current_step = frame
         
-        # Only advance the simulation when starting a new step
-        if frame % self.frames_per_step == 0:
-            self.model.step()
-            self.current_step = sim_step
-            
-        # Update visualization with interpolated positions
-        self.update(progress)
+        # Update visualization - no interpolation progress needed
+        self.update()
         
         return self.agent_dots
+        
+        # Commented out frame interpolation code:
+        # # Calculate which simulation step we're on and the progress within that step
+        # sim_step = frame // self.frames_per_step
+        # progress = (frame % self.frames_per_step) / self.frames_per_step
+        # 
+        # # Only advance the simulation when starting a new step
+        # if frame % self.frames_per_step == 0:
+        #     self.model.step()
+        #     self.current_step = sim_step
+        #     
+        # # Update visualization with interpolated positions
+        # self.update(progress)
     
     def start_animation(self, num_steps, interval=50):
-        """Start the animation loop"""
-        total_frames = num_steps * self.frames_per_step
+        """Start the animation loop - now one frame per simulation step"""
+        # No longer need to multiply by frames_per_step since we update every step
+        total_frames = num_steps
         self.animation = FuncAnimation(
             self.fig,
             self.animate,
@@ -127,16 +137,19 @@ class SimulationAnimator:
             repeat=False
         )
         plt.show()
+        
+        # Commented out frame interpolation code:
+        # total_frames = num_steps * self.frames_per_step
     
-    def update(self, progress):
-        """Update dynamic elements with interpolation progress"""
+    def update(self):
+        """Update dynamic elements"""
         # Clear previous agents
         for dot in self.agent_dots:
             dot.remove()
         self.agent_dots = []
         
-        # Redraw agents with interpolation
-        self._plot_residents(progress)
+        # Redraw agents
+        self._plot_residents()
         
         # Refresh display
         self.fig.canvas.draw_idle()
@@ -242,17 +255,22 @@ class SimulationAnimator:
                 # Fallback to current node position
                 return self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
     
-    def _plot_residents(self, progress):
-        """Plot all resident agents as colored dots with interpolated positions for traveling agents"""
+    def _plot_residents(self, progress=0.5):
+        """Plot all resident agents as colored dots with interpolated positions for traveling agents
+        
+        Args:
+            progress: Progress along the current minute for path interpolation (default 0.5 for mid-step)
+        """
         for resident in self.model.residents:
             try:
                 if hasattr(resident, 'traveling') and resident.traveling:
                     # Get interpolated position for traveling agents
+                    # Use progress to show position along the path within the current travel step
                     x, y = self._get_interpolated_position(resident, progress)
                     
                     # Use a different color for traveling agents
                     #Option to change the color of the traveling agents
-                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, alpha=0.8)[0]  # Orange for traveling
+                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, alpha=0.8)[0]  
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):
