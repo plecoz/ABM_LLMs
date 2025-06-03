@@ -384,7 +384,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, hide_daily_living=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based'):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based'):
     """
     Run the 15-minute city simulation.
     """
@@ -455,10 +455,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     if selected_parishes and parishes_gdf is not None:
         pois = filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes)
     
-    # If hiding daily living POIs, remove them from the POIs dictionary
-    if hide_daily_living:
-        print("Hiding daily living POIs from visualization")
-        pois["daily_living"] = []
+
     
     print(f"Spawning {num_residents} residents...")
     model = FifteenMinuteCity(
@@ -506,7 +503,7 @@ if __name__ == "__main__":
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
     parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
     parser.add_argument('--use-dummy-pois', action='store_true', help='Use dummy POIs for testing')
-    parser.add_argument('--hide-daily-living', action='store_true', help='Hide daily living POIs in visualization')
+    
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
     #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
@@ -539,7 +536,6 @@ if __name__ == "__main__":
         parish_demographics_path=args.parish_demographics,
         create_example_demographics=args.create_example_demographics,
         use_dummy_pois=args.use_dummy_pois,
-        hide_daily_living=args.hide_daily_living,
         selected_parishes=args.parishes,
         list_parishes=args.list_parishes,
         random_distribution=args.random_distribution,
