@@ -38,6 +38,7 @@ class CustomRandomActivation:
     def step(self):
         """Execute the step of all agents, one at a time, in random order"""
         random.shuffle(self.agents)
+        print(f"Activating {len(self.agents)} agents at step {self.steps}")
         for agent in self.agents:
             agent.step()
         self.steps += 1
