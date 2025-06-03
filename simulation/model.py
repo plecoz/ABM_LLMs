@@ -38,7 +38,9 @@ class CustomRandomActivation:
     def step(self):
         """Execute the step of all agents, one at a time, in random order"""
         random.shuffle(self.agents)
-        print(f"Activating {len(self.agents)} agents at step {self.steps}")
+        # Print less frequently with 1-minute time steps - only every hour
+        if self.steps % 60 == 0:
+            print(f"Activating {len(self.agents)} agents at step {self.steps} (Hour {self.steps // 60})")
         for agent in self.agents:
             agent.step()
         self.steps += 1
@@ -275,18 +277,52 @@ class FifteenMinuteCity(Model):
         """
         return [agent for agent in self.all_agents if getattr(agent, 'parish', None) == parish_name]
 
+    def get_current_time(self):
+        """
+        Get the current simulation time in a readable format.
+        
+        Returns:
+            Dictionary with current time information
+        """
+        minutes_elapsed = self.step_count
+        total_hours = minutes_elapsed // 60
+        current_minute = minutes_elapsed % 60
+        
+        # Calculate current hour and day
+        hour = (8 + total_hours) % 24  # Start at 8 AM
+        current_day = total_hours // 24
+        day_of_week = current_day % 7
+        
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        return {
+            'step': self.step_count,
+            'minute': current_minute,
+            'hour': hour,
+            'day': current_day + 1,
+            'day_of_week': day_names[day_of_week],
+            'time_string': f"Day {current_day + 1} ({day_names[day_of_week]}) {hour:02d}:{current_minute:02d}"
+        }
+
     def step(self):
         """Advance the model by one step"""
         # Increment step counter
         self.step_count += 1
         
-        # Advance time (each step is 1 hour)
-        self.hour_of_day = (self.hour_of_day + 1) % 24
-        if self.hour_of_day == 0:
-            # New day
-            self.day_of_week = (self.day_of_week + 1) % 7
-            self.day_count += 1
-            self.logger.info(f"Day {self.day_count}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
+        # Advance time (each step is 1 minute)
+        minutes_elapsed = self.step_count
+        total_hours = minutes_elapsed // 60
+        current_minute = minutes_elapsed % 60
+        
+        # Calculate current hour and day
+        self.hour_of_day = (8 + total_hours) % 24  # Start at 8 AM
+        current_day = total_hours // 24
+        self.day_of_week = current_day % 7
+        self.day_count = current_day
+        
+        # Log new day transitions
+        if self.step_count > 1 and current_minute == 0 and self.hour_of_day == 0:
+            self.logger.info(f"Day {self.day_count + 1}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
         
         # Use the scheduler to step all agents
         self.schedule.step()

@@ -498,7 +498,7 @@ if __name__ == "__main__":
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
     parser.add_argument('--residents', type=int, default=100, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=50, help='Number of simulation steps')
+    parser.add_argument('--steps', type=int, default=480, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
     parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')

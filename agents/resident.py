@@ -27,6 +27,9 @@ class Resident(BaseAgent):
         self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
+        # Track the last visited node to prevent consecutive visits to same POI
+        self.last_visited_node = None
+        
         # Person-specific attributes
         self.family_id = kwargs.get('family_id', None)
         self.household_members = kwargs.get('household_members', [])
@@ -118,7 +121,7 @@ class Resident(BaseAgent):
             to_node: Destination node ID
             
         Returns:
-            Number of time steps needed for travel (each step is 15 minutes)
+            Number of time steps needed for travel (each step is 1 minute)
         """
         # Get the distance in meters from the accessible_nodes dictionary
         # or calculate using shortest path if not directly accessible
@@ -146,14 +149,14 @@ class Resident(BaseAgent):
         # Convert to minutes
         travel_time_minutes = travel_time_hours * 60
         
-        # Convert to number of time steps (15-minute steps)
-        time_steps_exact = travel_time_minutes / 15
+        # Convert to number of time steps (1-minute steps)
+        time_steps_exact = travel_time_minutes
         
         # Round according to the specified rule
         time_steps_floor = math.floor(time_steps_exact)
-        remainder_minutes = (time_steps_exact - time_steps_floor) * 15
+        remainder_minutes = time_steps_exact - time_steps_floor
         
-        if remainder_minutes < 8:
+        if remainder_minutes < 0.5:  # Less than 30 seconds
             time_steps = time_steps_floor
         else:
             time_steps = math.ceil(time_steps_exact)
@@ -322,14 +325,20 @@ class Resident(BaseAgent):
     def choose_movement_target(self):
         """
         Choose where to move based on movement behavior setting.
+        For random movement, if no suitable POI is available (to avoid consecutive visits),
+        the agent will be forced to go home.
         
         Returns:
-            POI type to move to, or None if no movement should occur
+            POI type to move to, 'home' to go home, or None if no movement should occur
         """
         if self.movement_behavior == 'need-based':
             return self._choose_need_based_target()
         else:  # random movement
-            return self._choose_random_target()
+            target = self._choose_random_target()
+            if target is None and self.current_node != self.home_node:
+                # No suitable POI available and not at home - force going home
+                return 'home'
+            return target
 
     def _choose_need_based_target(self):
         """
@@ -360,21 +369,45 @@ class Resident(BaseAgent):
     def _choose_random_target(self):
         """
         Choose a random POI type for movement.
+        For random movement, prevents visiting the same POI twice in a row.
+        If no other POIs are available, returns None to trigger going home.
         
         Returns:
-            Random POI type, or None if no POIs available
+            Random POI type, or None if no suitable POIs available
         """
-        # Get all available POI types
-        available_poi_types = []
+        # Get all available POI types and their nodes
+        available_poi_options = []
         
         if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
-            available_poi_types = list(set(poi.poi_type for poi in self.model.poi_agents))
+            # Get POI agents and their node locations
+            for poi in self.model.poi_agents:
+                if poi.node_id in self.accessible_nodes:
+                    # Skip if this is the last visited node (prevent consecutive visits)
+                    if self.last_visited_node is not None and poi.node_id == self.last_visited_node:
+                        continue
+                    available_poi_options.append(poi.poi_type)
         elif hasattr(self.model, 'pois') and self.model.pois:
-            available_poi_types = list(self.model.pois.keys())
+            # Fall back to POI dictionary
+            for poi_type, poi_list in self.model.pois.items():
+                for poi_entry in poi_list:
+                    if isinstance(poi_entry, tuple):
+                        node_id, _ = poi_entry
+                    else:
+                        node_id = poi_entry
+                    
+                    if node_id in self.accessible_nodes:
+                        # Skip if this is the last visited node (prevent consecutive visits)
+                        if self.last_visited_node is not None and node_id == self.last_visited_node:
+                            continue
+                        available_poi_options.append(poi_type)
+        
+        # Remove duplicates while preserving order
+        available_poi_types = list(dict.fromkeys(available_poi_options))
         
         if available_poi_types:
             return random.choice(available_poi_types)
         
+        # No suitable POIs available - return None to trigger going home
         return None
 
     def _satisfy_needs_at_poi(self, poi_type):
@@ -396,11 +429,14 @@ class Resident(BaseAgent):
     def increase_needs_over_time(self):
         """
         Gradually increase needs over time to simulate natural need accumulation.
+        With 1-minute time steps, needs increase more slowly.
         """
-        for need_type in self.current_needs:
-            # Increase each need by a small random amount (1-5 points per step)
-            increase = random.randint(1, 5)
-            self.current_needs[need_type] = min(100, self.current_needs[need_type] + increase)
+        # Only increase needs every 15 minutes (every 15 steps) to avoid too rapid changes
+        if self.model.step_count % 15 == 0:
+            for need_type in self.current_needs:
+                # Increase each need by a small random amount (1-3 points per 15 minutes)
+                increase = random.randint(1, 3)
+                self.current_needs[need_type] = min(100, self.current_needs[need_type] + increase)
 
     def step(self):
         """Advance the agent one step"""
@@ -412,15 +448,16 @@ class Resident(BaseAgent):
             
             # Update energy levels
             if self.current_node != self.home_node:
-                # Deplete energy when not at home
-                self.energy = max(0, self.energy - self.energy_depletion_rate)
+                # Deplete energy when not at home - only every 30 minutes to be more realistic
+                if self.model.step_count % 30 == 0:
+                    self.energy = max(0, self.energy - self.energy_depletion_rate)
                 self.home_recharge_counter = 0
             else:
                 # At home - reset recharge counter or recharge energy
                 if self.energy < self.max_energy:
                     self.home_recharge_counter += 1
-                    # Recharge after staying home for 2 time steps
-                    if self.home_recharge_counter >= 2:
+                    # Recharge after staying home for 120 minutes (2 hours)
+                    if self.home_recharge_counter >= 120:
                         self.energy = self.max_energy
                         self.home_recharge_counter = 0
             
@@ -429,6 +466,9 @@ class Resident(BaseAgent):
                 # Cancel any ongoing travel
                 self.traveling = False
                 self.travel_time_remaining = 0
+                
+                # Update last visited node before going home
+                self.last_visited_node = self.current_node
                 
                 # Go straight home
                 self.current_node = self.home_node
@@ -445,6 +485,8 @@ class Resident(BaseAgent):
                 # Check if we've arrived
                 if self.travel_time_remaining <= 0:
                     self.traveling = False
+                    # Update last visited node before changing current node
+                    self.last_visited_node = self.current_node
                     self.current_node = self.destination_node
                     self.geometry = self.destination_geometry
                     self.visited_pois.append(self.destination_node)
@@ -481,7 +523,11 @@ class Resident(BaseAgent):
                 # Choose movement target based on behavior setting
                 target_poi_type = self.choose_movement_target()
                 
-                if target_poi_type:
+                if target_poi_type == 'home':
+                    # Force going home
+                    self.go_home()
+                elif target_poi_type:
+                    # Move to the specified POI type
                     self.move_to_poi(target_poi_type)
                 
         except Exception as e:
@@ -624,3 +670,24 @@ class Resident(BaseAgent):
     def get_memory(self):
         """Return the resident's memory (income and visited POIs)."""
         return self.memory
+
+    def go_home(self):
+        """
+        Move to the home node.
+        
+        Returns:
+            Boolean indicating if the move home was successful
+        """
+        # If already at home or traveling, don't start a new journey
+        if self.current_node == self.home_node or self.traveling:
+            return False
+        
+        # Get home node coordinates for geometry
+        node_coords = self.model.graph.nodes[self.home_node]
+        home_geometry = None
+        if 'x' in node_coords and 'y' in node_coords:
+            from shapely.geometry import Point
+            home_geometry = Point(node_coords['x'], node_coords['y'])
+        
+        # Start traveling home
+        return self.start_travel(self.home_node, home_geometry)
