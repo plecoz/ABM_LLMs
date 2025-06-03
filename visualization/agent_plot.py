@@ -19,8 +19,9 @@ class AgentPlotter:
             try:
                 if hasattr(resident, 'traveling') and resident.traveling:
                     # Get interpolated position for traveling agents
+                    # Option to change the visualization of travelling agents
                     x, y = self._get_interpolated_position(resident, graph)
-                    m = self.base.ax.plot(x, y, 'o', color='#FF5722', markersize=6, alpha=0.8)[0]  # Orange for traveling
+                    m = self.base.ax.plot(x, y, 'o', color='deepskyblue', markersize=6, alpha=0.8)[0]  
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):

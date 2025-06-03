@@ -251,7 +251,8 @@ class SimulationAnimator:
                     x, y = self._get_interpolated_position(resident, progress)
                     
                     # Use a different color for traveling agents
-                    dot = self.ax.plot(x, y, 'o', color='#FF5722', markersize=4, alpha=0.8)[0]  # Orange for traveling
+                    #Option to change the color of the traveling agents
+                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, alpha=0.8)[0]  # Orange for traveling
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):
@@ -344,14 +345,9 @@ class SimulationAnimator:
         legend_elements.append(
             plt.Line2D([0], [0], marker='o', color='w',
                       markerfacecolor='#00BFFF', markersize=8,
-                      label='Stationary Residents')
+                      label='Residents')
         )
         
-        legend_elements.append(
-            plt.Line2D([0], [0], marker='o', color='w',
-                      markerfacecolor='#FF5722', markersize=8,
-                      label='Traveling Residents')
-        )
         
         # Create the legend
         self.ax.legend(handles=legend_elements, 
