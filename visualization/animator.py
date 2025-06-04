@@ -280,12 +280,14 @@ class SimulationAnimator:
                     
                     # Use a different color for traveling agents
                     #Option to change the color of the traveling agents
-                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, alpha=0.8)[0]  
+                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, markeredgecolor='black',
+                                        markeredgewidth=0.5, alpha=0.8)[0]  
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):
                         x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
-                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=3, alpha=0.7)[0]  # Blue for stationary
+                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4,
+                                           markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]  # Blue for stationary
                     else:
                         # Use geometry if available
                         x, y = resident.geometry.x, resident.geometry.y
