@@ -92,7 +92,7 @@ def load_pois_from_file(filepath):
         print(f"Error loading POIs from file: {e}")
         return None
 
-def get_or_fetch_pois(graph, place_name="Macau, China", selected_pois=None, save_path=None, load_path=None):
+def get_or_fetch_pois(graph, place_name, selected_pois=None, save_path=None, load_path=None):
     """
     Load POIs from file if available, otherwise fetch from OSM and optionally save.
     

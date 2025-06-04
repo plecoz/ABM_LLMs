@@ -21,7 +21,7 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
+DEFAULT_PARISHES_PATH = "./data/hongkong_shapefiles/hongkong_districts.gpkg"
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -398,7 +398,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     
     # Use the new save/load functionality for the network
     graph = get_or_load_city_network(
-        place_name="Macau, China",
+        place_name="Hong Kong, China",
         mode="walk",
         save_path=save_network,
         load_path=load_network
@@ -464,7 +464,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Use the new save/load functionality for POIs
         pois = get_or_fetch_pois(
             graph=graph,
-            place_name="Macau, China",
+            place_name="Hong Kong, China",
             selected_pois=selected_pois,
             save_path=save_pois,
             load_path=load_pois
