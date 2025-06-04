@@ -42,8 +42,7 @@ def main():
             steps=120,         # 2 hours for testing
             save_network=network_file,  # Save network after loading
             save_pois=pois_file,       # Save POIs after fetching
-            movement_behavior='random',
-            seed=42  # Fixed seed for reproducible results
+            movement_behavior='random'
         )
         
         print(f"\nFiles saved:")
@@ -72,8 +71,7 @@ def main():
             steps=120,
             load_network=network_file,  # Load network from file
             load_pois=pois_file,       # Load POIs from file
-            movement_behavior='random',
-            seed=42  # Use same seed for reproducible comparison
+            movement_behavior='random'
         )
         
     elif choice == "3":
@@ -92,8 +90,7 @@ def main():
             load_network=network_file,  # Load network from file
             # No load_pois - will fetch from OSM
             save_pois=pois_file,       # Save the fresh POIs
-            movement_behavior='random',
-            seed=42  # Use same seed for reproducible comparison
+            movement_behavior='random'
         )
         
     elif choice == "4":
@@ -118,8 +115,7 @@ def main():
         run_simulation(
             num_residents=50,
             steps=120,
-            movement_behavior='random',
-            seed=42  # Use same seed for reproducible comparison
+            movement_behavior='random'
         )
         
     else:
