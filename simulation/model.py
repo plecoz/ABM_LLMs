@@ -69,8 +69,26 @@ class GeometryEncoder(json.JSONEncoder):
 
 class FifteenMinuteCity(Model):
     def __init__(self, graph, pois, num_residents, **kwargs):
-        super().__init__()  # Mesa 3.x model initialization
+        """
+        Initialize the model.
         
+        Args:
+            graph: NetworkX graph representing the street network
+            pois: Dictionary of POIs by category
+            num_residents: Number of resident agents to create
+            **kwargs: Additional arguments:
+                - parishes_gdf: GeoDataFrame with parish boundaries
+                - parish_demographics: Dictionary of parish-specific demographics
+                - parish_distribution: Dictionary mapping parishes to number of residents
+                - random_distribution: Whether to distribute residents randomly
+                - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
+                - movement_behavior: Agent movement behavior ('need-based' or 'random')
+                - seed: Random seed for reproducible results
+        """
+        # Get random seed from kwargs if provided
+  # Mesa 3.x model initialization with seed
+        super().__init__()
+        random.seed(0)
         # Initialize logger
         self.logger = logging.getLogger("FifteenMinuteCity")
         
@@ -134,7 +152,7 @@ class FifteenMinuteCity(Model):
             self._map_nodes_to_parishes()
         
         self.random = random.Random(kwargs.get('seed', None))
-        
+        #self.random = random.Random(0)
         # Set up scheduler and spatial environment
         self.schedule = CustomRandomActivation(self)
         self.space = GeoSpace()

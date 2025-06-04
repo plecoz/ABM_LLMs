@@ -474,8 +474,6 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     if selected_parishes and parishes_gdf is not None:
         pois = filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes)
     
-
-    
     print(f"Spawning {num_residents} residents...")
     model = FifteenMinuteCity(
         graph, 
@@ -489,7 +487,6 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         movement_behavior=movement_behavior
     )
     
-
     print("Starting simulation...")
     # Set up interactive mode
     plt.ion()  # Turn on interactive mode
@@ -516,7 +513,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
-    parser.add_argument('--residents', type=int, default=100, help='Number of resident agents')
+    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
     parser.add_argument('--steps', type=int, default=480, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')

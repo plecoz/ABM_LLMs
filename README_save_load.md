@@ -19,26 +19,29 @@ The simulation now supports saving and loading the city network and POIs to/from
 - `--load-network PATH`: Load the city network from file instead of OSM
 - `--load-pois PATH`: Load the POIs from file instead of OSM
 
+### Reproducibility
+- `--seed INT`: Set random seed for reproducible results (e.g., `--seed 42`)
+
 ## Usage Examples
 
-### 1. First Run - Save Everything
+### 1. First Run - Save Everything with Fixed Seed
 ```bash
-python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl --residents 50 --steps 120
+python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl --residents 50 --steps 120 --seed 42
 ```
 
-### 2. Fast Subsequent Runs - Load Everything
+### 2. Fast Subsequent Runs - Load Everything with Same Seed
 ```bash
-python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl --residents 50 --steps 120
+python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl --residents 50 --steps 120 --seed 42
 ```
 
 ### 3. Mixed Approach - Load Network, Fresh POIs
 ```bash
-python main.py --load-network data/macau_network.pkl --save-pois data/macau_pois_new.pkl --residents 50 --steps 120
+python main.py --load-network data/macau_network.pkl --save-pois data/macau_pois_new.pkl --residents 50 --steps 120 --seed 42
 ```
 
 ### 4. Save Only Network (POIs from OSM)
 ```bash
-python main.py --save-network data/macau_network.pkl --residents 50 --steps 120
+python main.py --save-network data/macau_network.pkl --residents 50 --steps 120 --seed 42
 ```
 
 ## Interactive Example Script
@@ -49,11 +52,11 @@ Run the example script for a guided experience:
 python example_save_load.py
 ```
 
-This script provides four options:
-1. **First run**: Load from OSM and save to files
+This script provides four options and uses a fixed seed (42) for reproducible results:
+1. **First run**: Load from OSM and save files
 2. **Fast run**: Load from saved files (much faster)
 3. **Mixed run**: Load network from file, fetch fresh POIs
-4. **Clean run**: Delete saved files and start fresh
+4. **Clean run**: Delete files and start fresh
 
 ## File Structure
 
@@ -70,6 +73,7 @@ data/
 - **Network**: Contains the complete NetworkX graph with nodes and edges
 - **POIs**: Contains the dictionary structure with POIs organized by category
 - **Compatibility**: Files are compatible across different runs and parameter combinations
+- **Random Seed**: Affects all random number generators (Python, NumPy, Mesa)
 
 ## Performance Comparison
 
@@ -86,6 +90,7 @@ data/
 3. **Update When Needed**: Fetch fresh data occasionally to get updated POIs
 4. **Backup Files**: Keep backup copies of your saved files
 5. **Version Control**: Consider adding `data/*.pkl` to `.gitignore` due to file size
+6. **Reproducibility**: Use `--seed` with the same value across test runs
 
 ## Troubleshooting
 
@@ -101,6 +106,12 @@ Error loading city network from file: ...
 ```
 **Solution**: The file might be corrupted. Delete it and fetch fresh data from OSM.
 
+### Different Results with Same Seed
+If you get different results with the same seed:
+1. Check if all files are loaded from the same source
+2. Ensure no other random processes are affecting the simulation
+3. Try clearing any cached data and rerunning with a fresh seed
+
 ### Large File Sizes
 - Network files: ~5-15 MB
 - POI files: ~1-5 MB
@@ -114,11 +125,11 @@ The save/load functionality works seamlessly with all existing features:
 - Different movement behaviors (`--movement-behavior`)
 - All other simulation parameters
 
-Example with parishes:
+Example with parishes and fixed seed:
 ```bash
 # Save full data
-python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
+python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl --seed 42
 
-# Load and filter to specific parishes
-python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl --parishes "Sé" "Nossa Senhora de Fátima"
+# Load and filter to specific parishes (same seed for reproducibility)
+python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl --parishes "Sé" "Nossa Senhora de Fátima" --seed 42
 ``` 
