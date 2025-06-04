@@ -109,6 +109,13 @@ class SimulationAnimator:
         # Update visualization - no interpolation progress needed
         self.update()
         
+        # Check if this is the last frame and print output summary
+        if hasattr(self, 'total_frames') and frame >= self.total_frames - 1:
+            print("\nAnimation completed!")
+            # Print output summary if output controller exists
+            if hasattr(self.model, 'output_controller'):
+                self.model.output_controller.print_travel_summary()
+        
         return self.agent_dots
         
         # Commented out frame interpolation code:
@@ -128,6 +135,8 @@ class SimulationAnimator:
         """Start the animation loop - now one frame per simulation step"""
         # No longer need to multiply by frames_per_step since we update every step
         total_frames = num_steps
+        self.total_frames = total_frames  # Store for completion check
+        
         self.animation = FuncAnimation(
             self.fig,
             self.animate,
@@ -136,6 +145,7 @@ class SimulationAnimator:
             blit=True,
             repeat=False
         )
+        
         plt.show()
         
         # Commented out frame interpolation code:

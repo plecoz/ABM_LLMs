@@ -185,6 +185,15 @@ class Resident(BaseAgent):
         self.destination_node = target_node
         self.destination_geometry = target_geometry
         
+        # Notify output controller about travel start
+        if hasattr(self.model, 'output_controller'):
+            self.model.output_controller.track_travel_start(
+                agent_id=self.unique_id,
+                from_node=self.current_node,
+                to_node=target_node,
+                travel_time=travel_time
+            )
+        
         return True
 
     def move_to_poi(self, poi_type):

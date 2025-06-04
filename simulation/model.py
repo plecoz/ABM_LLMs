@@ -15,6 +15,7 @@ import pandas as pd
 from mesa_geo import GeoSpace
 from mesa.datacollection import DataCollector
 import geopandas as gpd
+from outputs import OutputController
 
 
 # Set up logging
@@ -178,6 +179,9 @@ class FifteenMinuteCity(Model):
                 "Travel_Time_Remaining": lambda a: getattr(a, 'travel_time_remaining', 0)
             }
         )
+        
+        # Initialize output controller for tracking metrics
+        self.output_controller = OutputController(self)
         
         # Create resident agents with proportional distribution
         self._create_residents_with_distribution(num_residents)
