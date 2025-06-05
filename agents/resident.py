@@ -102,6 +102,10 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
+        # Waiting time tracking (new)
+        self.waiting_at_poi = False
+        self.waiting_time_remaining = 0
+        
         # Memory module
         self.memory = {
             'income': self.income,
@@ -502,10 +506,12 @@ class Resident(BaseAgent):
                     
                     # Add resident to POI's visitors if it's a POI agent
                     visited_poi_type = None
+                    visited_poi_agent = None
                     for poi in self.model.poi_agents:
                         if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
                             poi.visitors.add(self.unique_id)
                             visited_poi_type = poi.poi_type
+                            visited_poi_agent = poi
                             # --- MEMORY MODULE: Record visit ---
                             self.memory['visited_pois'].append({
                                 'step': getattr(self.model, 'step_count', None),
@@ -514,7 +520,22 @@ class Resident(BaseAgent):
                                 'category': getattr(poi, 'category', None),
                                 'income': self.income
                             })
+                            
+                            # Print POI visits for resident 0
+                            #if self.unique_id == 0:
+                            #    current_step = getattr(self.model, 'step_count', 'Unknown')
+                            #    visited_poi_ids = [visit['poi_id'] for visit in self.memory['visited_pois']]
+                            #    print(f"Step {current_step}: Resident 0 visited POIs {visited_poi_ids}")
+                            
                             break
+                    
+                    # Start waiting at POI if it has waiting time
+                    if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
+                        waiting_time = visited_poi_agent.get_waiting_time()
+                        if waiting_time > 0:
+                            self.waiting_at_poi = True
+                            self.waiting_time_remaining = waiting_time
+                            print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
                     
                     # Satisfy needs if we're using need-based movement and visited a POI
                     if self.movement_behavior == 'need-based' and visited_poi_type:
@@ -525,6 +546,18 @@ class Resident(BaseAgent):
                     self.destination_geometry = None
                 
                 # Still traveling, don't take any other movement actions
+                return
+            
+            # Handle waiting at POI
+            if self.waiting_at_poi:
+                self.waiting_time_remaining -= 1
+                
+                # Check if waiting is finished
+                if self.waiting_time_remaining <= 0:
+                    self.waiting_at_poi = False
+                    print(f"Resident {self.unique_id} finished waiting at POI")
+                
+                # Still waiting, don't take any other movement actions
                 return
             
             # Regular movement behavior - only if energy is not depleted and not traveling
