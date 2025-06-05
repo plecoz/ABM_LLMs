@@ -506,11 +506,10 @@ class Resident(BaseAgent):
                                 'income': self.income
                             })
                             
-                            # Print POI visits for resident 0
-                            #if self.unique_id == 0:
-                            #    current_step = getattr(self.model, 'step_count', 'Unknown')
-                            #    visited_poi_ids = [visit['poi_id'] for visit in self.memory['visited_pois']]
-                            #    print(f"Step {current_step}: Resident 0 visited POIs {visited_poi_ids}")
+                            # Track POI visit in output controller
+                            if visited_poi_agent and hasattr(self.model, 'output_controller'):
+                                poi_category = getattr(visited_poi_agent, 'category', 'other')
+                                self.model.output_controller.track_poi_visit(poi_category)
                             
                             break
                     
@@ -521,6 +520,11 @@ class Resident(BaseAgent):
                             self.waiting_at_poi = True
                             self.waiting_time_remaining = waiting_time
                             print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
+                            
+                            # Track waiting time in output controller
+                            if hasattr(self.model, 'output_controller'):
+                                poi_category = getattr(visited_poi_agent, 'category', 'other')
+                                self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
                     
                     # Satisfy needs if we're using need-based movement and visited a POI
                     if self.movement_behavior == 'need-based' and visited_poi_type:

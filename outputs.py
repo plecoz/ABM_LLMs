@@ -32,6 +32,17 @@ class OutputController:
         self.agent_travel_times = {}  # Individual agent travel times
         self.travel_events = []  # List of travel events for detailed analysis
         
+        # New tracking variables for waiting and POI visits
+        self.total_waiting_time = 0  # Total minutes spent waiting at POIs by all agents
+        self.agent_waiting_times = {}  # Individual agent waiting times
+        self.poi_visits_by_category = {  # Track POI visits by category
+            "daily_living": 0,
+            "healthcare": 0,
+            "education": 0,
+            "entertainment": 0,
+            "transportation": 0
+        }
+        
         # Other potential metrics (for future expansion)
         self.poi_visits = {}  # Track POI visit counts
         self.energy_stats = {}  # Track energy consumption
@@ -68,6 +79,42 @@ class OutputController:
         
         self.logger.debug(f"Agent {agent_id} started travel: {travel_time} minutes from {from_node} to {to_node}")
     
+    def track_waiting_start(self, agent_id: int, poi_category: str, waiting_time: int):
+        """
+        Track when an agent starts waiting at a POI.
+        
+        Args:
+            agent_id: ID of the waiting agent
+            poi_category: Category of the POI (daily_living, healthcare, etc.)
+            waiting_time: Expected waiting time in minutes
+        """
+        # Initialize agent waiting time if not exists
+        if agent_id not in self.agent_waiting_times:
+            self.agent_waiting_times[agent_id] = 0
+        
+        # Add to total waiting time
+        self.total_waiting_time += waiting_time
+        self.agent_waiting_times[agent_id] += waiting_time
+        
+        self.logger.debug(f"Agent {agent_id} started waiting: {waiting_time} minutes at {poi_category} POI")
+    
+    def track_poi_visit(self, poi_category: str):
+        """
+        Track a POI visit by category.
+        
+        Args:
+            poi_category: Category of the POI being visited
+        """
+        if poi_category in self.poi_visits_by_category:
+            self.poi_visits_by_category[poi_category] += 1
+        else:
+            # Handle unknown categories
+            if "other" not in self.poi_visits_by_category:
+                self.poi_visits_by_category["other"] = 0
+            self.poi_visits_by_category["other"] += 1
+        
+        self.logger.debug(f"POI visit tracked: {poi_category}")
+    
     def get_total_travel_time(self) -> int:
         """
         Get the total travel time for all agents.
@@ -96,6 +143,24 @@ class OutputController:
         if not self.agent_travel_times:
             return 0.0
         return self.total_travel_time / len(self.agent_travel_times)
+    
+    def get_total_waiting_time(self) -> int:
+        """
+        Get the total waiting time for all agents.
+        
+        Returns:
+            Total waiting time in minutes
+        """
+        return self.total_waiting_time
+    
+    def get_poi_visits_by_category(self) -> Dict[str, int]:
+        """
+        Get POI visits by category.
+        
+        Returns:
+            Dictionary mapping POI categories to visit counts
+        """
+        return self.poi_visits_by_category.copy()
     
     def print_travel_summary(self):
         """
@@ -129,6 +194,27 @@ class OutputController:
             avg_trip_length = sum(event['travel_time'] for event in self.travel_events) / len(self.travel_events)
             print(f"Average trip length: {avg_trip_length:.1f} minutes")
         
+        # Waiting time statistics
+        print(f"\nTotal waiting time (all agents): {self.total_waiting_time} minutes")
+        print(f"Total waiting time (all agents): {self.total_waiting_time / 60:.1f} hours")
+        
+        if self.agent_waiting_times:
+            print(f"Number of agents that waited: {len(self.agent_waiting_times)}")
+            avg_waiting_per_agent = self.total_waiting_time / len(self.agent_waiting_times)
+            print(f"Average waiting time per agent: {avg_waiting_per_agent:.1f} minutes")
+        else:
+            print("No agents waited at POIs during the simulation.")
+        
+        # POI visit statistics
+        print(f"\nPOI visits by category:")
+        total_visits = sum(self.poi_visits_by_category.values())
+        print(f"Total POI visits: {total_visits}")
+        
+        for category, count in self.poi_visits_by_category.items():
+            if count > 0:
+                percentage = (count / total_visits * 100) if total_visits > 0 else 0
+                print(f"  - {category.replace('_', ' ').title()}: {count} visits ({percentage:.1f}%)")
+        
         print("="*60)
     
     def save_detailed_report(self, filepath: str = None):
@@ -155,6 +241,16 @@ class OutputController:
                 'agent_travel_times': self.agent_travel_times,
                 'total_travel_events': len(self.travel_events)
             },
+            'waiting_statistics': {
+                'total_waiting_time_minutes': self.total_waiting_time,
+                'total_waiting_time_hours': self.total_waiting_time / 60,
+                'agent_waiting_times': self.agent_waiting_times,
+                'number_of_agents_that_waited': len(self.agent_waiting_times)
+            },
+            'poi_visit_statistics': {
+                'visits_by_category': self.poi_visits_by_category,
+                'total_visits': sum(self.poi_visits_by_category.values())
+            },
             'travel_events': self.travel_events
         }
         
@@ -176,6 +272,15 @@ class OutputController:
         self.total_travel_time = 0
         self.agent_travel_times = {}
         self.travel_events = []
+        self.total_waiting_time = 0
+        self.agent_waiting_times = {}
+        self.poi_visits_by_category = {
+            "daily_living": 0,
+            "healthcare": 0,
+            "education": 0,
+            "entertainment": 0,
+            "transportation": 0
+        }
         self.poi_visits = {}
         self.energy_stats = {}
         self.parish_mobility = {}
