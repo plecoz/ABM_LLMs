@@ -118,55 +118,40 @@ class Resident(BaseAgent):
 
     def calculate_travel_time(self, from_node, to_node):
         """
-        Calculate the travel time between two nodes based on distance and agent's speed.
+        Calculate the travel time between two nodes based on 80-meter steps.
+        Each step represents 80 meters of walking distance (1 minute at 5km/h).
+        Always rounds up to ensure the agent doesn't move more than 80m per step.
         
         Args:
             from_node: Starting node ID
             to_node: Destination node ID
             
         Returns:
-            Number of time steps needed for travel (each step is 1 minute)
+            Number of time steps needed for travel (each step is 1 minute = 80 meters)
         """
-        # Get the distance in meters from the accessible_nodes dictionary
-        # or calculate using shortest path if not directly accessible
-        if to_node in self.accessible_nodes:
-            distance_meters = self.accessible_nodes[to_node]
-        else:
-            try:
-                # Calculate shortest path length
-                distance_meters = nx.shortest_path_length(
-                    self.model.graph, 
-                    from_node, 
-                    to_node, 
-                    weight='length'
-                )
-            except (nx.NetworkXNoPath, KeyError):
-                self.logger.warning(f"No path found from {from_node} to {to_node}")
-                return None
+        # Always calculate the actual shortest path length for consistency
+        try:
+            # Calculate shortest path length along the street network
+            distance_meters = nx.shortest_path_length(
+                self.model.graph, 
+                from_node, 
+                to_node, 
+                weight='length'
+            )
+        except (nx.NetworkXNoPath, KeyError):
+            self.logger.warning(f"No path found from {from_node} to {to_node}")
+            return None
 
-        # Convert distance from meters to kilometers
-        distance_km = distance_meters / 1000
+        # Calculate number of 80-meter steps needed
+        # Always round UP to ensure no step exceeds 80 meters
+        steps_needed = math.ceil(distance_meters / 80.0)
         
-        # Calculate travel time in hours
-        travel_time_hours = distance_km / self.speed
-        
-        # Convert to minutes
-        travel_time_minutes = travel_time_hours * 60
-        
-        # Convert to number of time steps (1-minute steps)
-        time_steps_exact = travel_time_minutes
-        
-        # Round according to the specified rule
-        time_steps_floor = math.floor(time_steps_exact)
-        remainder_minutes = time_steps_exact - time_steps_floor
-        
-        if remainder_minutes < 0.5:  # Less than 30 seconds
-            time_steps = time_steps_floor
-        else:
-            time_steps = math.ceil(time_steps_exact)
+        # Debug output for resident 0
+        if hasattr(self, 'unique_id') and self.unique_id == 0:
+            print(f"Resident 0: Distance {distance_meters:.1f}m → {steps_needed} steps (80m each)")
         
         # Ensure at least 1 time step
-        return max(1, time_steps)
+        return max(1, steps_needed)
 
     def start_travel(self, target_node, target_geometry):
         """

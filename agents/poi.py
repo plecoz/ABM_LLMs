@@ -81,7 +81,7 @@ class POI(BaseAgent):
             Base service time in minutes
         """
         # Set all POI types to have 5 minutes service time
-        return 30
+        return 5
     
     def _determine_category(self, poi_type):
         """

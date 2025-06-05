@@ -168,6 +168,7 @@ class SimulationAnimator:
     def _get_interpolated_position(self, resident, progress):
         """
         Calculate the interpolated position of a traveling resident along the path.
+        Now works with 80-meter steps where each step = 80 meters of travel.
         
         Args:
             resident: The resident agent that is traveling
@@ -196,65 +197,70 @@ class SimulationAnimator:
             if len(path) <= 1:
                 return self.graph.nodes[start_node]['x'], self.graph.nodes[start_node]['y']
                 
-            # Calculate total travel time and remaining time
-            total_time = resident.travel_time_remaining + 1  # +1 because we've already decremented by 1
-            # Adjust progress to account for both the step progress and the interpolation progress
-            continuous_progress = 1 - ((resident.travel_time_remaining - progress) / total_time)
-            continuous_progress = max(0, min(1, continuous_progress))  # Clamp between 0 and 1
-            
-            # Calculate cumulative distances along the path
-            distances = [0]  # Start with 0 distance
+            # Calculate total path distance
             total_distance = 0
-            
             for i in range(len(path) - 1):
                 node1, node2 = path[i], path[i + 1]
-                # Get edge data
-                edge_data = self.graph.get_edge_data(node1, node2, 0)  # 0 is the default key for MultiDiGraph
-                # Get length or calculate Euclidean distance
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 if 'length' in edge_data:
-                    distance = edge_data['length']
+                    total_distance += edge_data['length']
                 else:
                     x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
                     x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
-                    distance = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                    total_distance += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+            
+            # Calculate how far the agent should be along the path
+            # We need to know the original travel time to calculate progress correctly
+            # Since we don't store the original travel time, we'll calculate it from the path
+            original_travel_time = max(1, int(np.ceil(total_distance / 80.0)))
+            
+            # Calculate how many steps have been completed
+            steps_completed = original_travel_time - resident.travel_time_remaining
+            
+            # Add progress within the current step (0 to 1)
+            total_progress = steps_completed + progress
+            
+            # Calculate distance traveled so far (80 meters per step)
+            distance_traveled = total_progress * 80.0
+            
+            # Clamp to total distance to avoid overshooting
+            distance_traveled = min(distance_traveled, total_distance)
+            
+            # Find position along the path
+            current_distance = 0
+            for i in range(len(path) - 1):
+                node1, node2 = path[i], path[i + 1]
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 
-                total_distance += distance
-                distances.append(total_distance)
-            
-            # Normalize distances to 0-1 range
-            if total_distance > 0:
-                distances = [d / total_distance for d in distances]
-            
-            # Find which segment the agent is on
-            target_distance = continuous_progress
-            segment_idx = 0
-            while segment_idx < len(distances) - 1 and distances[segment_idx + 1] < target_distance:
-                segment_idx += 1
+                if 'length' in edge_data:
+                    segment_length = edge_data['length']
+                else:
+                    x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
+                    x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
+                    segment_length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
                 
-            # If we're at the last node
-            if segment_idx >= len(distances) - 1:
-                return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
+                # Check if the target distance is within this segment
+                if current_distance + segment_length >= distance_traveled:
+                    # Interpolate within this segment
+                    segment_progress = (distance_traveled - current_distance) / segment_length
+                    segment_progress = max(0, min(1, segment_progress))  # Clamp to [0,1]
+                    
+                    # Get segment start and end positions
+                    start_x = self.graph.nodes[node1]['x']
+                    start_y = self.graph.nodes[node1]['y']
+                    end_x = self.graph.nodes[node2]['x']
+                    end_y = self.graph.nodes[node2]['y']
+                    
+                    # Interpolate position
+                    x = start_x + segment_progress * (end_x - start_x)
+                    y = start_y + segment_progress * (end_y - start_y)
+                    
+                    return x, y
                 
-            # Calculate interpolation within the segment
-            start_dist = distances[segment_idx]
-            end_dist = distances[segment_idx + 1]
+                current_distance += segment_length
             
-            if end_dist == start_dist:  # Avoid division by zero
-                segment_progress = 0
-            else:
-                segment_progress = (target_distance - start_dist) / (end_dist - start_dist)
-                
-            # Get segment start and end positions
-            start_x = self.graph.nodes[path[segment_idx]]['x']
-            start_y = self.graph.nodes[path[segment_idx]]['y']
-            end_x = self.graph.nodes[path[segment_idx + 1]]['x']
-            end_y = self.graph.nodes[path[segment_idx + 1]]['y']
-            
-            # Interpolate position
-            x = start_x + segment_progress * (end_x - start_x)
-            y = start_y + segment_progress * (end_y - start_y)
-            
-            return x, y
+            # If we've gone through all segments, return the end position
+            return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
             
         except Exception as e:
             # If there's any error, return the current position
