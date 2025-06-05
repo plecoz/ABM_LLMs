@@ -384,7 +384,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None):
     """
     Run the 15-minute city simulation.
     
@@ -393,6 +393,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_network: Path to load the network from (instead of OSM)
         save_pois: Path to save the POIs after fetching from OSM
         load_pois: Path to load the POIs from (instead of OSM)
+        save_json_report: Path to save the detailed JSON report (optional)
     """
     print("Loading Macau's street network...")
     
@@ -504,6 +505,11 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     # Start the animation loop
     animator.start_animation(steps, interval=50)  # 50ms between frames
     
+    # Save JSON report if requested
+    if save_json_report:
+        print(f"\nSaving detailed JSON report to: {save_json_report}")
+        model.output_controller.save_detailed_report(save_json_report)
+    
     plt.ioff()  # Turn off interactive mode
     plt.show()  # Keep window open at end
 
@@ -536,6 +542,9 @@ if __name__ == "__main__":
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
     
+    # JSON report argument
+    parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
+    #python main.py --save-json-report reports/my_simulation.json
     args = parser.parse_args()
     
     # Get POI configuration
@@ -568,5 +577,6 @@ if __name__ == "__main__":
         save_network=args.save_network,
         load_network=args.load_network,
         save_pois=args.save_pois,
-        load_pois=args.load_pois
+        load_pois=args.load_pois,
+        save_json_report=args.save_json_report
     )
