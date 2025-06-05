@@ -80,26 +80,8 @@ class POI(BaseAgent):
         Returns:
             Base service time in minutes
         """
-        # Define base service times for different POI types (in minutes)
-        service_times = {
-            'supermarket': 15,
-            'grocery': 10,
-            'bank': 20,
-            'restaurant': 45,
-            'cafe': 15,
-            'barber': 30,
-            'pharmacy': 10,
-            'convenience': 5,
-            'marketplace': 20
-        }
-        
-        # Find the matching POI type
-        for poi_type, time in service_times.items():
-            if poi_type in self.poi_type.lower():
-                return time
-        
-        # Default service time
-        return 15
+        # Set all POI types to have 5 minutes service time
+        return 30
     
     def _determine_category(self, poi_type):
         """
@@ -269,7 +251,8 @@ class POI(BaseAgent):
         if not self.has_waiting_time:
             return 0
         
-        return max(0, round(self.current_waiting_time))
+        #return max(0, round(self.current_waiting_time))
+        return self.base_service_time
     
     def get_info(self):
         """

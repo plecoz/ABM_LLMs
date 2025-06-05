@@ -21,7 +21,7 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/hongkong_shapefiles/hongkong_districts.gpkg"
+DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
