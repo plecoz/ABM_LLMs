@@ -32,13 +32,12 @@ MACAU_PARISH_PROPORTIONS = {
     "So Loureno": 0.082,       # 8.2%
     "S": 0.083,                 # 8.3%
     "Nossa Senhora de Ftima": 0.368,  # 36.8%
-    "Nossa Senhora do Carmo": 0.155,   # 15.5%
-    "So Francisco Xavier": 0.054,     # 5.4%
-    "Zona do Aterro de Cotai": 0.005   # 0.5%
+    "Taipa": 0.160,            # 16.0% (Nossa Senhora do Carmo 15.5% + Zona do Aterro de Cotai 0.5%)
+    "Coloane": 0.054,          # 5.4% (formerly So Francisco Xavier)
 }
 
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
 
 def load_parishes(shapefile_path=None):
     """
@@ -530,7 +529,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
     parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
