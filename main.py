@@ -21,7 +21,9 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
+#DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
+#Shapefile path for barcelona parishes
+DEFAULT_PARISHES_PATH = "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg"
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -539,6 +541,7 @@ if __name__ == "__main__":
     #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
     parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
     #python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
     
@@ -546,8 +549,9 @@ if __name__ == "__main__":
     parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
     #python main.py --save-json-report reports/my_simulation.json
     args = parser.parse_args()
-    
-    # Get POI configuration
+    #Good simulations :
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
+        # Get POI configuration
     if args.essential_only:
         try:
             from config.poi_config import ESSENTIAL_SERVICES_ONLY
