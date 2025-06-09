@@ -93,6 +93,9 @@ class FifteenMinuteCity(Model):
         # Initialize logger
         self.logger = logging.getLogger("FifteenMinuteCity")
         
+        # Store city name
+        self.city = kwargs.get('city', 'Macau, China')
+        
         self.graph = graph
         self.pois = pois
         self.grid = NetworkGrid(graph)
@@ -394,11 +397,9 @@ class FifteenMinuteCity(Model):
 
     def _generate_agent_properties(self, parish=None):
         """
-        Generate agent properties based on demographic distributions using hierarchical probabilistic approach.
-        
-        1. First selects age class based on parish age distribution
-        2. Then selects gender based on age class and parish gender distribution  
-        3. Then selects education based on age class, gender, and parish education distribution
+        Generate agent properties based on demographic distributions.
+        If a parish is specified and parish-specific demographics exist,
+        use those instead of the global demographics.
         
         Args:
             parish: The parish name to use for demographics (optional)
@@ -407,64 +408,18 @@ class FifteenMinuteCity(Model):
             Dictionary of agent properties
         """
         # Use parish-specific demographics if available
-        parish_demographics = None
+        demographics = self.demographics
         if parish and parish in self.parish_demographics:
-            parish_demographics = self.parish_demographics[parish]
+            demographics = self.parish_demographics[parish]
         
-        if not parish_demographics:
-            # Fall back to global demographics (simplified version)
-            return self._generate_agent_properties_fallback()
+        if not demographics:
+            return {}
         
         props = {}
         
-        # Step 1: Generate age class based on parish age distribution
-        age_dist = parish_demographics.get('age_distribution', {})
-        if not age_dist:
-            return self._generate_agent_properties_fallback()
-        
-        age_class = self._sample_from_distribution(age_dist)
-        
-        # Convert age class to actual age
-        props['age_class'] = age_class
-        props['age'] = self._age_class_to_age(age_class)
-        
-        # Step 2: Generate gender based on age class and parish gender distribution
-        gender_by_age = parish_demographics.get('gender_by_age', {})
-        if age_class in gender_by_age:
-            gender_dist = gender_by_age[age_class]
-            props['gender'] = self._sample_from_distribution(gender_dist)
-        else:
-            # Fallback to balanced gender distribution
-            props['gender'] = self.random.choice(['male', 'female'])
-        
-        # Step 3: Generate education based on age class, gender, and parish education distribution
-        education_by_age_gender = parish_demographics.get('education_distribution_by_age_and_gender', {})
-        if age_class in education_by_age_gender and props['gender'] in education_by_age_gender[age_class]:
-            education_dist = education_by_age_gender[age_class][props['gender']]
-            # Flatten the nested education structure
-            flattened_education_dist = self._flatten_education_distribution(education_dist)
-            props['education'] = self._sample_from_distribution(flattened_education_dist)
-        else:
-            # Fallback education
-            props['education'] = 'Secondary education'
-        
-        # Set default values for employment and income (to be updated later)
-        props['employment_status'] = "employed"  # Placeholder
-        props['household_type'] = "single"  # Placeholder
-        props['income'] = 50000  # Placeholder - will be based on employment and education later
-        
-        return props
-    
-    def _generate_agent_properties_fallback(self):
-        """
-        Fallback method for generating agent properties when parish-specific data is not available.
-        Uses the original approach with global demographics.
-        """
-        props = {}
-        
-        # Generate age using global distribution
-        age_dist = self.demographics.get('age_distribution', {})
-        age_group = self._sample_from_distribution(age_dist) if age_dist else "19-35"
+        # Generate age
+        age_dist = demographics.get('age_distribution', {})
+        age_group = self._sample_from_distribution(age_dist)
         
         # Convert age group to actual age
         if age_group == "0-18":
@@ -477,79 +432,46 @@ class FifteenMinuteCity(Model):
             props['age'] = self.random.randint(65, 90)
         
         # Generate gender
-        gender_dist = self.demographics.get('gender_distribution', {})
-        props['gender'] = self._sample_from_distribution(gender_dist) if gender_dist else 'male'
+        gender_dist = demographics.get('gender_distribution', {})
+        props['gender'] = self._sample_from_distribution(gender_dist)
+        
+        # Generate income
+        income_dist = demographics.get('income_distribution', {})
+        income_level = self._sample_from_distribution(income_dist)
+        
+        # Convert income level to actual income - use parish-specific ranges if available
+        income_ranges = demographics.get('income_ranges', {
+            "low": (10000, 30000),
+            "medium": (30001, 100000),
+            "high": (100001, 500000)
+        })
+        
+        if income_level in income_ranges:
+            min_val, max_val = income_ranges[income_level]
+            props['income'] = self.random.randint(min_val, max_val)
+        else:
+            # Fallback to default ranges
+            if income_level == "low":
+                props['income'] = self.random.randint(10000, 30000)
+            elif income_level == "medium":
+                props['income'] = self.random.randint(30001, 100000)
+            else:  # high
+                props['income'] = self.random.randint(100001, 500000)
         
         # Generate education
-        education_dist = self.demographics.get('education_distribution', {})
-        props['education'] = self._sample_from_distribution(education_dist) if education_dist else 'high_school'
-        
-        # Generate income (simplified)
-        income_dist = self.demographics.get('income_distribution', {})
-        income_level = self._sample_from_distribution(income_dist) if income_dist else 'medium'
-        
-        if income_level == "low":
-            props['income'] = self.random.randint(10000, 30000)
-        elif income_level == "medium":
-            props['income'] = self.random.randint(30001, 100000)
-        else:  # high
-            props['income'] = self.random.randint(100001, 500000)
-        
-        # Default values
+        education_dist = demographics.get('education_distribution', {})
+        props['education'] = self._sample_from_distribution(education_dist)
+
+        # Default values for employment status and household type
+        # These will be initialized later with sociodemographic data
         props['employment_status'] = "employed"
         props['household_type'] = "single"
         
+        # We no longer add parish to props since it's passed separately
+        # This avoids the "got multiple values for keyword argument 'parish'" error
+        
         return props
     
-    def _age_class_to_age(self, age_class):
-        """
-        Convert age class string to actual age integer.
-        
-        Args:
-            age_class: Age class string (e.g., "20-24", "25-29", etc.)
-            
-        Returns:
-            Random integer age within the age class range
-        """
-        if age_class == "85+":
-            return self.random.randint(85, 95)
-        
-        try:
-            # Parse age range (e.g., "20-24" -> 20, 24)
-            age_parts = age_class.split('-')
-            if len(age_parts) == 2:
-                min_age = int(age_parts[0])
-                max_age = int(age_parts[1])
-                return self.random.randint(min_age, max_age)
-        except (ValueError, IndexError):
-            pass
-        
-        # Fallback to default age
-        return 30
-    
-    def _flatten_education_distribution(self, education_dist):
-        """
-        Flatten the nested education distribution structure.
-        
-        Args:
-            education_dist: Nested dictionary with education levels and sub-levels
-            
-        Returns:
-            Flattened dictionary with education options and their probabilities
-        """
-        flattened = {}
-        
-        for edu_level, value in education_dist.items():
-            if isinstance(value, dict):
-                # Handle nested structure like "Primary education": {"complete": 0.03, "incomplete": 0.01}
-                for sub_level, prob in value.items():
-                    combined_key = f"{edu_level} ({sub_level})"
-                    flattened[combined_key] = prob
-            else:
-                # Handle direct values like "Tertiary education": 0.35
-                flattened[edu_level] = value
-        
-        return flattened
 
     def _sample_from_distribution(self, distribution):
         """

@@ -385,7 +385,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China'):
     """
     Run the 15-minute city simulation.
     
@@ -395,12 +395,13 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         save_pois: Path to save the POIs after fetching from OSM
         load_pois: Path to load the POIs from (instead of OSM)
         save_json_report: Path to save the detailed JSON report (optional)
+        city: Name of the city for the simulation (default: 'Macau, China')
     """
-    print("Loading Macau's street network...")
+    print(f"Loading {city}'s street network...")
     
     # Use the new save/load functionality for the network
     graph = get_or_load_city_network(
-        place_name="Hong Kong, China",
+        place_name=city,
         mode="walk",
         save_path=save_network,
         load_path=load_network
@@ -466,7 +467,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Use the new save/load functionality for POIs
         pois = get_or_fetch_pois(
             graph=graph,
-            place_name="Hong Kong, China",
+            place_name=city,
             selected_pois=selected_pois,
             save_path=save_pois,
             load_path=load_pois
@@ -478,15 +479,16 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     
     print(f"Spawning {num_residents} residents...")
     model = FifteenMinuteCity(
-        graph, 
-        pois, 
+        graph=graph,
+        pois=pois,
         num_residents=num_residents,
         parishes_gdf=parishes_gdf,
         parish_demographics=parish_demographics,
         parish_distribution=parish_distribution,
         random_distribution=random_distribution,
         needs_selection=needs_selection,
-        movement_behavior=movement_behavior
+        movement_behavior=movement_behavior,
+        city=city
     )
     
     print("Starting simulation...")
@@ -546,7 +548,10 @@ if __name__ == "__main__":
     
     # JSON report argument
     parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
-    #python main.py --save-json-report reports/my_simulation.json
+    
+    # City argument
+    parser.add_argument('--city', type=str, default='Macau, China', help='City name for the simulation (default: Macau, China)')
+    
     args = parser.parse_args()
     #Good simulations :
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
@@ -581,5 +586,6 @@ if __name__ == "__main__":
         load_network=args.load_network,
         save_pois=args.save_pois,
         load_pois=args.load_pois,
-        save_json_report=args.save_json_report
+        save_json_report=args.save_json_report,
+        city=args.city
     )
