@@ -456,14 +456,15 @@ class SimulationAnimator:
         scale_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
     
     def _add_north_arrow(self):
-        """Add a north arrow to the top right of the map"""
+        """Add a north arrow above the scale bar in the bottom left area"""
         # Get the current axis limits
         xlim = self.ax.get_xlim()
         ylim = self.ax.get_ylim()
         
-        # Position the north arrow (top right corner with margins)
-        arrow_x = xlim[1] - (xlim[1] - xlim[0]) * 0.08
-        arrow_y = ylim[1] - (ylim[1] - ylim[0]) * 0.08
+        # Position the north arrow above the scale bar (bottom left area)
+        # Scale bar is at 5% from edges, so place arrow at same x but higher y
+        arrow_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        arrow_y = ylim[0] + (ylim[1] - ylim[0]) * 0.12  # Above scale bar area
         
         # Calculate arrow size
         arrow_length = (ylim[1] - ylim[0]) * 0.04
