@@ -46,8 +46,39 @@ class Resident(BaseAgent):
         
         # Movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
-        
 
+
+        self.employment = {
+            "No schooling / Pre-primary education": {
+                "employed": 0.204859253,
+            },
+            "Primary education": {
+                "incomplete": {
+                    "employed": 0.347652163,
+                },
+                "complete": {
+                    "employed": 0.487596097,
+                },
+            },
+            "Secondary education": {
+                "Junior": {
+                    "employed": 0.586663197,
+                },
+                "Senior": {
+                    "employed": 0.607928076,
+                },
+            },
+            "Diploma programme": {
+                "employed": 0.747351695,
+            },
+            "Tertiary education": {
+                "employed": 0.801285549,
+            },
+            "Others": {
+                "employed": 0.196492271,
+            }
+        }
+        
         # Dynamic needs (placeholder - to be implemented later)
         self.dynamic_needs = {
             "hunger": 0,
