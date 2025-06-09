@@ -21,9 +21,9 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-#DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_districts.gpkg"
+DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_new_districts.gpkg"
 #Shapefile path for barcelona parishes
-DEFAULT_PARISHES_PATH = "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg"
+#DEFAULT_PARISHES_PATH = "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg"
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -32,7 +32,7 @@ MACAU_PARISH_PROPORTIONS = {
     "So Loureno": 0.082,       # 8.2%
     "S": 0.083,                 # 8.3%
     "Nossa Senhora de Ftima": 0.368,  # 36.8%
-    "Taipa": 0.160,            # 16.0% (Nossa Senhora do Carmo 15.5% + Zona do Aterro de Cotai 0.5%)
+    "Taipa": 0.160,            # 16.0% 
     "Coloane": 0.054,          # 5.4% (formerly So Francisco Xavier)
 }
 
@@ -539,7 +539,7 @@ if __name__ == "__main__":
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
     #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
     parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
-    #python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl
+    #python main.py --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
