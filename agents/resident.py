@@ -51,31 +51,39 @@ class Resident(BaseAgent):
         self.employment = {
             "No schooling / Pre-primary education": {
                 "employed": 0.204859253,
+                "unemployed or inactive": 0.795140747
             },
             "Primary education": {
                 "incomplete": {
                     "employed": 0.347652163,
+                    "unemployed or inactive": 0.652347837
                 },
                 "complete": {
                     "employed": 0.487596097,
-                },
+                    "unemployed or inactive": 0.512403903
+                }
             },
             "Secondary education": {
                 "Junior": {
                     "employed": 0.586663197,
+                    "unemployed or inactive": 0.413336803
                 },
                 "Senior": {
                     "employed": 0.607928076,
-                },
+                    "unemployed or inactive": 0.392071924
+                }
             },
             "Diploma programme": {
                 "employed": 0.747351695,
+                "unemployed or inactive": 0.252648305
             },
             "Tertiary education": {
                 "employed": 0.801285549,
+                "unemployed or inactive": 0.198714451
             },
             "Others": {
                 "employed": 0.196492271,
+                "unemployed or inactive": 0.803507729
             }
         }
         
