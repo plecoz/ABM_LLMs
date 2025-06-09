@@ -311,7 +311,7 @@ try:
     # Download Macau street network
     print("Downloading 'Macau, China' street network...")
     graph = ox.graph_from_place(
-        "Macau, China", 
+        "Hong Kong, China", 
         network_type="walk",  # Pedestrian paths only
         simplify=True        # Clean topological artifacts
     )
@@ -322,11 +322,11 @@ try:
     print(f"- Total walkable length: {ox.stats.edge_length_total(graph)/1000:.1f} km")
     
     # Initialize POI classes
-    daily_pois = DailyPOIs('Macau, China')
-    healthcare_pois = HealthcarePOIs('Macau, China')
-    education_pois = EducationPOIs('Macau, China')
-    entertainment_pois = EntertainmentPOIs('Macau, China')
-    transportation_pois = PublicTransportationPOIs('Macau, China')
+    daily_pois = DailyPOIs('Hong Kong, China')
+    healthcare_pois = HealthcarePOIs('Hong Kong, China')
+    education_pois = EducationPOIs('Hong Kong, China')
+    entertainment_pois = EntertainmentPOIs('Hong Kong, China')
+    transportation_pois = PublicTransportationPOIs('Hong Kong, China')
     
     # Fetch POIs
     # daily_pois.fetch_all()  # Commented out to stop plotting daily POIs
@@ -357,11 +357,11 @@ try:
     transportation_pois.plot(ax)  # Plot public transportation POIs
     
     # Add title and legend
-    ax.set_title("Macau Walkable Streets with Public Transportation", fontsize=16, pad=20)
+    ax.set_title("Hong Kong Walkable Streets with Public Transportation", fontsize=16, pad=20)
     ax.legend(loc='upper right')
     
     plt.tight_layout()
-    plt.savefig('macau_public_transportation.png', dpi=300)
+    plt.savefig('hong_kong_public_transportation.png', dpi=300)
     plt.show()
 
 except Exception as e:

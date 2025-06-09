@@ -63,6 +63,7 @@ class Resident(BaseAgent):
         
         # Demographic attributes from model (may vary by parish)
         self.age = kwargs.get('age', 30)  # Default age
+        self.age_class = kwargs.get('age_class', None)  # Age class from parish demographics (e.g., "20-24")
         self.gender = kwargs.get('gender', 'male')  # Default gender
         self.income = kwargs.get('income', 50000)  # Default income
         self.education = kwargs.get('education', 'high_school')  # Default education level
@@ -690,6 +691,7 @@ class Resident(BaseAgent):
             "home_location": (self.geometry.x, self.geometry.y),
             "demographic_info": {
                 "age": self.age,
+                "age_class": self.age_class,
                 "gender": self.gender,
                 "income": self.income,
                 "education": self.education,
