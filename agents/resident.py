@@ -75,20 +75,20 @@ class Resident(BaseAgent):
 
         
         # Energy levels and mobility constraints
-        self.max_energy = 100
-        self.energy = self.max_energy
+        # self.max_energy = 100
+        # self.energy = self.max_energy
         # Age-based energy depletion rate: older agents lose energy faster
-        if self.age < 18:
-            self.energy_depletion_rate = 2  # Children have moderate depletion
-        elif self.age < 35:
-            self.energy_depletion_rate = 1  # Young adults have lowest depletion
-        elif self.age < 65:
-            self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
-        else:
-            self.energy_depletion_rate = 3  # Elderly have highest depletion
+        # if self.age < 18:
+        #     self.energy_depletion_rate = 2  # Children have moderate depletion
+        # elif self.age < 35:
+        #     self.energy_depletion_rate = 1  # Young adults have lowest depletion
+        # elif self.age < 65:
+        #     self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
+        # else:
+        #     self.energy_depletion_rate = 3  # Elderly have highest depletion
         
         # Recharge counter when at home
-        self.home_recharge_counter = 0
+        # self.home_recharge_counter = 0
         
         # Mobility constraints - speed in km/h
         if self.age >= 65:
@@ -445,36 +445,36 @@ class Resident(BaseAgent):
             self.increase_needs_over_time()
             
             # Update energy levels
-            if self.current_node != self.home_node:
-                # Deplete energy when not at home - only every 30 minutes to be more realistic
-                if self.model.step_count % 30 == 0:
-                    self.energy = max(0, self.energy - self.energy_depletion_rate)
-                self.home_recharge_counter = 0
-            else:
-                # At home - reset recharge counter or recharge energy
-                if self.energy < self.max_energy:
-                    self.home_recharge_counter += 1
-                    # Recharge after staying home for 120 minutes (2 hours)
-                    if self.home_recharge_counter >= 120:
-                        self.energy = self.max_energy
-                        self.home_recharge_counter = 0
+            # if self.current_node != self.home_node:
+            #     # Deplete energy when not at home - only every 30 minutes to be more realistic
+            #     if self.model.step_count % 30 == 0:
+            #         self.energy = max(0, self.energy - self.energy_depletion_rate)
+            #     self.home_recharge_counter = 0
+            # else:
+            #     # At home - reset recharge counter or recharge energy
+            #     if self.energy < self.max_energy:
+            #         self.home_recharge_counter += 1
+            #         # Recharge after staying home for 120 minutes (2 hours)
+            #         if self.home_recharge_counter >= 120:
+            #             self.energy = self.max_energy
+            #             self.home_recharge_counter = 0
             
             # Check energy level - if depleted, go home immediately
-            if self.energy <= 0 and self.current_node != self.home_node:
-                # Cancel any ongoing travel
-                self.traveling = False
-                self.travel_time_remaining = 0
-                
-                # Update last visited node before going home
-                self.last_visited_node = self.current_node
-                
-                # Go straight home
-                self.current_node = self.home_node
-                node_coords = self.model.graph.nodes[self.home_node]
-                if 'x' in node_coords and 'y' in node_coords:
-                    from shapely.geometry import Point
-                    self.geometry = Point(node_coords['x'], node_coords['y'])
-                return  # Skip regular movement behavior
+            # if self.energy <= 0 and self.current_node != self.home_node:
+            #     # Cancel any ongoing travel
+            #     self.traveling = False
+            #     self.travel_time_remaining = 0
+            #     
+            #     # Update last visited node before going home
+            #     self.last_visited_node = self.current_node
+            #     
+            #     # Go straight home
+            #     self.current_node = self.home_node
+            #     node_coords = self.model.graph.nodes[self.home_node]
+            #     if 'x' in node_coords and 'y' in node_coords:
+            #         from shapely.geometry import Point
+            #         self.geometry = Point(node_coords['x'], node_coords['y'])
+            #     return  # Skip regular movement behavior
             
             # Handle ongoing travel
             if self.traveling:
@@ -550,7 +550,7 @@ class Resident(BaseAgent):
                 return
             
             # Regular movement behavior - only if energy is not depleted and not traveling
-            if self.energy > 0 and not self.traveling:
+            if not self.traveling:  # Removed energy check
                 # Choose movement target based on behavior setting
                 target_poi_type = self.choose_movement_target()
                 
