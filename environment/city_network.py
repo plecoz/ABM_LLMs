@@ -76,7 +76,7 @@ def load_city_network_from_file(filepath):
         print(f"Error loading city network from file: {e}")
         return None
 
-def get_or_load_city_network(place_name="Macau, China", mode="walk", save_path=None, load_path=None):
+def get_or_load_city_network(place_name, mode="walk", save_path=None, load_path=None):
     """
     Load city network from file if available, otherwise fetch from OSM and optionally save.
     
