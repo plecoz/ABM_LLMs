@@ -21,7 +21,9 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/hongkong_shapefiles/hongkong_districts.gpkg"
+DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_new_districts.gpkg"
+#Shapefile path for barcelona parishes
+#DEFAULT_PARISHES_PATH = "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg"
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -30,13 +32,12 @@ MACAU_PARISH_PROPORTIONS = {
     "So Loureno": 0.082,       # 8.2%
     "S": 0.083,                 # 8.3%
     "Nossa Senhora de Ftima": 0.368,  # 36.8%
-    "Nossa Senhora do Carmo": 0.155,   # 15.5%
-    "So Francisco Xavier": 0.054,     # 5.4%
-    "Zona do Aterro de Cotai": 0.005   # 0.5%
+    "Taipa": 0.160,            # 16.0% 
+    "Coloane": 0.054,          # 5.4% (formerly So Francisco Xavier)
 }
 
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
 
 def load_parishes(shapefile_path=None):
     """
@@ -384,7 +385,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China'):
     """
     Run the 15-minute city simulation.
     
@@ -393,12 +394,14 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_network: Path to load the network from (instead of OSM)
         save_pois: Path to save the POIs after fetching from OSM
         load_pois: Path to load the POIs from (instead of OSM)
+        save_json_report: Path to save the detailed JSON report (optional)
+        city: Name of the city for the simulation (default: 'Macau, China')
     """
-    print("Loading Macau's street network...")
+    print(f"Loading {city}'s street network...")
     
     # Use the new save/load functionality for the network
     graph = get_or_load_city_network(
-        place_name="Hong Kong, China",
+        place_name=city,
         mode="walk",
         save_path=save_network,
         load_path=load_network
@@ -464,7 +467,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Use the new save/load functionality for POIs
         pois = get_or_fetch_pois(
             graph=graph,
-            place_name="Hong Kong, China",
+            place_name=city,
             selected_pois=selected_pois,
             save_path=save_pois,
             load_path=load_pois
@@ -476,15 +479,16 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     
     print(f"Spawning {num_residents} residents...")
     model = FifteenMinuteCity(
-        graph, 
-        pois, 
+        graph=graph,
+        pois=pois,
         num_residents=num_residents,
         parishes_gdf=parishes_gdf,
         parish_demographics=parish_demographics,
         parish_distribution=parish_distribution,
         random_distribution=random_distribution,
         needs_selection=needs_selection,
-        movement_behavior=movement_behavior
+        movement_behavior=movement_behavior,
+        city=city
     )
     
     print("Starting simulation...")
@@ -504,6 +508,11 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     # Start the animation loop
     animator.start_animation(steps, interval=50)  # 50ms between frames
     
+    # Save JSON report if requested
+    if save_json_report:
+        print(f"\nSaving detailed JSON report to: {save_json_report}")
+        model.output_controller.save_detailed_report(save_json_report)
+    
     plt.ioff()  # Turn off interactive mode
     plt.show()  # Keep window open at end
 
@@ -513,7 +522,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
-    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
+    parser.add_argument('--residents', type=int, default=10, help='Number of resident agents')
     parser.add_argument('--steps', type=int, default=50, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
@@ -522,7 +531,7 @@ if __name__ == "__main__":
     
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
     parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
@@ -532,13 +541,21 @@ if __name__ == "__main__":
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
     #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
     parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
-    #python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl
+    #python main.py --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
     
-    args = parser.parse_args()
+    # JSON report argument
+    parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
     
-    # Get POI configuration
+    # City argument
+    parser.add_argument('--city', type=str, default='Macau, China', help='City name for the simulation (default: Macau, China)')
+    
+    args = parser.parse_args()
+    #Good simulations :
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
+        # Get POI configuration
     if args.essential_only:
         try:
             from config.poi_config import ESSENTIAL_SERVICES_ONLY
@@ -568,5 +585,7 @@ if __name__ == "__main__":
         save_network=args.save_network,
         load_network=args.load_network,
         save_pois=args.save_pois,
-        load_pois=args.load_pois
+        load_pois=args.load_pois,
+        save_json_report=args.save_json_report,
+        city=args.city
     )

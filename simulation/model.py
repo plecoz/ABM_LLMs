@@ -93,6 +93,9 @@ class FifteenMinuteCity(Model):
         # Initialize logger
         self.logger = logging.getLogger("FifteenMinuteCity")
         
+        # Store city name
+        self.city = kwargs.get('city', 'Macau, China')
+        
         self.graph = graph
         self.pois = pois
         self.grid = NetworkGrid(graph)
@@ -170,10 +173,11 @@ class FifteenMinuteCity(Model):
                 "Type": lambda a: a.__class__.__name__,
                 "Parish": lambda a: getattr(a, 'parish', None),
                 "Age": lambda a: getattr(a, 'age', None),
+                "Age_Class": lambda a: getattr(a, 'age_class', None),
                 "Income": lambda a: getattr(a, 'income', None),
                 "Employment": lambda a: getattr(a, 'employment_status', None),
                 "Household": lambda a: getattr(a, 'household_type', None),
-                "Energy": lambda a: getattr(a, 'energy', None),
+                #"Energy": lambda a: getattr(a, 'energy', None),
                 "Speed": lambda a: getattr(a, 'speed', None),
                 "Traveling": lambda a: getattr(a, 'traveling', False),
                 "Travel_Time_Remaining": lambda a: getattr(a, 'travel_time_remaining', 0)

@@ -1,6 +1,8 @@
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib import patheffects
 import osmnx as ox
 from .base_plot import BaseMap  # Relative import from same package
 from .agent_plot import AgentPlotter
@@ -90,6 +92,8 @@ class SimulationAnimator:
         """Draw initial state"""
         self._plot_poi_agents()
         self._plot_residents()
+        self._add_scale_bar()
+        self._add_north_arrow()
         self._create_legend()
         
         # Set title with parishes information
@@ -168,6 +172,7 @@ class SimulationAnimator:
     def _get_interpolated_position(self, resident, progress):
         """
         Calculate the interpolated position of a traveling resident along the path.
+        Now works with 80-meter steps where each step = 80 meters of travel.
         
         Args:
             resident: The resident agent that is traveling
@@ -196,65 +201,70 @@ class SimulationAnimator:
             if len(path) <= 1:
                 return self.graph.nodes[start_node]['x'], self.graph.nodes[start_node]['y']
                 
-            # Calculate total travel time and remaining time
-            total_time = resident.travel_time_remaining + 1  # +1 because we've already decremented by 1
-            # Adjust progress to account for both the step progress and the interpolation progress
-            continuous_progress = 1 - ((resident.travel_time_remaining - progress) / total_time)
-            continuous_progress = max(0, min(1, continuous_progress))  # Clamp between 0 and 1
-            
-            # Calculate cumulative distances along the path
-            distances = [0]  # Start with 0 distance
+            # Calculate total path distance
             total_distance = 0
-            
             for i in range(len(path) - 1):
                 node1, node2 = path[i], path[i + 1]
-                # Get edge data
-                edge_data = self.graph.get_edge_data(node1, node2, 0)  # 0 is the default key for MultiDiGraph
-                # Get length or calculate Euclidean distance
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 if 'length' in edge_data:
-                    distance = edge_data['length']
+                    total_distance += edge_data['length']
                 else:
                     x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
                     x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
-                    distance = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                    total_distance += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+            
+            # Calculate how far the agent should be along the path
+            # We need to know the original travel time to calculate progress correctly
+            # Since we don't store the original travel time, we'll calculate it from the path
+            original_travel_time = max(1, int(np.ceil(total_distance / 80.0)))
+            
+            # Calculate how many steps have been completed
+            steps_completed = original_travel_time - resident.travel_time_remaining
+            
+            # Add progress within the current step (0 to 1)
+            total_progress = steps_completed + progress
+            
+            # Calculate distance traveled so far (80 meters per step)
+            distance_traveled = total_progress * 80.0
+            
+            # Clamp to total distance to avoid overshooting
+            distance_traveled = min(distance_traveled, total_distance)
+            
+            # Find position along the path
+            current_distance = 0
+            for i in range(len(path) - 1):
+                node1, node2 = path[i], path[i + 1]
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 
-                total_distance += distance
-                distances.append(total_distance)
-            
-            # Normalize distances to 0-1 range
-            if total_distance > 0:
-                distances = [d / total_distance for d in distances]
-            
-            # Find which segment the agent is on
-            target_distance = continuous_progress
-            segment_idx = 0
-            while segment_idx < len(distances) - 1 and distances[segment_idx + 1] < target_distance:
-                segment_idx += 1
+                if 'length' in edge_data:
+                    segment_length = edge_data['length']
+                else:
+                    x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
+                    x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
+                    segment_length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
                 
-            # If we're at the last node
-            if segment_idx >= len(distances) - 1:
-                return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
+                # Check if the target distance is within this segment
+                if current_distance + segment_length >= distance_traveled:
+                    # Interpolate within this segment
+                    segment_progress = (distance_traveled - current_distance) / segment_length
+                    segment_progress = max(0, min(1, segment_progress))  # Clamp to [0,1]
+                    
+                    # Get segment start and end positions
+                    start_x = self.graph.nodes[node1]['x']
+                    start_y = self.graph.nodes[node1]['y']
+                    end_x = self.graph.nodes[node2]['x']
+                    end_y = self.graph.nodes[node2]['y']
+                    
+                    # Interpolate position
+                    x = start_x + segment_progress * (end_x - start_x)
+                    y = start_y + segment_progress * (end_y - start_y)
+                    
+                    return x, y
                 
-            # Calculate interpolation within the segment
-            start_dist = distances[segment_idx]
-            end_dist = distances[segment_idx + 1]
+                current_distance += segment_length
             
-            if end_dist == start_dist:  # Avoid division by zero
-                segment_progress = 0
-            else:
-                segment_progress = (target_distance - start_dist) / (end_dist - start_dist)
-                
-            # Get segment start and end positions
-            start_x = self.graph.nodes[path[segment_idx]]['x']
-            start_y = self.graph.nodes[path[segment_idx]]['y']
-            end_x = self.graph.nodes[path[segment_idx + 1]]['x']
-            end_y = self.graph.nodes[path[segment_idx + 1]]['y']
-            
-            # Interpolate position
-            x = start_x + segment_progress * (end_x - start_x)
-            y = start_y + segment_progress * (end_y - start_y)
-            
-            return x, y
+            # If we've gone through all segments, return the end position
+            return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
             
         except Exception as e:
             # If there's any error, return the current position
@@ -387,3 +397,98 @@ class SimulationAnimator:
         
         # Adjust figure to make room for legend
         self.fig.tight_layout()
+    
+    def _add_scale_bar(self):
+        """Add a scale bar to the bottom left of the map"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Calculate a reasonable scale bar length (about 10% of map width)
+        map_width = xlim[1] - xlim[0]
+        scale_length_deg = map_width * 0.1
+        
+        # Get the center latitude of the current map for accurate conversion
+        center_lat = (ylim[0] + ylim[1]) / 2
+        
+        # Convert to meters using the actual latitude
+        # At any latitude, 1 degree longitude ≈ 111,000 * cos(latitude) meters
+        scale_length_m = scale_length_deg * 111000 * np.cos(np.radians(center_lat))
+        
+        # Round to a nice number
+        if scale_length_m > 5000:
+            scale_length_m = round(scale_length_m / 1000) * 1000  # Round to nearest km
+            scale_text = f"{int(scale_length_m/1000)} km"
+        elif scale_length_m > 1000:
+            scale_length_m = round(scale_length_m / 500) * 500   # Round to nearest 500m
+            scale_text = f"{int(scale_length_m)} m"
+        else:
+            scale_length_m = round(scale_length_m / 100) * 100   # Round to nearest 100m
+            scale_text = f"{int(scale_length_m)} m"
+        
+        # Convert back to degrees for plotting using the same latitude
+        scale_length_deg = scale_length_m / (111000 * np.cos(np.radians(center_lat)))
+        
+        # Position the scale bar (bottom left corner with margins)
+        scale_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        scale_y = ylim[0] + (ylim[1] - ylim[0]) * 0.05
+        
+        # Draw the scale bar
+        scale_bar = self.ax.plot([scale_x, scale_x + scale_length_deg], 
+                                [scale_y, scale_y], 
+                                'k-', linewidth=3)[0]
+        
+        # Add tick marks at the ends
+        tick_height = (ylim[1] - ylim[0]) * 0.005
+        left_tick = self.ax.plot([scale_x, scale_x], 
+                                [scale_y - tick_height, scale_y + tick_height], 
+                                'k-', linewidth=2)[0]
+        right_tick = self.ax.plot([scale_x + scale_length_deg, scale_x + scale_length_deg], 
+                                 [scale_y - tick_height, scale_y + tick_height], 
+                                 'k-', linewidth=2)[0]
+        
+        # Add scale text
+        text_y = scale_y + (ylim[1] - ylim[0]) * 0.01
+        scale_label = self.ax.text(scale_x + scale_length_deg/2, text_y, scale_text,
+                                  ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        scale_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+    
+    def _add_north_arrow(self):
+        """Add a north arrow above the scale bar in the bottom left area"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Position the north arrow above the scale bar (bottom left area)
+        # Scale bar is at 5% from edges, so place arrow at same x but higher y
+        arrow_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        arrow_y = ylim[0] + (ylim[1] - ylim[0]) * 0.12  # Above scale bar area
+        
+        # Calculate arrow size
+        arrow_length = (ylim[1] - ylim[0]) * 0.04
+        arrow_width = (xlim[1] - xlim[0]) * 0.01
+        
+        # Create north arrow using FancyArrowPatch
+        arrow = FancyArrowPatch((arrow_x, arrow_y - arrow_length/2),
+                               (arrow_x, arrow_y + arrow_length/2),
+                               arrowstyle='-|>', 
+                               mutation_scale=20,
+                               color='black',
+                               linewidth=2)
+        self.ax.add_patch(arrow)
+        
+        # Add 'N' label
+        n_label = self.ax.text(arrow_x, arrow_y + arrow_length/2 + (ylim[1] - ylim[0]) * 0.015, 
+                              'N',
+                              ha='center', va='bottom', fontsize=12, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        n_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+        
+        # Add a background circle for better visibility
+        circle = plt.Circle((arrow_x, arrow_y), arrow_length * 0.7, 
+                          fill=True, facecolor='white', edgecolor='black', 
+                          alpha=0.8, linewidth=1)
+        self.ax.add_patch(circle)

@@ -46,8 +46,50 @@ class Resident(BaseAgent):
         
         # Movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
-        
 
+        # Employment probabilities - only for Macau
+        if hasattr(self.model, 'city') and self.model.city == 'Macau, China':
+            self.employment = {
+                "No schooling / Pre-primary education": {
+                    "employed": 0.204859253,
+                    "unemployed or inactive": 0.795140747
+                },
+                "Primary education": {
+                    "incomplete": {
+                        "employed": 0.347652163,
+                        "unemployed or inactive": 0.652347837
+                    },
+                    "complete": {
+                        "employed": 0.487596097,
+                        "unemployed or inactive": 0.512403903
+                    }
+                },
+                "Secondary education": {
+                    "Junior": {
+                        "employed": 0.586663197,
+                        "unemployed or inactive": 0.413336803
+                    },
+                    "Senior": {
+                        "employed": 0.607928076,
+                        "unemployed or inactive": 0.392071924
+                    }
+                },
+                "Diploma programme": {
+                    "employed": 0.747351695,
+                    "unemployed or inactive": 0.252648305
+                },
+                "Tertiary education": {
+                    "employed": 0.801285549,
+                    "unemployed or inactive": 0.198714451
+                },
+                "Others": {
+                    "employed": 0.196492271,
+                    "unemployed or inactive": 0.803507729
+                }
+            }
+        else:
+            self.employment = None
+        
         # Dynamic needs (placeholder - to be implemented later)
         self.dynamic_needs = {
             "hunger": 0,
@@ -63,6 +105,7 @@ class Resident(BaseAgent):
         
         # Demographic attributes from model (may vary by parish)
         self.age = kwargs.get('age', 30)  # Default age
+        self.age_class = kwargs.get('age_class', None)  # Age class from parish demographics (e.g., "20-24")
         self.gender = kwargs.get('gender', 'male')  # Default gender
         self.income = kwargs.get('income', 50000)  # Default income
         self.education = kwargs.get('education', 'high_school')  # Default education level
@@ -75,20 +118,20 @@ class Resident(BaseAgent):
 
         
         # Energy levels and mobility constraints
-        self.max_energy = 100
-        self.energy = self.max_energy
+        # self.max_energy = 100
+        # self.energy = self.max_energy
         # Age-based energy depletion rate: older agents lose energy faster
-        if self.age < 18:
-            self.energy_depletion_rate = 2  # Children have moderate depletion
-        elif self.age < 35:
-            self.energy_depletion_rate = 1  # Young adults have lowest depletion
-        elif self.age < 65:
-            self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
-        else:
-            self.energy_depletion_rate = 3  # Elderly have highest depletion
+        # if self.age < 18:
+        #     self.energy_depletion_rate = 2  # Children have moderate depletion
+        # elif self.age < 35:
+        #     self.energy_depletion_rate = 1  # Young adults have lowest depletion
+        # elif self.age < 65:
+        #     self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
+        # else:
+        #     self.energy_depletion_rate = 3  # Elderly have highest depletion
         
         # Recharge counter when at home
-        self.home_recharge_counter = 0
+        # self.home_recharge_counter = 0
         
         # Mobility constraints - speed in km/h
         if self.age >= 65:
@@ -102,6 +145,10 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
+        # Waiting time tracking (new)
+        self.waiting_at_poi = False
+        self.waiting_time_remaining = 0
+        
         # Memory module
         self.memory = {
             'income': self.income,
@@ -114,55 +161,40 @@ class Resident(BaseAgent):
 
     def calculate_travel_time(self, from_node, to_node):
         """
-        Calculate the travel time between two nodes based on distance and agent's speed.
+        Calculate the travel time between two nodes based on 80-meter steps.
+        Each step represents 80 meters of walking distance (1 minute at 5km/h).
+        Always rounds up to ensure the agent doesn't move more than 80m per step.
         
         Args:
             from_node: Starting node ID
             to_node: Destination node ID
             
         Returns:
-            Number of time steps needed for travel (each step is 1 minute)
+            Number of time steps needed for travel (each step is 1 minute = 80 meters)
         """
-        # Get the distance in meters from the accessible_nodes dictionary
-        # or calculate using shortest path if not directly accessible
-        if to_node in self.accessible_nodes:
-            distance_meters = self.accessible_nodes[to_node]
-        else:
-            try:
-                # Calculate shortest path length
-                distance_meters = nx.shortest_path_length(
-                    self.model.graph, 
-                    from_node, 
-                    to_node, 
-                    weight='length'
-                )
-            except (nx.NetworkXNoPath, KeyError):
-                self.logger.warning(f"No path found from {from_node} to {to_node}")
-                return None
+        # Always calculate the actual shortest path length for consistency
+        try:
+            # Calculate shortest path length along the street network
+            distance_meters = nx.shortest_path_length(
+                self.model.graph, 
+                from_node, 
+                to_node, 
+                weight='length'
+            )
+        except (nx.NetworkXNoPath, KeyError):
+            self.logger.warning(f"No path found from {from_node} to {to_node}")
+            return None
 
-        # Convert distance from meters to kilometers
-        distance_km = distance_meters / 1000
+        # Calculate number of 80-meter steps needed
+        # Always round UP to ensure no step exceeds 80 meters
+        steps_needed = math.ceil(distance_meters / 80.0)
         
-        # Calculate travel time in hours
-        travel_time_hours = distance_km / self.speed
-        
-        # Convert to minutes
-        travel_time_minutes = travel_time_hours * 60
-        
-        # Convert to number of time steps (1-minute steps)
-        time_steps_exact = travel_time_minutes
-        
-        # Round according to the specified rule
-        time_steps_floor = math.floor(time_steps_exact)
-        remainder_minutes = time_steps_exact - time_steps_floor
-        
-        if remainder_minutes < 0.5:  # Less than 30 seconds
-            time_steps = time_steps_floor
-        else:
-            time_steps = math.ceil(time_steps_exact)
+        # Debug output for resident 0
+        if hasattr(self, 'unique_id') and self.unique_id == 0:
+            print(f"Resident 0: Distance {distance_meters:.1f}m → {steps_needed} steps (80m each)")
         
         # Ensure at least 1 time step
-        return max(1, time_steps)
+        return max(1, steps_needed)
 
     def start_travel(self, target_node, target_geometry):
         """
@@ -456,36 +488,36 @@ class Resident(BaseAgent):
             self.increase_needs_over_time()
             
             # Update energy levels
-            if self.current_node != self.home_node:
-                # Deplete energy when not at home - only every 30 minutes to be more realistic
-                if self.model.step_count % 30 == 0:
-                    self.energy = max(0, self.energy - self.energy_depletion_rate)
-                self.home_recharge_counter = 0
-            else:
-                # At home - reset recharge counter or recharge energy
-                if self.energy < self.max_energy:
-                    self.home_recharge_counter += 1
-                    # Recharge after staying home for 120 minutes (2 hours)
-                    if self.home_recharge_counter >= 120:
-                        self.energy = self.max_energy
-                        self.home_recharge_counter = 0
+            # if self.current_node != self.home_node:
+            #     # Deplete energy when not at home - only every 30 minutes to be more realistic
+            #     if self.model.step_count % 30 == 0:
+            #         self.energy = max(0, self.energy - self.energy_depletion_rate)
+            #     self.home_recharge_counter = 0
+            # else:
+            #     # At home - reset recharge counter or recharge energy
+            #     if self.energy < self.max_energy:
+            #         self.home_recharge_counter += 1
+            #         # Recharge after staying home for 120 minutes (2 hours)
+            #         if self.home_recharge_counter >= 120:
+            #             self.energy = self.max_energy
+            #             self.home_recharge_counter = 0
             
             # Check energy level - if depleted, go home immediately
-            if self.energy <= 0 and self.current_node != self.home_node:
-                # Cancel any ongoing travel
-                self.traveling = False
-                self.travel_time_remaining = 0
-                
-                # Update last visited node before going home
-                self.last_visited_node = self.current_node
-                
-                # Go straight home
-                self.current_node = self.home_node
-                node_coords = self.model.graph.nodes[self.home_node]
-                if 'x' in node_coords and 'y' in node_coords:
-                    from shapely.geometry import Point
-                    self.geometry = Point(node_coords['x'], node_coords['y'])
-                return  # Skip regular movement behavior
+            # if self.energy <= 0 and self.current_node != self.home_node:
+            #     # Cancel any ongoing travel
+            #     self.traveling = False
+            #     self.travel_time_remaining = 0
+            #     
+            #     # Update last visited node before going home
+            #     self.last_visited_node = self.current_node
+            #     
+            #     # Go straight home
+            #     self.current_node = self.home_node
+            #     node_coords = self.model.graph.nodes[self.home_node]
+            #     if 'x' in node_coords and 'y' in node_coords:
+            #         from shapely.geometry import Point
+            #         self.geometry = Point(node_coords['x'], node_coords['y'])
+            #     return  # Skip regular movement behavior
             
             # Handle ongoing travel
             if self.traveling:
@@ -502,10 +534,12 @@ class Resident(BaseAgent):
                     
                     # Add resident to POI's visitors if it's a POI agent
                     visited_poi_type = None
+                    visited_poi_agent = None
                     for poi in self.model.poi_agents:
                         if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
                             poi.visitors.add(self.unique_id)
                             visited_poi_type = poi.poi_type
+                            visited_poi_agent = poi
                             # --- MEMORY MODULE: Record visit ---
                             self.memory['visited_pois'].append({
                                 'step': getattr(self.model, 'step_count', None),
@@ -514,7 +548,26 @@ class Resident(BaseAgent):
                                 'category': getattr(poi, 'category', None),
                                 'income': self.income
                             })
+                            
+                            # Track POI visit in output controller
+                            if visited_poi_agent and hasattr(self.model, 'output_controller'):
+                                poi_category = getattr(visited_poi_agent, 'category', 'other')
+                                self.model.output_controller.track_poi_visit(poi_category)
+                            
                             break
+                    
+                    # Start waiting at POI if it has waiting time
+                    if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
+                        waiting_time = visited_poi_agent.get_waiting_time()
+                        if waiting_time > 0:
+                            self.waiting_at_poi = True
+                            self.waiting_time_remaining = waiting_time
+                            print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
+                            
+                            # Track waiting time in output controller
+                            if hasattr(self.model, 'output_controller'):
+                                poi_category = getattr(visited_poi_agent, 'category', 'other')
+                                self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
                     
                     # Satisfy needs if we're using need-based movement and visited a POI
                     if self.movement_behavior == 'need-based' and visited_poi_type:
@@ -527,8 +580,20 @@ class Resident(BaseAgent):
                 # Still traveling, don't take any other movement actions
                 return
             
+            # Handle waiting at POI
+            if self.waiting_at_poi:
+                self.waiting_time_remaining -= 1
+                
+                # Check if waiting is finished
+                if self.waiting_time_remaining <= 0:
+                    self.waiting_at_poi = False
+                    print(f"Resident {self.unique_id} finished waiting at POI")
+                
+                # Still waiting, don't take any other movement actions
+                return
+            
             # Regular movement behavior - only if energy is not depleted and not traveling
-            if self.energy > 0 and not self.traveling:
+            if not self.traveling:  # Removed energy check
                 # Choose movement target based on behavior setting
                 target_poi_type = self.choose_movement_target()
                 
@@ -668,6 +733,7 @@ class Resident(BaseAgent):
             "home_location": (self.geometry.x, self.geometry.y),
             "demographic_info": {
                 "age": self.age,
+                "age_class": self.age_class,
                 "gender": self.gender,
                 "income": self.income,
                 "education": self.education,
