@@ -1,6 +1,8 @@
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib import patheffects
 import osmnx as ox
 from .base_plot import BaseMap  # Relative import from same package
 from .agent_plot import AgentPlotter
@@ -90,6 +92,8 @@ class SimulationAnimator:
         """Draw initial state"""
         self._plot_poi_agents()
         self._plot_residents()
+        self._add_scale_bar()
+        self._add_north_arrow()
         self._create_legend()
         
         # Set title with parishes information
@@ -393,3 +397,97 @@ class SimulationAnimator:
         
         # Adjust figure to make room for legend
         self.fig.tight_layout()
+    
+    def _add_scale_bar(self):
+        """Add a scale bar to the bottom left of the map"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Calculate a reasonable scale bar length (about 10% of map width)
+        map_width = xlim[1] - xlim[0]
+        scale_length_deg = map_width * 0.1
+        
+        # Get the center latitude of the current map for accurate conversion
+        center_lat = (ylim[0] + ylim[1]) / 2
+        
+        # Convert to meters using the actual latitude
+        # At any latitude, 1 degree longitude ≈ 111,000 * cos(latitude) meters
+        scale_length_m = scale_length_deg * 111000 * np.cos(np.radians(center_lat))
+        
+        # Round to a nice number
+        if scale_length_m > 5000:
+            scale_length_m = round(scale_length_m / 1000) * 1000  # Round to nearest km
+            scale_text = f"{int(scale_length_m/1000)} km"
+        elif scale_length_m > 1000:
+            scale_length_m = round(scale_length_m / 500) * 500   # Round to nearest 500m
+            scale_text = f"{int(scale_length_m)} m"
+        else:
+            scale_length_m = round(scale_length_m / 100) * 100   # Round to nearest 100m
+            scale_text = f"{int(scale_length_m)} m"
+        
+        # Convert back to degrees for plotting using the same latitude
+        scale_length_deg = scale_length_m / (111000 * np.cos(np.radians(center_lat)))
+        
+        # Position the scale bar (bottom left corner with margins)
+        scale_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        scale_y = ylim[0] + (ylim[1] - ylim[0]) * 0.05
+        
+        # Draw the scale bar
+        scale_bar = self.ax.plot([scale_x, scale_x + scale_length_deg], 
+                                [scale_y, scale_y], 
+                                'k-', linewidth=3)[0]
+        
+        # Add tick marks at the ends
+        tick_height = (ylim[1] - ylim[0]) * 0.005
+        left_tick = self.ax.plot([scale_x, scale_x], 
+                                [scale_y - tick_height, scale_y + tick_height], 
+                                'k-', linewidth=2)[0]
+        right_tick = self.ax.plot([scale_x + scale_length_deg, scale_x + scale_length_deg], 
+                                 [scale_y - tick_height, scale_y + tick_height], 
+                                 'k-', linewidth=2)[0]
+        
+        # Add scale text
+        text_y = scale_y + (ylim[1] - ylim[0]) * 0.01
+        scale_label = self.ax.text(scale_x + scale_length_deg/2, text_y, scale_text,
+                                  ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        scale_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+    
+    def _add_north_arrow(self):
+        """Add a north arrow to the top right of the map"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Position the north arrow (top right corner with margins)
+        arrow_x = xlim[1] - (xlim[1] - xlim[0]) * 0.08
+        arrow_y = ylim[1] - (ylim[1] - ylim[0]) * 0.08
+        
+        # Calculate arrow size
+        arrow_length = (ylim[1] - ylim[0]) * 0.04
+        arrow_width = (xlim[1] - xlim[0]) * 0.01
+        
+        # Create north arrow using FancyArrowPatch
+        arrow = FancyArrowPatch((arrow_x, arrow_y - arrow_length/2),
+                               (arrow_x, arrow_y + arrow_length/2),
+                               arrowstyle='-|>', 
+                               mutation_scale=20,
+                               color='black',
+                               linewidth=2)
+        self.ax.add_patch(arrow)
+        
+        # Add 'N' label
+        n_label = self.ax.text(arrow_x, arrow_y + arrow_length/2 + (ylim[1] - ylim[0]) * 0.015, 
+                              'N',
+                              ha='center', va='bottom', fontsize=12, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        n_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+        
+        # Add a background circle for better visibility
+        circle = plt.Circle((arrow_x, arrow_y), arrow_length * 0.7, 
+                          fill=True, facecolor='white', edgecolor='black', 
+                          alpha=0.8, linewidth=1)
+        self.ax.add_patch(circle)
