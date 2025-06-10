@@ -161,16 +161,17 @@ class Resident(BaseAgent):
 
     def calculate_travel_time(self, from_node, to_node):
         """
-        Calculate the travel time between two nodes based on 80-meter steps.
-        Each step represents 80 meters of walking distance (1 minute at 5km/h).
-        Always rounds up to ensure the agent doesn't move more than 80m per step.
+        Calculate the travel time between two nodes based on age-class-specific step sizes.
+        - Residents with age_class indicating 65+: 60-meter steps (1 minute at 3.6km/h)
+        - Younger residents: 80-meter steps (1 minute at 4.8km/h)
+        Always rounds up to ensure the agent doesn't move more than their step size per minute.
         
         Args:
             from_node: Starting node ID
             to_node: Destination node ID
             
         Returns:
-            Number of time steps needed for travel (each step is 1 minute = 80 meters)
+            Number of time steps needed for travel (each step is 1 minute)
         """
         # Always calculate the actual shortest path length for consistency
         try:
@@ -185,13 +186,31 @@ class Resident(BaseAgent):
             self.logger.warning(f"No path found from {from_node} to {to_node}")
             return None
 
-        # Calculate number of 80-meter steps needed
-        # Always round UP to ensure no step exceeds 80 meters
-        steps_needed = math.ceil(distance_meters / 80.0)
+        # Determine step size based on age_class
+        # Check if age_class indicates elderly (65+ years)
+        is_elderly = False
+        if self.age_class:
+            age_class_str = str(self.age_class).lower()
+            # Check for age classes that indicate 65+ years
+            if ('65+' in age_class_str or '65-' in age_class_str or 
+                '70+' in age_class_str or '70-' in age_class_str or
+                '75+' in age_class_str or '75-' in age_class_str or
+                '80+' in age_class_str or '80-' in age_class_str or
+                '85+' in age_class_str or '85-' in age_class_str):
+                is_elderly = True
+        
+        if is_elderly:
+            step_size = 60.0  # 60 meters per minute for elderly
+        else:
+            step_size = 80.0  # 80 meters per minute for younger residents
+        
+        # Calculate number of steps needed
+        # Always round UP to ensure no step exceeds the agent's step size
+        steps_needed = math.ceil(distance_meters / step_size)
         
         # Debug output for resident 0
-        if hasattr(self, 'unique_id') and self.unique_id == 0:
-            print(f"Resident 0: Distance {distance_meters:.1f}m → {steps_needed} steps (80m each)")
+        #if hasattr(self, 'unique_id') and self.unique_id == 0:
+        #    print(f"Resident 0 (age_class {self.age_class}): Distance {distance_meters:.1f}m → {steps_needed} steps ({step_size}m each)")
         
         # Ensure at least 1 time step
         return max(1, steps_needed)
