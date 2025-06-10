@@ -414,6 +414,18 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         save_json_report: Path to save the detailed JSON report (optional)
         city: Name of the city for the simulation (default: 'Macau, China')
     """
+    # Get parishes path based on city if not explicitly provided
+    if parishes_path is None:
+        parishes_path = get_parishes_path(city)
+        if parishes_path is None:
+            print(f"No parishes data available for {city}. Simulation will run without parish visualization.")
+    
+    # If user just wants to list parishes, do that and exit early
+    if list_parishes:
+        parishes_gdf = load_parishes(parishes_path)
+        print_available_parishes(parishes_gdf)
+        return
+    
     print(f"Loading {city}'s street network...")
     
     # Use the new save/load functionality for the network
@@ -424,19 +436,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_path=load_network
     )
     
-    # Get parishes path based on city if not explicitly provided
-    if parishes_path is None:
-        parishes_path = get_parishes_path(city)
-        if parishes_path is None:
-            print(f"No parishes data available for {city}. Simulation will run without parish visualization.")
-    
     # Load parishes data
     parishes_gdf = load_parishes(parishes_path)
-    
-    # If user wants to list parishes, do that and exit
-    if list_parishes:
-        print_available_parishes(parishes_gdf)
-        return
     
     # Filter graph by selected parishes if specified
     if selected_parishes and parishes_gdf is not None:
