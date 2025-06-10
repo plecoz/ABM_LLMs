@@ -581,7 +581,8 @@ class Resident(BaseAgent):
                         if waiting_time > 0:
                             self.waiting_at_poi = True
                             self.waiting_time_remaining = waiting_time
-                            print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
+                            #line to debug
+                            # print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
                             
                             # Track waiting time in output controller
                             if hasattr(self.model, 'output_controller'):
