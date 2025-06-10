@@ -78,7 +78,7 @@ You can customize the simulation with the following arguments:
 | :--- | :--- | :--- | :--- |
 | `--residents` | Number of resident agents. | 100 | `--residents 500` |
 | `--steps` | Number of simulation steps to run. | 100 | `--steps 200` |
-| `--city` | The city to simulate. | `Macau, China` | `--city "Hong Kong"` |
+| `--city` | Name of the city to simulate. Currently supports parishes data for Macau, Barcelona, and Hong Kong. | 'Macau, China' | `--city "Barcelona, Spain"` |
 | `--parishes` | A list of specific parishes to run the simulation in (for Macau). | (all) | `--parishes "Taipa" "Coloane"` |
 | `--demographics` | Path to the parish demographics JSON file. | `data/parish_demographic.json` | `--demographics path/to/my_data.json` |
 | `--save-json-report` | Save a detailed JSON report of the simulation. | (not set) | `--save-json-report` |
@@ -97,6 +97,30 @@ To run a simulation for only the "Taipa" and "Coloane" parishes in Macau with 50
 ```bash
 python main.py --residents 500 --steps 150 --parishes "Taipa" "Coloane" --save-json-report
 ```
+
+To run a simulation for Barcelona's Ciutat Vella district:
+
+```bash
+python main.py --city "Barcelona, Spain" --parishes "Ciutat Vella" --residents 500 --steps 150
+```
+
+### Supported Cities with Parish/District Data
+
+The simulation currently includes district/parish data for the following cities:
+
+1. **Macau, China** (Default)
+   - Includes all parishes: Santo Antonio, So Lzaro, So Loureno, S, Nossa Senhora de Ftima, Taipa, Coloane
+   - Includes detailed demographic data and proportional distribution
+
+2. **Barcelona, Spain**
+   - Includes all districts with their administrative boundaries
+   - Use `--list-parishes` to see available districts
+
+3. **Hong Kong, China**
+   - Includes administrative district boundaries
+   - Use `--list-parishes` to see available districts
+
+For other cities, the simulation will run without parish/district visualization, but all other features (POIs, resident movement, etc.) will work normally.
 
 ---
 

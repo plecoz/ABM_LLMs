@@ -21,9 +21,11 @@ except ImportError:
     get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/macau_shapefiles/macau_new_districts.gpkg"
-#Shapefile path for barcelona parishes
-#DEFAULT_PARISHES_PATH = "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg"
+CITY_PARISHES_PATHS = {
+    "Macau, China": "./data/macau_shapefiles/macau_new_districts.gpkg",
+    "Barcelona, Spain": "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg",
+    "Hong Kong, China": "./data/hong_kong_shapefiles/hong_kong_districts.gpkg"
+}
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -39,9 +41,21 @@ MACAU_PARISH_PROPORTIONS = {
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
     #--parishes "Taipa" "Coloane" for the new city of macau
 
+def get_parishes_path(city):
+    """
+    Get the parishes shapefile path for a given city.
+    
+    Args:
+        city: Name of the city (e.g., 'Macau, China')
+        
+    Returns:
+        Path to the parishes shapefile or None if not available
+    """
+    return CITY_PARISHES_PATHS.get(city)
+
 def load_parishes(shapefile_path=None):
     """
-    Load Macau parishes from shapefile.
+    Load parishes from shapefile.
     
     Args:
         shapefile_path: Path to the shapefile containing parish data
@@ -49,9 +63,12 @@ def load_parishes(shapefile_path=None):
     Returns:
         GeoDataFrame with parishes data or None if file not found
     """
+    if shapefile_path is None:
+        print("No parishes shapefile path provided. Simulation will run without parish visualization.")
+        return None
+        
     try:
-        path = shapefile_path or DEFAULT_PARISHES_PATH
-        districts = gpd.read_file(path)
+        districts = gpd.read_file(shapefile_path)
         print(f"Successfully loaded parishes data!")
         print(f"Number of parishes/districts: {len(districts)}")
         return districts
@@ -406,6 +423,12 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         save_path=save_network,
         load_path=load_network
     )
+    
+    # Get parishes path based on city if not explicitly provided
+    if parishes_path is None:
+        parishes_path = get_parishes_path(city)
+        if parishes_path is None:
+            print(f"No parishes data available for {city}. Simulation will run without parish visualization.")
     
     # Load parishes data
     parishes_gdf = load_parishes(parishes_path)
