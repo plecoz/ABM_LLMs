@@ -24,7 +24,7 @@ except ImportError:
 CITY_PARISHES_PATHS = {
     "Macau, China": "./data/macau_shapefiles/macau_new_districts.gpkg",
     "Barcelona, Spain": "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg",
-    "Hong Kong, China": "./data/hong_kong_shapefiles/hong_kong_districts.gpkg"
+    "Hong Kong, China": "./data/hongkong_shapefiles/hongkong_districts.gpkg"
 }
 
 # Macau parish population proportions (based on real demographics)
