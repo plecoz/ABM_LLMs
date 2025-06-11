@@ -10,15 +10,17 @@ import numpy as np
 import geopandas as gpd
 import os
 import networkx as nx
+from matplotlib_scalebar.scalebar import ScaleBar
 
 
 class SimulationAnimator:
-    def __init__(self, model, graph, ax=None, parishes_gdf=None):
+    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None):
         self.model = model
         self.graph = graph
         self.fig = ax.figure if ax else plt.figure(figsize=(12, 10))
         self.ax = ax if ax else self.fig.add_subplot(111)
         self.parishes_gdf = parishes_gdf  # GeoDataFrame containing parishes
+        self.residential_buildings = residential_buildings
         
         # Initialize plot elements
         self.base_plot = self._create_base_plot()
@@ -89,9 +91,26 @@ class SimulationAnimator:
         )
     
     def initialize(self):
-        """Draw initial state"""
+        """Initialize the plot with the static elements."""
+        self.ax.clear()
+        
+        # Plot the street network
+        ox.plot_graph(self.graph, ax=self.ax, node_size=0, edge_color='gray', edge_linewidth=0.5, show=False, close=False)
+        
+        # Plot parishes if available
+        if self.parishes_gdf is not None:
+            self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=2)
+            
+        # Plot residential buildings if available
+        if self.residential_buildings is not None and not self.residential_buildings.empty:
+            self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=1)
+
+        # Plot POIs
         self._plot_poi_agents()
+        
+        # Plot initial resident positions
         self._plot_residents()
+        
         self._add_scale_bar()
         self._add_north_arrow()
         self._create_legend()
