@@ -250,6 +250,9 @@ def filter_pois(pois, poi_types=None):
                 if poi_type in poi_types:
                     filtered_pois[category].append(poi_entry)
     
+    total_filtered = sum(len(poi_list) for poi_list in filtered_pois.values())
+    total_original = sum(len(poi_list) for poi_list in pois.values())
+    print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
     return filtered_pois
 
 def create_dummy_pois(graph, num_per_category=5):
@@ -307,3 +310,91 @@ def create_dummy_pois(graph, num_per_category=5):
             print(f"Added dummy {poi_type} to {category}")
     
     return pois
+
+def get_or_fetch_residential_buildings(place_name="Macau, China", save_path=None, load_path=None):
+    """
+    Fetch or load residential buildings for a given place.
+
+    This function first checks if a `load_path` is provided. If so, it loads the
+    residential buildings from the specified file. Otherwise, it fetches the data
+    from OpenStreetMap (OSM) based on a set of predefined tags for residential
+    buildings.
+
+    If a `save_path` is provided, the fetched data will be saved to that path
+    for faster access in future runs.
+
+    Args:
+        place_name (str): The name of the city or area to fetch buildings for.
+        save_path (str, optional): Path to save the fetched buildings.
+        load_path (str, optional): Path to load pre-saved buildings from.
+
+    Returns:
+        geopandas.GeoDataFrame: A GeoDataFrame containing the residential buildings.
+    """
+    if load_path and os.path.exists(load_path):
+        print(f"Loading residential buildings from: {load_path}")
+        try:
+            with open(load_path, 'rb') as f:
+                buildings = pickle.load(f)
+            print(f"Successfully loaded {len(buildings)} residential buildings from file.")
+            return buildings
+        except (pickle.UnpicklingError, EOFError) as e:
+            print(f"Error loading residential buildings from {load_path}: {e}")
+            print("Will try fetching from OSM instead.")
+
+    print(f"Fetching residential buildings for {place_name} from OSM...")
+    
+    # Tags to identify residential buildings in OSM
+    tags = {
+        "building": ["apartments", "house", "residential", "detached", "semidetached_house", "terrace", "dormitory"]
+    }
+    
+    try:
+        buildings = ox.features_from_place(place_name, tags)
+        print(f"Successfully fetched {len(buildings)} residential buildings.")
+
+        if save_path:
+            print(f"Saving residential buildings to: {save_path}")
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, 'wb') as f:
+                pickle.dump(buildings, f)
+        
+        return buildings
+
+    except Exception as e:
+        print(f"Could not fetch residential buildings from OSM: {e}")
+        return gpd.GeoDataFrame()
+
+def filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes):
+    """
+    Filter POIs to only include those within selected parishes.
+    """
+    if not selected_parishes or parishes_gdf is None:
+        return pois
+    
+    # Get all nodes in the filtered graph
+    graph_nodes = set(graph.nodes())
+    
+    # Filter POIs to only include those in the filtered graph
+    filtered_pois = {}
+    
+    for category, poi_list in pois.items():
+        filtered_poi_list = []
+        
+        for poi_data in poi_list:
+            if isinstance(poi_data, tuple):
+                node_id, _ = poi_data
+            else:
+                node_id = poi_data
+            
+            # Only keep POIs that are in the filtered graph
+            if node_id in graph_nodes:
+                filtered_poi_list.append(poi_data)
+        
+        filtered_pois[category] = filtered_poi_list
+    
+    total_filtered = sum(len(poi_list) for poi_list in filtered_pois.values())
+    total_original = sum(len(poi_list) for poi_list in pois.values())
+    print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
+    return filtered_pois

@@ -1,5 +1,5 @@
 from environment.city_network import load_city_network, get_or_load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois
+from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_residential_buildings
 from simulation.model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
@@ -402,7 +402,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China'):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_buildings=None, load_buildings=None):
     """
     Run the 15-minute city simulation.
     
@@ -497,6 +497,18 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
             load_path=load_pois
         )
     
+    # Fetch or load residential buildings
+    residential_buildings = get_or_fetch_residential_buildings(
+        place_name=city,
+        save_path=save_buildings,
+        load_path=load_buildings
+    )
+    
+    if residential_buildings is not None and not residential_buildings.empty:
+        print(f"Found {len(residential_buildings)} residential buildings.")
+    else:
+        print("No residential buildings found or loaded.")
+    
     # Filter POIs by selected parishes
     if selected_parishes and parishes_gdf is not None:
         pois = filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes)
@@ -512,7 +524,9 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         random_distribution=random_distribution,
         needs_selection=needs_selection,
         movement_behavior=movement_behavior,
-        city=city
+        city=city,
+        save_buildings=save_buildings,
+        load_buildings=load_buildings
     )
     
     print("Starting simulation...")
@@ -547,7 +561,7 @@ if __name__ == "__main__":
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
     parser.add_argument('--residents', type=int, default=10, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=50, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--steps', type=int, default=5000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
     parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
@@ -569,6 +583,8 @@ if __name__ == "__main__":
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
+    parser.add_argument('--save-buildings', type=str, help='Path to save the residential buildings to (e.g., data/macau_buildings.pkl)')
+    parser.add_argument('--load-buildings', type=str, help='Path to load residential buildings from (e.g., data/macau_buildings.pkl)')
     
     # JSON report argument
     parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
@@ -611,5 +627,7 @@ if __name__ == "__main__":
         save_pois=args.save_pois,
         load_pois=args.load_pois,
         save_json_report=args.save_json_report,
-        city=args.city
+        city=args.city,
+        save_buildings=args.save_buildings,
+        load_buildings=args.load_buildings
     )
