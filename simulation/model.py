@@ -627,7 +627,7 @@ class FifteenMinuteCity(Model):
                     lat2=home_node_geom['y'], lon2=home_node_geom['x']
                 )
                 print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
-                
+                parish = self._get_parish_for_node(home_node)
                 agent_props = self._generate_agent_properties(parish)
 
                 # Determine step size and 15-minute radius based on agent's age
@@ -638,7 +638,7 @@ class FifteenMinuteCity(Model):
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                     self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
                 ))
-                parish = self._get_parish_for_node(home_node)
+                
                 
                 resident = Resident(
                     model=self, unique_id=agent_id, geometry=point_geometry,
