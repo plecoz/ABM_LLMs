@@ -628,12 +628,18 @@ class FifteenMinuteCity(Model):
                 )
                 print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 
-                accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                    self.graph, home_node, cutoff=1000, weight='length'
-                ))
-                parish = self._get_parish_for_node(home_node)
                 agent_props = self._generate_agent_properties(parish)
 
+                # Determine step size and 15-minute radius based on agent's age
+                is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
+                step_size = 60.0 if is_elderly else 80.0
+                fifteen_minute_radius = 15 * step_size
+
+                accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                    self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+                ))
+                parish = self._get_parish_for_node(home_node)
+                
                 resident = Resident(
                     model=self, unique_id=agent_id, geometry=point_geometry,
                     home_node=home_node, accessible_nodes=accessible_nodes,
@@ -687,12 +693,18 @@ class FifteenMinuteCity(Model):
             )
             print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
-            accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                self.graph, home_node, cutoff=1000, weight='length'
-            ))
-            parish = self._get_parish_for_node(home_node)
             agent_props = self._generate_agent_properties(parish)
 
+            # Determine step size and 15-minute radius based on agent's age
+            is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
+            step_size = 60.0 if is_elderly else 80.0
+            fifteen_minute_radius = 15 * step_size
+
+            accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+            ))
+            parish = self._get_parish_for_node(home_node)
+            
             resident = Resident(
                 model=self, unique_id=i, geometry=point_geometry,
                 home_node=home_node, accessible_nodes=accessible_nodes,
