@@ -402,7 +402,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_buildings=None, load_buildings=None):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_buildings=None, load_buildings=None, seed=42):
     """
     Run the 15-minute city simulation.
     
@@ -525,7 +525,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         needs_selection=needs_selection,
         movement_behavior=movement_behavior,
         city=city,
-        residential_buildings=residential_buildings
+        residential_buildings=residential_buildings,
+        seed=seed
     )
     
     print("Starting simulation...")
@@ -563,6 +564,10 @@ if __name__ == "__main__":
     # Parse command line arguments
     import argparse
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
+    
+    # Add seed argument at the top for visibility
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
+    
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
     parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
@@ -634,5 +639,6 @@ if __name__ == "__main__":
         save_json_report=args.save_json_report,
         city=args.city,
         save_buildings=args.save_buildings,
-        load_buildings=args.load_buildings
+        load_buildings=args.load_buildings,
+        seed=args.seed
     )

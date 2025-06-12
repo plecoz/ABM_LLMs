@@ -85,14 +85,21 @@ class FifteenMinuteCity(Model):
                 - random_distribution: Whether to distribute residents randomly
                 - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
                 - movement_behavior: Agent movement behavior ('need-based' or 'random')
-                - seed: Random seed for reproducible results
+                - seed: Random seed for reproducible results (default: 42)
         """
-        # Get random seed from kwargs if provided
-  # Mesa 3.x model initialization with seed
-        super().__init__()
-        random.seed(42)
+        # Get random seed from kwargs
+        seed = kwargs.get('seed', 42)
+        
+        # Initialize Mesa's Model with the seed
+        super().__init__(seed=seed)
+        
+        # Seed all random number generators consistently
+        random.seed(seed)  # Python's random
+        np.random.seed(seed)  # NumPy's random
+        
         # Initialize logger
         self.logger = logging.getLogger("FifteenMinuteCity")
+        self.logger.info(f"Initializing model with seed: {seed}")
         
         # Store city name
         self.city = kwargs.get('city', 'Macau, China')
@@ -159,7 +166,7 @@ class FifteenMinuteCity(Model):
         if self.parishes_gdf is not None:
             self._map_nodes_to_parishes()
         
-        self.random = random.Random(kwargs.get('seed', None))
+        self.random = random.Random(seed)
         #self.random = random.Random(0)
         # Set up scheduler and spatial environment
         self.schedule = CustomRandomActivation(self)
