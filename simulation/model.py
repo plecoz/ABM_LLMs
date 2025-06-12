@@ -90,7 +90,7 @@ class FifteenMinuteCity(Model):
         # Get random seed from kwargs if provided
   # Mesa 3.x model initialization with seed
         super().__init__()
-        random.seed(0)
+        random.seed(42)
         # Initialize logger
         self.logger = logging.getLogger("FifteenMinuteCity")
         
@@ -621,8 +621,11 @@ class FifteenMinuteCity(Model):
                 point_geometry = location['geometry']
                 
                 # Calculate access distance from building centroid to nearest network node
-                home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
-                access_distance_meters = point_geometry.distance(home_node_geom)
+                home_node_geom = self.graph.nodes[home_node]
+                access_distance_meters = ox.distance.great_circle(
+                    lat1=point_geometry.y, lon1=point_geometry.x,
+                    lat2=home_node_geom['y'], lon2=home_node_geom['x']
+                )
                 print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
@@ -677,8 +680,11 @@ class FifteenMinuteCity(Model):
             point_geometry = location['geometry']
             
             # Calculate access distance
-            home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
-            access_distance_meters = point_geometry.distance(home_node_geom)
+            home_node_geom = self.graph.nodes[home_node]
+            access_distance_meters = ox.distance.great_circle_vec(
+                lat1=point_geometry.y, lon1=point_geometry.x,
+                lat2=home_node_geom['y'], lon2=home_node_geom['x']
+            )
             print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(

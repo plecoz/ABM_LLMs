@@ -126,9 +126,10 @@ class Resident(BaseAgent):
 
         # Calculate home access time penalty based on distance from building to network
         self.access_distance = kwargs.get('access_distance', 0)
-        if self.access_distance > 0:
+        if self.access_distance > 0.1:  # Only apply penalty for distances > 0.1 meters
             # Time (in steps/minutes) to walk from building to nearest street node
-            self.home_access_time = max(1, math.ceil(self.access_distance / self.step_size))
+            # We use ceil to ensure any non-zero distance results in at least a 1-minute penalty
+            self.home_access_time = math.ceil(self.access_distance / self.step_size)
             print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
         else:
             self.home_access_time = 0
