@@ -79,7 +79,11 @@ class SimulationAnimator:
             
             # For accurate centroid calculation, project to a local UTM zone
             try:
-                projected_parishes = ox.project_gdf(self.parishes_gdf)
+                # Estimate the UTM CRS for the geometries, which is more robust
+                utm_crs = self.parishes_gdf.estimate_utm_crs()
+                # Project to the estimated UTM CRS
+                projected_parishes = self.parishes_gdf.to_crs(utm_crs)
+                
                 # Calculate centroids in projected space
                 projected_centroids = projected_parishes.geometry.centroid
                 # Convert centroids back to the original CRS for plotting
