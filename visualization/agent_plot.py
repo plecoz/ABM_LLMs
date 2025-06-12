@@ -147,6 +147,7 @@ class AgentPlotter:
             'education': {'color': '#2196F3', 'marker': '^'},     # Blue triangle
             'entertainment': {'color': '#4CAF50', 'marker': '*'}, # Green star
             'transportation': {'color': '#000000', 'marker': 'd'}, # Black diamond
+            'casino': {'color': '#9C27B0', 'marker': 'D'},        # Purple large diamond
             'other': {'color': '#9E9E9E', 'marker': 'o'}          # Gray circle
         }
         

@@ -140,6 +140,7 @@ def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
         "education": [],      # Kindergartens, primary schools, secondary schools
         "entertainment": [],  # Parks, libraries, museums, etc.
         "transportation": [], # Bus stops
+        "casino": [],         # Casinos
     }
     
     try:
@@ -206,6 +207,12 @@ def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
         tags_bus_stops = {'highway': 'bus_stop'}
         
         pois["transportation"].extend(get_pois_for_category(graph, place_name, tags_bus_stops, 'bus_stop'))
+        
+        # 6. Casino POIs
+        print("\nFetching casino points of interest...")
+        tags_casinos = {'amenity': 'casino', 'leisure': 'casino'}
+        
+        pois["casino"].extend(get_pois_for_category(graph, place_name, tags_casinos, 'casino'))
         
         # Remove duplicates (some POIs might share nearest nodes)
         for category in pois:
@@ -275,6 +282,7 @@ def create_dummy_pois(graph, num_per_category=5):
         "education": [],      # Kindergartens, primary schools, secondary schools
         "entertainment": [],  # Parks, libraries, museums, etc.
         "transportation": [], # Bus stops
+        "casino": [],         # Casinos
     }
     
     # Sample POI types for each category
@@ -284,6 +292,7 @@ def create_dummy_pois(graph, num_per_category=5):
         "education": ['school', 'kindergarten', 'primary_school', 'secondary_school', 'university'],
         "entertainment": ['park', 'library', 'museum', 'theater', 'gym'],
         "transportation": ['bus_stop', 'bus_station', 'station', 'platform', 'stop_position'],
+        "casino": ['casino'],
     }
     
     # Get random nodes from the graph

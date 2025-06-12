@@ -121,6 +121,11 @@ class POI(BaseAgent):
             'entertainment', 'community_center'
         ]
         
+        # Casino: Casinos and gambling establishments
+        casino_types = [
+            'casino', 'gambling', 'gaming'
+        ]
+        
         # Public Transportation: Bus stops
         transportation_types = [
             'bus_stop', 'bus_station', 'transit_stop', 'public_transport',
@@ -139,6 +144,8 @@ class POI(BaseAgent):
             category = 'education'
         elif poi_type.lower() in entertainment_types:
             category = 'entertainment'
+        elif poi_type.lower() in casino_types:
+            category = 'casino'
         elif poi_type.lower() in transportation_types:
             category = 'transportation'
         # If no exact match, check for partial matches
@@ -148,6 +155,8 @@ class POI(BaseAgent):
             category = 'healthcare'
         elif any(t in poi_type.lower() for t in ['school', 'education', 'university', 'college']):
             category = 'education'
+        elif any(t in poi_type.lower() for t in ['casino', 'gambling', 'gaming']):
+            category = 'casino'
         elif any(t in poi_type.lower() for t in ['park', 'museum', 'theater', 'library', 'recreation']):
             category = 'entertainment'
         elif any(t in poi_type.lower() for t in ['market', 'shop', 'store', 'bank', 'restaurant']):

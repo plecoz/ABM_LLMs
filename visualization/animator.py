@@ -47,6 +47,7 @@ class SimulationAnimator:
             "education": "#2196F3",      # Blue
             "entertainment": "#4CAF50",  # Green
             "transportation": "#000000", # Black
+            "casino": "#9C27B0",         # Purple
             "other": "#9E9E9E"           # Gray
         }
         
@@ -57,6 +58,7 @@ class SimulationAnimator:
             "education": "^",            # Triangle up
             "entertainment": "*",        # Star
             "transportation": "d",       # Diamond
+            "casino": "D",               # Large diamond
             "other": "o"                 # Circle
         }
         
@@ -353,6 +355,7 @@ class SimulationAnimator:
             "education": 0,
             "entertainment": 0,
             "transportation": 0,
+            "casino": 0,
             "other": 0
         }
         
@@ -405,6 +408,7 @@ class SimulationAnimator:
             "education": "Education",
             "entertainment": "Entertainment",
             "transportation": "Bus Stops",
+            "casino": "Casinos",
             "other": "Other POIs"
         }
         

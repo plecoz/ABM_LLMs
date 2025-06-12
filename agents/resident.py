@@ -349,7 +349,7 @@ class Resident(BaseAgent):
         return {
             "hunger": ["restaurant", "cafe", "fast_food", "food_court", "bar", "pub"],
             "social": ["restaurant", "cafe", "bar", "pub", "community_centre", "place_of_worship", "park"],
-            "recreation": ["park", "cinema", "theatre", "sports_centre", "museum", "library", "tourist_attraction"],
+            "recreation": ["park", "cinema", "theatre", "sports_centre", "museum", "library", "tourist_attraction", "casino"],
             "shopping": ["shop", "supermarket", "mall", "marketplace", "department_store"],
             "healthcare": ["hospital", "clinic", "pharmacy", "dentist", "doctor"],
             "education": ["school", "university", "college", "library", "training_centre"]
