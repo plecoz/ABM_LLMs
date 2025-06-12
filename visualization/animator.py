@@ -22,6 +22,13 @@ class SimulationAnimator:
         self.parishes_gdf = parishes_gdf  # GeoDataFrame containing parishes
         self.residential_buildings = residential_buildings
         
+        # Set font to support Chinese characters if available
+        try:
+            plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial Unicode MS']
+            plt.rcParams['axes.unicode_minus'] = False  # Ensure minus sign is displayed correctly
+        except Exception:
+            print("Warning: CJK-compatible font not found. Chinese characters in plot may not display correctly.")
+        
         # Initialize plot elements
         self.base_plot = self._create_base_plot()
         self.agent_dots = []
@@ -70,13 +77,20 @@ class SimulationAnimator:
                 legend_kwds={'title': 'Parishes', 'loc': 'lower left'}
             )
             
-            # Add parish labels
-            for x, y, label in zip(
-                self.parishes_gdf.geometry.centroid.x,
-                self.parishes_gdf.geometry.centroid.y,
-                self.parishes_gdf['name']
-            ):
-                self.ax.text(x, y, label, fontsize=8, ha='center')
+            # For accurate centroid calculation, project to a local UTM zone
+            try:
+                projected_parishes = ox.project_gdf(self.parishes_gdf)
+                # Calculate centroids in projected space
+                projected_centroids = projected_parishes.geometry.centroid
+                # Convert centroids back to the original CRS for plotting
+                centroids_geo = projected_centroids.to_crs(self.parishes_gdf.crs)
+
+                # Add parish labels at the accurate centroid
+                for geom, label in zip(centroids_geo, self.parishes_gdf['name']):
+                    self.ax.text(geom.x, geom.y, label, fontsize=8, ha='center',
+                                 path_effects=[patheffects.withStroke(linewidth=2, foreground='white')])
+            except Exception as e:
+                print(f"Warning: Could not plot parish labels due to projection error: {e}")
         
         # Then plot the street network on top
         return ox.plot_graph(
