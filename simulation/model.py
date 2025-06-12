@@ -5,6 +5,7 @@ import random
 from agents.resident import Resident
 from agents.poi import POI
 import networkx as nx
+import osmnx as ox
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 import json
@@ -551,113 +552,149 @@ class FifteenMinuteCity(Model):
     def _create_residents_with_distribution(self, num_residents):
         """
         Create resident agents with proportional distribution across parishes.
-        
-        Args:
-            num_residents: Total number of residents to create
-        """
-        if self.parish_distribution and not self.random_distribution:
-            # Use proportional distribution
-            self._create_residents_proportionally(num_residents)
-        else:
-            # Use random distribution (original method)
-            self._create_residents_randomly(num_residents)
-
-    def _create_residents_proportionally(self, num_residents):
-        """
-        Create residents with proportional distribution across parishes.
+        If residential building data is available, residents are placed at building
+        locations. Otherwise, they are placed at random nodes within the parish.
         
         Args:
             num_residents: Total number of residents to create
         """
         agent_id = 0
         
+        # Check if we should use buildings for placement
+        use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
+        
+        if use_buildings:
+            self.logger.info("Initializing residents at residential building locations.")
+        else:
+            self.logger.info("No residential building data. Initializing residents at random network nodes.")
+
         for parish_name, num_parish_residents in self.parish_distribution.items():
             if num_parish_residents <= 0:
                 continue
-                
-            # Get nodes in this parish
-            parish_nodes = [node_id for node_id, parish in self.node_to_parish.items() 
-                          if parish and self._clean_parish_name_for_matching(parish) == parish_name]
             
-            if not parish_nodes:
-                self.logger.warning(f"No nodes found for parish {parish_name}. Skipping residents for this parish.")
-                continue
+            # --- Home Location Selection ---
+            home_locations = []
             
-            # Create residents for this parish
-            for i in range(num_parish_residents):
-                home_node = random.choice(parish_nodes)
+            if use_buildings and self.parishes_gdf is not None:
+                # Get the geometry for the current parish
+                parish_geom_series = self.parishes_gdf[self.parishes_gdf['name'].apply(
+                    self._clean_parish_name_for_matching) == parish_name].geometry
                 
-                # Get coordinates from the node
-                node_coords = self.graph.nodes[home_node]
-                # Create a Point geometry from the coordinates
-                point_geometry = Point(node_coords['x'], node_coords['y'])
+                if not parish_geom_series.empty:
+                    parish_geom = parish_geom_series.iloc[0]
+                    # Find buildings within this parish
+                    buildings_in_parish = self.residential_buildings[self.residential_buildings.within(parish_geom)]
+                    
+                    if not buildings_in_parish.empty:
+                        # Sample buildings with replacement for the number of residents
+                        selected_buildings = buildings_in_parish.sample(n=num_parish_residents, replace=True, random_state=self.random.randint(0, 1000000))
+                        
+                        for _, building in selected_buildings.iterrows():
+                            # Use centroid for agent geometry
+                            point_geometry = building.geometry.centroid
+                            # Find nearest network node for travel
+                            home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                            home_locations.append({'geometry': point_geometry, 'node': home_node})
+                    else:
+                        self.logger.warning(f"No residential buildings found in parish {parish_name}. Falling back to random nodes for this parish.")
+                else:
+                    self.logger.warning(f"Could not find geometry for parish {parish_name}. Falling back to random nodes.")
+            
+            # Fallback or default behavior: use random nodes
+            if not home_locations:
+                parish_nodes = [node_id for node_id, parish in self.node_to_parish.items() 
+                              if parish and self._clean_parish_name_for_matching(parish) == parish_name]
                 
-                # Calculate all nodes within 1km
+                if not parish_nodes:
+                    self.logger.warning(f"No network nodes found for parish {parish_name}. Skipping residents for this parish.")
+                    continue
+                
+                for _ in range(num_parish_residents):
+                    home_node = random.choice(parish_nodes)
+                    node_coords = self.graph.nodes[home_node]
+                    point_geometry = Point(node_coords['x'], node_coords['y'])
+                    home_locations.append({'geometry': point_geometry, 'node': home_node})
+
+            # --- Residents Creation ---
+            for location in home_locations:
+                home_node = location['node']
+                point_geometry = location['geometry']
+                
+                # Calculate access distance from building centroid to nearest network node
+                home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
+                access_distance_meters = point_geometry.distance(home_node_geom)
+                
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                     self.graph, home_node, cutoff=1000, weight='length'
                 ))
-
-                # Determine the parish this agent belongs to
                 parish = self._get_parish_for_node(home_node)
-                
-                # Generate agent properties based on parish if available
                 agent_props = self._generate_agent_properties(parish)
 
                 resident = Resident(
-                    model=self,
-                    unique_id=agent_id,
-                    geometry=point_geometry,
-                    home_node=home_node,
-                    accessible_nodes=accessible_nodes,
-                    parish=parish,
-                    needs_selection=self.needs_selection,
-                    movement_behavior=self.movement_behavior,
+                    model=self, unique_id=agent_id, geometry=point_geometry,
+                    home_node=home_node, accessible_nodes=accessible_nodes,
+                    parish=parish, needs_selection=self.needs_selection,
+                    movement_behavior=self.movement_behavior, 
+                    access_distance=access_distance_meters,
                     **agent_props
                 )
                 self.grid.place_agent(resident, home_node)
-                self.schedule.add(resident)  # Add to our custom scheduler
+                self.schedule.add(resident)
                 self.residents.append(resident)
                 self.all_agents.append(resident)
                 agent_id += 1
 
     def _create_residents_randomly(self, num_residents):
         """
-        Create residents with random distribution (original method).
+        Create residents with random distribution.
+        If residential building data is available, residents are placed at random
+        building locations. Otherwise, they are placed at random nodes.
         
         Args:
             num_residents: Total number of residents to create
         """
-        for i in range(num_residents):
-            home_node = random.choice(list(self.graph.nodes()))
-            # Get coordinates from the node
-            node_coords = self.graph.nodes[home_node]
-            # Create a Point geometry from the coordinates
-            point_geometry = Point(node_coords['x'], node_coords['y'])
+        home_locations = []
+        use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
+
+        if use_buildings:
+            self.logger.info("Initializing residents at random residential building locations.")
+            selected_buildings = self.residential_buildings.sample(n=num_residents, replace=True, random_state=self.random.randint(0, 1000000))
+            for _, building in selected_buildings.iterrows():
+                point_geometry = building.geometry.centroid
+                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                home_locations.append({'geometry': point_geometry, 'node': home_node})
+        else:
+            self.logger.info("No residential building data. Initializing residents at random network nodes.")
+            random_nodes = random.choices(list(self.graph.nodes()), k=num_residents)
+            for home_node in random_nodes:
+                node_coords = self.graph.nodes[home_node]
+                point_geometry = Point(node_coords['x'], node_coords['y'])
+                home_locations.append({'geometry': point_geometry, 'node': home_node})
+
+        for i, location in enumerate(home_locations):
+            home_node = location['node']
+            point_geometry = location['geometry']
             
-            # Calculate all nodes within 1km
+            # Calculate access distance
+            home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
+            access_distance_meters = point_geometry.distance(home_node_geom)
+            
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 self.graph, home_node, cutoff=1000, weight='length'
             ))
-
-            # Determine the parish this agent belongs to
             parish = self._get_parish_for_node(home_node)
-            
-            # Generate agent properties based on parish if available
             agent_props = self._generate_agent_properties(parish)
 
             resident = Resident(
-                model=self,
-                unique_id=i,
-                geometry=point_geometry,
-                home_node=home_node,
-                accessible_nodes=accessible_nodes,
-                parish=parish,
-                needs_selection=self.needs_selection,
-                movement_behavior=self.movement_behavior,
+                model=self, unique_id=i, geometry=point_geometry,
+                home_node=home_node, accessible_nodes=accessible_nodes,
+                parish=parish, needs_selection=self.needs_selection,
+                movement_behavior=self.movement_behavior, 
+                access_distance=access_distance_meters,
                 **agent_props
             )
             self.grid.place_agent(resident, home_node)
-            self.schedule.add(resident)  # Add to our custom scheduler
+            self.schedule.add(resident)
             self.residents.append(resident)
             self.all_agents.append(resident)
 

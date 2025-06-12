@@ -525,8 +525,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         needs_selection=needs_selection,
         movement_behavior=movement_behavior,
         city=city,
-        save_buildings=save_buildings,
-        load_buildings=load_buildings
+        residential_buildings=residential_buildings
     )
     
     print("Starting simulation...")
@@ -535,7 +534,13 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     fig, ax = plt.subplots(figsize=(12, 10))
     
     # Initialize animator with parishes data
-    animator = SimulationAnimator(model, graph, ax=ax, parishes_gdf=parishes_gdf)
+    animator = SimulationAnimator(
+        model, 
+        graph, 
+        ax=ax, 
+        parishes_gdf=parishes_gdf,
+        residential_buildings=model.residential_buildings
+    )
     
     # Configure animator to use specific styling for selected POIs
     if selected_pois:
@@ -560,7 +565,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
     parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
     parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
-    parser.add_argument('--residents', type=int, default=10, help='Number of resident agents')
+    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
     parser.add_argument('--steps', type=int, default=5000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')

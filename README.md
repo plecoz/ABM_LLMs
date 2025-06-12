@@ -89,6 +89,8 @@ You can customize the simulation with the following arguments:
 | `--load-network` | Load a pre-saved city network from a file. | (not set) | `--load-network path/to/network.pkl` |
 | `--save-pois` | Save the downloaded POIs to a file. | (not set) | `--save-pois path/to/pois.pkl` |
 | `--load-pois` | Load pre-saved POIs from a file. | (not set) | `--load-pois path/to/pois.pkl` |
+| `--save-buildings` | Save downloaded residential buildings to a file. | (not set) | `--save-buildings path/to/buildings.pkl` |
+| `--load-buildings` | Load pre-saved residential buildings from a file. | (not set) | `--load-buildings path/to/buildings.pkl` |
 
 ### Running a Focused Simulation
 
@@ -125,6 +127,16 @@ For other cities, the simulation will run without parish/district visualization,
 ---
 
 ## Key Concepts & Implementation Details
+
+### Realistic Home Initialization & Access Time
+
+To improve simulation realism, agents are no longer placed on abstract street corners.
+
+1.  **Initialization in Buildings**: If residential building data is provided (using `--load-buildings`), each resident is initialized at the center of a real residential building within their assigned parish. This provides a far more accurate starting point for their daily activities.
+
+2.  **Access Time Penalty**: The model calculates the distance from the agent's building to the nearest point on the street network. This distance is converted into a time penalty (in minutes) based on the agent's walking speed. This "access time" is automatically added to any journey that starts from or ends at the agent's home, realistically modeling the time it takes to walk from a front door to the street.
+
+This dual approach ensures that both the agent's location and their travel times are more representative of a real urban environment.
 
 ### Resident Agent
 
@@ -181,22 +193,27 @@ The simulation is designed to be city-agnostic. To add and simulate a new city (
     python main.py --city "Lisbon, Portugal"
     ```
 
-2.  **(Optional) Add a Districts Shapefile**: To visualize the city's districts or parishes and confine the simulation to specific areas, you need a geographic shapefile (e.g., `.gpkg`, `.shp`).
-    -   Place the shapefile in the `data/` directory (e.g., `data/lisbon_shapefiles/`).
-    -   In `main.py`, update the `DEFAULT_PARISHES_PATH` variable to point to your new file.
+2.  **(Optional but Recommended) Add Building Data**: To enable realistic agent placement, you can download and save the city's residential buildings.
+    -   Run the simulation once with `--save-buildings`.
+    -   `python main.py --city "Lisbon, Portugal" --save-buildings data/lisbon_buildings.pkl`
+    -   Use `--load-buildings` in all future runs.
 
-3.  **(Optional) Add Demographic Data**: For high-fidelity simulations with realistic agent generation (like in Macau), you can create a demographic JSON file.
+3.  **(Optional) Add a Districts Shapefile**: To visualize the city's districts or parishes and confine the simulation to specific areas, you need a geographic shapefile (e.g., `.gpkg`, `.shp`).
+    -   Place the shapefile in the `data/` directory (e.g., `data/lisbon_shapefiles/`).
+    -   In `main.py`, update the `CITY_PARISHES_PATHS` dictionary to point to your new file.
+
+4.  **(Optional) Add Demographic Data**: For high-fidelity simulations with realistic agent generation (like in Macau), you can create a demographic JSON file.
     -   Create a file similar to `data/parish_demographic.json` with age, gender, and education distributions for the new city's districts.
     -   Use the `--demographics` argument to point the simulation to your new file.
-    -   If no demographic file is provided, residents will be generated with default attributes and distributed randomly.
+    -   If no demographic file is provided, residents will be generated with default attributes and distributed randomly (either at building locations or on the network).
 
-4.  **(Recommended) Use Caching Arguments**: For new cities, downloading the network and POIs can be slow. Run the simulation once with `--save-network` and `--save-pois`, then use `--load-network` and `--load-pois` for all subsequent runs to speed up initialization significantly.
+5.  **(Recommended) Use Caching Arguments**: For new cities, downloading the network and POIs can be slow. Run the simulation once with `--save-network`, `--save-pois`, and `--save-buildings`, then use the `--load-*` arguments for all subsequent runs to speed up initialization significantly.
     ```bash
-    # First run (downloads and saves)
-    python main.py --city "Lisbon, Portugal" --save-network data/lisbon_network.pkl --save-pois data/lisbon_pois.pkl
+    # First run (downloads and saves everything)
+    python main.py --city "Lisbon, Portugal" --save-network data/lisbon_network.pkl --save-pois data/lisbon_pois.pkl --save-buildings data/lisbon_buildings.pkl
 
     # Subsequent runs (loads from file)
-    python main.py --city "Lisbon, Portugal" --load-network data/lisbon_network.pkl --load-pois data/lisbon_pois.pkl
+    python main.py --city "Lisbon, Portugal" --load-network data/lisbon_network.pkl --load-pois data/lisbon_pois.pkl --load-buildings data/lisbon_buildings.pkl
     ```
 
 ---

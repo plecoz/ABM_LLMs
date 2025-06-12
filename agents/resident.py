@@ -115,7 +115,22 @@ class Resident(BaseAgent):
         self.employment_status = kwargs.get('employment_status', "employed")
         self.household_type = kwargs.get('household_type', "single")
         
+        # Determine step size based on age for calculating travel times
+        is_elderly = False
+        if self.age_class:
+            age_class_str = str(self.age_class).lower()
+            if any(s in age_class_str for s in ['65+', '65-', '70+', '70-', '75+', '75-', '80+', '80-', '85+', '85-']):
+                is_elderly = True
+        
+        self.step_size = 60.0 if is_elderly else 80.0  # meters per minute
 
+        # Calculate home access time penalty based on distance from building to network
+        self.access_distance = kwargs.get('access_distance', 0)
+        if self.access_distance > 0:
+            # Time (in steps/minutes) to walk from building to nearest street node
+            self.home_access_time = max(1, math.ceil(self.access_distance / self.step_size))
+        else:
+            self.home_access_time = 0
         
         # Energy levels and mobility constraints
         # self.max_energy = 100
@@ -230,6 +245,13 @@ class Resident(BaseAgent):
         
         if travel_time is None:
             return False
+        
+        # Add access time penalty if starting from or going to home
+        is_starting_from_home = self.current_node == self.home_node and not self.traveling
+        is_going_home = target_node == self.home_node
+        
+        if (is_starting_from_home or is_going_home) and self.current_node != target_node:
+            travel_time += self.home_access_time
         
         self.traveling = True
         self.travel_time_remaining = travel_time
