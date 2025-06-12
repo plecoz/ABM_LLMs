@@ -623,6 +623,7 @@ class FifteenMinuteCity(Model):
                 # Calculate access distance from building centroid to nearest network node
                 home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
                 access_distance_meters = point_geometry.distance(home_node_geom)
+                print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                     self.graph, home_node, cutoff=1000, weight='length'
@@ -678,6 +679,7 @@ class FifteenMinuteCity(Model):
             # Calculate access distance
             home_node_geom = Point(self.graph.nodes[home_node]['x'], self.graph.nodes[home_node]['y'])
             access_distance_meters = point_geometry.distance(home_node_geom)
+            print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 self.graph, home_node, cutoff=1000, weight='length'

@@ -129,6 +129,7 @@ class Resident(BaseAgent):
         if self.access_distance > 0:
             # Time (in steps/minutes) to walk from building to nearest street node
             self.home_access_time = max(1, math.ceil(self.access_distance / self.step_size))
+            print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
         else:
             self.home_access_time = 0
         
@@ -251,6 +252,7 @@ class Resident(BaseAgent):
         is_going_home = target_node == self.home_node
         
         if (is_starting_from_home or is_going_home) and self.current_node != target_node:
+            print(f"DEBUG: Resident {self.unique_id} trip to/from home. Base travel time: {travel_time} min. Adding access penalty: {self.home_access_time} min.")
             travel_time += self.home_access_time
         
         self.traveling = True
