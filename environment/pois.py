@@ -407,3 +407,190 @@ def filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes):
     total_original = sum(len(poi_list) for poi_list in pois.values())
     print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
     return filtered_pois
+
+def get_or_fetch_environment_data(place_name="Macau, China", save_path=None, load_path=None):
+    """
+    Load environment data from file if available, otherwise fetch from OSM and optionally save.
+    Environment data includes residential buildings, water bodies, and cliffs.
+    
+    Args:
+        place_name: Name of the place to fetch environment data from
+        save_path: Path to save the environment data after fetching (optional)
+        load_path: Path to load the environment data from (optional)
+        
+    Returns:
+        Dictionary containing environment data with keys: 'residential_buildings', 'water_bodies', 'cliffs'
+    """
+    # Try to load from file first if path is provided
+    if load_path:
+        env_data = load_environment_data(load_path)
+        if env_data is not None:
+            return env_data
+        else:
+            print("Failed to load environment data from file, fetching from OpenStreetMap...")
+    
+    # Fetch from OpenStreetMap
+    env_data = fetch_environment_data(place_name)
+    
+    # Save to file if path is provided
+    if save_path:
+        save_environment_data(env_data, save_path)
+    
+    return env_data
+
+def fetch_environment_data(place_name="Macau, China"):
+    """
+    Fetch comprehensive environment data from OpenStreetMap including:
+    - Residential buildings
+    - Water bodies (natural=water, waterway=*, etc.)
+    - Cliffs and barriers (natural=cliff, barrier=*, etc.)
+    - Forests and green areas (landuse=forest, natural=wood, etc.)
+    
+    Args:
+        place_name: Name of the place to fetch environment data from
+        
+    Returns:
+        Dictionary containing environment data
+    """
+    print(f"Fetching environment data for {place_name} from OpenStreetMap...")
+    
+    env_data = {
+        'residential_buildings': gpd.GeoDataFrame(),
+        'water_bodies': gpd.GeoDataFrame(),
+        'cliffs': gpd.GeoDataFrame(),
+        'forests': gpd.GeoDataFrame()
+    }
+    
+    try:
+        # 1. Fetch residential buildings
+        print("- Fetching residential buildings...")
+        residential_tags = {
+            "building": ["apartments", "house", "residential", "detached", "semidetached_house", "terrace", "dormitory"]
+        }
+        
+        try:
+            buildings = ox.features_from_place(place_name, residential_tags)
+            env_data['residential_buildings'] = buildings
+            print(f"  Found {len(buildings)} residential buildings")
+        except Exception as e:
+            print(f"  Error fetching residential buildings: {e}")
+            env_data['residential_buildings'] = gpd.GeoDataFrame()
+        
+        # 2. Fetch water bodies
+        print("- Fetching water bodies...")
+        water_tags = {
+            "natural": ["water", "bay", "strait"],
+            "waterway": ["river", "stream", "canal", "drain"],
+            "landuse": ["reservoir", "basin"]
+        }
+        
+        try:
+            water_bodies = ox.features_from_place(place_name, water_tags)
+            env_data['water_bodies'] = water_bodies
+            print(f"  Found {len(water_bodies)} water bodies")
+        except Exception as e:
+            print(f"  Error fetching water bodies: {e}")
+            env_data['water_bodies'] = gpd.GeoDataFrame()
+        
+        # 3. Fetch cliffs and barriers
+        print("- Fetching cliffs and barriers...")
+        cliff_tags = {
+            "natural": ["cliff", "rock", "stone"],
+            "barrier": ["wall", "fence", "retaining_wall", "city_wall"],
+            "man_made": ["breakwater", "groyne", "embankment"]
+        }
+        
+        try:
+            cliffs = ox.features_from_place(place_name, cliff_tags)
+            env_data['cliffs'] = cliffs
+            print(f"  Found {len(cliffs)} cliffs and barriers")
+        except Exception as e:
+            print(f"  Error fetching cliffs and barriers: {e}")
+            env_data['cliffs'] = gpd.GeoDataFrame()
+        
+        # 4. Fetch forests and green areas
+        print("- Fetching forests and green areas...")
+        forest_tags = {
+            "landuse": ["forest", "wood"],
+            "natural": ["wood", "scrub", "grassland"],
+            "leisure": ["park", "nature_reserve"]
+        }
+        
+        try:
+            forests = ox.features_from_place(place_name, forest_tags)
+            env_data['forests'] = forests
+            print(f"  Found {len(forests)} forests and green areas")
+        except Exception as e:
+            print(f"  Error fetching forests and green areas: {e}")
+            env_data['forests'] = gpd.GeoDataFrame()
+        
+        print("Environment data fetching completed successfully!")
+        
+    except Exception as e:
+        print(f"Error fetching environment data: {e}")
+        # Return empty GeoDataFrames if fetching fails
+        env_data = {
+            'residential_buildings': gpd.GeoDataFrame(),
+            'water_bodies': gpd.GeoDataFrame(),
+            'cliffs': gpd.GeoDataFrame(),
+            'forests': gpd.GeoDataFrame()
+        }
+    
+    return env_data
+
+def save_environment_data(env_data, filepath):
+    """
+    Save environment data dictionary to a file using pickle.
+    
+    Args:
+        env_data: Dictionary containing environment data
+        filepath: Path where to save the environment data file
+    """
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        with open(filepath, 'wb') as f:
+            pickle.dump(env_data, f)
+        
+        # Count total features
+        total_buildings = len(env_data.get('residential_buildings', gpd.GeoDataFrame()))
+        total_water = len(env_data.get('water_bodies', gpd.GeoDataFrame()))
+        total_cliffs = len(env_data.get('cliffs', gpd.GeoDataFrame()))
+        total_forests = len(env_data.get('forests', gpd.GeoDataFrame()))
+        
+        print(f"Environment data saved to {filepath}")
+        print(f"Saved {total_buildings} residential buildings, {total_water} water bodies, {total_cliffs} cliffs/barriers, {total_forests} forests/green areas")
+    except Exception as e:
+        print(f"Error saving environment data: {e}")
+
+def load_environment_data(filepath):
+    """
+    Load environment data dictionary from a saved file.
+    
+    Args:
+        filepath: Path to the saved environment data file
+        
+    Returns:
+        Dictionary containing environment data or None if loading fails
+    """
+    try:
+        if not os.path.exists(filepath):
+            print(f"Environment data file not found: {filepath}")
+            return None
+            
+        with open(filepath, 'rb') as f:
+            env_data = pickle.load(f)
+        
+        # Count total features
+        total_buildings = len(env_data.get('residential_buildings', gpd.GeoDataFrame()))
+        total_water = len(env_data.get('water_bodies', gpd.GeoDataFrame()))
+        total_cliffs = len(env_data.get('cliffs', gpd.GeoDataFrame()))
+        total_forests = len(env_data.get('forests', gpd.GeoDataFrame()))
+        
+        print(f"Environment data loaded from {filepath}")
+        print(f"Loaded {total_buildings} residential buildings, {total_water} water bodies, {total_cliffs} cliffs/barriers, {total_forests} forests/green areas")
+        return env_data
+    except Exception as e:
+        print(f"Error loading environment data from file: {e}")
+        return None

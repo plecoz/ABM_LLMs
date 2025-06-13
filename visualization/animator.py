@@ -14,13 +14,16 @@ from matplotlib_scalebar.scalebar import ScaleBar
 
 
 class SimulationAnimator:
-    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None):
+    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None, water_bodies=None, cliffs=None, forests=None):
         self.model = model
         self.graph = graph
         self.fig = ax.figure if ax else plt.figure(figsize=(12, 10))
         self.ax = ax if ax else self.fig.add_subplot(111)
         self.parishes_gdf = parishes_gdf  # GeoDataFrame containing parishes
         self.residential_buildings = residential_buildings
+        self.water_bodies = water_bodies  # GeoDataFrame containing water bodies
+        self.cliffs = cliffs  # GeoDataFrame containing cliffs and barriers
+        self.forests = forests  # GeoDataFrame containing forests and green areas
         
         # Set font to support Chinese characters if available
         try:
@@ -114,16 +117,28 @@ class SimulationAnimator:
         """Initialize the plot with the static elements."""
         self.ax.clear()
         
+        # Plot water bodies first (lowest layer)
+        if self.water_bodies is not None and not self.water_bodies.empty:
+            self.water_bodies.plot(ax=self.ax, facecolor='#4FC3F7', edgecolor='#0277BD', linewidth=0.5, alpha=0.7, zorder=0)
+        
+        # Plot forests and green areas
+        if self.forests is not None and not self.forests.empty:
+            self.forests.plot(ax=self.ax, facecolor='#66BB6A', edgecolor='#2E7D32', linewidth=0.5, alpha=0.6, zorder=1)
+        
+        # Plot cliffs and barriers
+        if self.cliffs is not None and not self.cliffs.empty:
+            self.cliffs.plot(ax=self.ax, facecolor='#8D6E63', edgecolor='#5D4037', linewidth=0.8, alpha=0.8, zorder=2)
+        
+        # Plot residential buildings
+        if self.residential_buildings is not None and not self.residential_buildings.empty:
+            self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=3)
+        
         # Plot the street network
         ox.plot_graph(self.graph, ax=self.ax, node_size=0, edge_color='gray', edge_linewidth=0.5, show=False, close=False)
         
-        # Plot parishes if available
+        # Plot parishes if available (on top of everything else)
         if self.parishes_gdf is not None:
-            self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=2)
-            
-        # Plot residential buildings if available
-        if self.residential_buildings is not None and not self.residential_buildings.empty:
-            self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=1)
+            self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=5)
 
         # Plot POIs
         self._plot_poi_agents()
@@ -135,11 +150,14 @@ class SimulationAnimator:
         self._add_north_arrow()
         self._create_legend()
         
-        # Set title with parishes information
+        # Set title with environment information
+        title_parts = ["Macau 15-Minute City"]
         if self.parishes_gdf is not None:
-            self.ax.set_title("Macau 15-Minute City with Parishes", fontsize=16)
-        else:
-            self.ax.set_title("Macau 15-Minute City", fontsize=16)
+            title_parts.append("with Parishes")
+        if (self.water_bodies is not None and not self.water_bodies.empty) or (self.cliffs is not None and not self.cliffs.empty) or (self.forests is not None and not self.forests.empty):
+            title_parts.append("and Environment")
+        
+        self.ax.set_title(" ".join(title_parts), fontsize=16)
             
         plt.draw()
     
@@ -429,6 +447,30 @@ class SimulationAnimator:
                       label='Residents')
         )
         
+        # Add environment elements to legend if they exist
+        if self.residential_buildings is not None and not self.residential_buildings.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#d3d3d3', edgecolor='gray',
+                             label='Residential Buildings')
+            )
+        
+        if self.water_bodies is not None and not self.water_bodies.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#4FC3F7', edgecolor='#0277BD',
+                             alpha=0.7, label='Water Bodies')
+            )
+        
+        if self.forests is not None and not self.forests.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#66BB6A', edgecolor='#2E7D32',
+                             alpha=0.6, label='Forests & Green Areas')
+            )
+        
+        if self.cliffs is not None and not self.cliffs.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#8D6E63', edgecolor='#5D4037',
+                             alpha=0.8, label='Cliffs & Barriers')
+            )
         
         # Create the legend
         self.ax.legend(handles=legend_elements, 

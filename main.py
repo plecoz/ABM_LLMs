@@ -1,24 +1,19 @@
-from environment.city_network import load_city_network, get_or_load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_residential_buildings
-from simulation.model import FifteenMinuteCity
-from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
-import sys
-import os
+import matplotlib.patheffects as patheffects
+from matplotlib.patches import FancyArrowPatch
+import numpy as np
 import geopandas as gpd
 import json
+import os
+from config.poi_config import get_active_poi_config
+
+from environment.city_network import load_city_network, get_or_load_city_network
+from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
+from simulation.model import FifteenMinuteCity
+from visualization import SimulationAnimator
+import sys
 import re
 import unicodedata
-
-# Import POI configuration
-try:
-    from config.poi_config import get_active_poi_config
-except ImportError:
-    # Create config directory if it doesn't exist
-    if not os.path.exists('config'):
-        os.makedirs('config')
-    print("POI configuration not found. Using default configuration (all POIs).")
-    get_active_poi_config = lambda: None
 
 # Shapefile path for Macau parishes
 CITY_PARISHES_PATHS = {
@@ -402,7 +397,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_buildings=None, load_buildings=None, seed=42):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42):
     """
     Run the 15-minute city simulation.
     
@@ -411,6 +406,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_network: Path to load the network from (instead of OSM)
         save_pois: Path to save the POIs after fetching from OSM
         load_pois: Path to load the POIs from (instead of OSM)
+        save_environment: Path to save the environment data (buildings, water, cliffs) after fetching from OSM
+        load_environment: Path to load the environment data from (instead of OSM)
         save_json_report: Path to save the detailed JSON report (optional)
         city: Name of the city for the simulation (default: 'Macau, China')
     """
@@ -497,17 +494,38 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
             load_path=load_pois
         )
     
-    # Fetch or load residential buildings
-    residential_buildings = get_or_fetch_residential_buildings(
+    # Fetch or load environment data (buildings, water bodies, cliffs)
+    environment_data = get_or_fetch_environment_data(
         place_name=city,
-        save_path=save_buildings,
-        load_path=load_buildings
+        save_path=save_environment,
+        load_path=load_environment
     )
     
-    if residential_buildings is not None and not residential_buildings.empty:
+    # Extract components from environment data
+    residential_buildings = environment_data.get('residential_buildings', gpd.GeoDataFrame())
+    water_bodies = environment_data.get('water_bodies', gpd.GeoDataFrame())
+    cliffs = environment_data.get('cliffs', gpd.GeoDataFrame())
+    forests = environment_data.get('forests', gpd.GeoDataFrame())
+    
+    if not residential_buildings.empty:
         print(f"Found {len(residential_buildings)} residential buildings.")
     else:
         print("No residential buildings found or loaded.")
+        
+    if not water_bodies.empty:
+        print(f"Found {len(water_bodies)} water bodies.")
+    else:
+        print("No water bodies found or loaded.")
+        
+    if not cliffs.empty:
+        print(f"Found {len(cliffs)} cliffs and barriers.")
+    else:
+        print("No cliffs and barriers found or loaded.")
+        
+    if not forests.empty:
+        print(f"Found {len(forests)} forests and green areas.")
+    else:
+        print("No forests and green areas found or loaded.")
     
     # Filter POIs by selected parishes
     if selected_parishes and parishes_gdf is not None:
@@ -534,13 +552,16 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     plt.ion()  # Turn on interactive mode
     fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Initialize animator with parishes data
+    # Initialize animator with parishes data and environment components
     animator = SimulationAnimator(
         model, 
         graph, 
         ax=ax, 
         parishes_gdf=parishes_gdf,
-        residential_buildings=model.residential_buildings
+        residential_buildings=residential_buildings,
+        water_bodies=water_bodies,
+        cliffs=cliffs,
+        forests=forests
     )
     
     # Configure animator to use specific styling for selected POIs
@@ -593,8 +614,8 @@ if __name__ == "__main__":
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
-    parser.add_argument('--save-buildings', type=str, help='Path to save the residential buildings to (e.g., data/macau_buildings.pkl)')
-    parser.add_argument('--load-buildings', type=str, help='Path to load residential buildings from (e.g., data/macau_buildings.pkl)')
+    parser.add_argument('--save-environment', type=str, help='Path to save the environment data (buildings, water, cliffs) after fetching from OSM (e.g., data/macau_environment.pkl)')
+    parser.add_argument('--load-environment', type=str, help='Path to load the environment data from file instead of OSM (e.g., data/macau_environment.pkl)')
     
     # JSON report argument
     parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
@@ -638,7 +659,7 @@ if __name__ == "__main__":
         load_pois=args.load_pois,
         save_json_report=args.save_json_report,
         city=args.city,
-        save_buildings=args.save_buildings,
-        load_buildings=args.load_buildings,
+        save_environment=args.save_environment,
+        load_environment=args.load_environment,
         seed=args.seed
     )
