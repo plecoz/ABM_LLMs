@@ -1,16 +1,16 @@
-
 import os
 import random
 import httpx
 import argparse
 from openai import OpenAI
 
+
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_random_exponential,
 )
-from config import PROXY, ATTEMPT_COUNTER, WAIT_TIME_MIN, WAIT_TIME_MAX, VLLM_URL
+from config.config_API import PROXY, ATTEMPT_COUNTER, WAIT_TIME_MIN, WAIT_TIME_MAX, VLLM_URL
 from utils import token_count
 
 
@@ -23,13 +23,15 @@ def get_api_key(platform, model_name=None):
         return os.environ["vllm_KEY"]
     elif platform=="SiliconFlow":
         return os.environ["SiliconFlow_API_KEY"]
+    elif platform=="zhipuai":
+        return os.environ.get("ZHIPUAI_API_KEY", "8a8922a87b9c404c86a33c9f84890f53.h1orz28xqPNUjLpl")
 
 
 class LLMAPI:
     def __init__(self, model_name, platform=None):
         self.model_name = model_name
         
-        self.platform_list = ["SiliconFlow", "OpenAI", "DeepInfra", 'vllm']
+        self.platform_list = ["SiliconFlow", "OpenAI", "DeepInfra", 'vllm', 'zhipuai']
         self.model_platforms = {
                     "SiliconFlow":  [
                         'llama3-8b', 'llama3-70b', 'gemma2-9b', 'gemma2-27b', 'mistral7bv2', 'qwen2-1.5b', 'qwen2-7b', 'qwen2-14b', 'qwen2-72b', 'glm4-9b', 'glm3-6b', 'deepseekv2', 'llama3.1-8b', 'llama3.1-70b', 'llama3.1-405b'] + [
@@ -37,7 +39,8 @@ class LLMAPI:
                     ],
                     "OpenAI":       ['gpt35turbo', 'gpt4turbo', 'gpt4o', 'gpt4omini'],
                     "DeepInfra":    ['llama3-8b', 'llama3-70b', 'gemma2-9b', 'gemma2-27b', 'mistral7bv2', 'qwen2-7b', 'qwen2-72b', 'llama3.1-8b', 'llama3.1-70b', 'mistral7bv3', 'llama3.1-405b'],
-                    "vllm": ['llama3-8B-local', 'gemma2-2b-local', 'chatglm3-citygpt', 'chatglm3-6B-local']
+                    "vllm": ['llama3-8B-local', 'gemma2-2b-local', 'chatglm3-citygpt', 'chatglm3-6B-local'],
+                    "zhipuai": ['glm-4-flash', 'glm-4', 'glm-4-air', 'glm-4-airx', 'glm-4-long', 'glm-3-turbo']
                 }
         
         self.model_mapper = {
@@ -74,7 +77,14 @@ class LLMAPI:
             'llama3-8B-local':'llama3-8B-local',
             'gemma2-2b-local': 'gemma2-2b-local',
             'chatglm3-citygpt': 'chatglm3-citygpt',
-            'chatglm3-6B-local': 'chatglm3-6B-local'
+            'chatglm3-6B-local': 'chatglm3-6B-local',
+            # ZhipuAI models
+            'glm-4-flash': 'glm-4-flash',
+            'glm-4': 'glm-4',
+            'glm-4-air': 'glm-4-air',
+            'glm-4-airx': 'glm-4-airx',
+            'glm-4-long': 'glm-4-long',
+            'glm-3-turbo': 'glm-3-turbo'
         }
 
         support_models = ";".join([";".join(self.model_platforms[k]) for k in self.model_platforms])
@@ -117,6 +127,19 @@ class LLMAPI:
                 base_url=VLLM_URL,
                 api_key=get_api_key(platform)
             )
+        elif self.platform == 'zhipuai':
+            # Only pass proxies if they are configured
+            if PROXY:
+                self.client = OpenAI(
+                    base_url="https://open.bigmodel.cn/api/paas/v4/",
+                    api_key=get_api_key(platform),
+                    http_client=httpx.Client(proxies=PROXY),
+                )
+            else:
+                self.client = OpenAI(
+                    base_url="https://open.bigmodel.cn/api/paas/v4/",
+                    api_key=get_api_key(platform),
+                )
     
     def get_client(self):
         return self.client
@@ -171,7 +194,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_name', type=str, default="llama3-8b")
-    parser.add_argument("--platform", type=str, default="SiliconFlow", choices=["SiliconFlow", "OpenAI", "DeepInfra"])
+    parser.add_argument("--platform", type=str, default="SiliconFlow", choices=["SiliconFlow", "OpenAI", "DeepInfra", "zhipuai"])
     args = parser.parse_args()
 
     llm = LLMWrapper(model_name=args.model_name, platform=args.platform)
