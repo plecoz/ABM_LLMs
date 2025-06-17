@@ -18,6 +18,9 @@ from mesa.datacollection import DataCollector
 import geopandas as gpd
 from outputs import OutputController
 
+# Add imports for LLM integration
+from agents.persona_memory_modules import PersonaMemoryManager, PersonaType
+from simulation.llm_interaction_layer import LLMInteractionLayer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -160,6 +163,16 @@ class FifteenMinuteCity(Model):
         
         # Get movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        
+        # Initialize LLM components if needed
+        self.llm_enabled = (self.needs_selection == 'llms' or self.movement_behavior == 'llms')
+        if self.llm_enabled:
+            self.logger.info("Initializing LLM components for persona-driven behavior")
+            self.persona_memory_manager = PersonaMemoryManager()
+            self.llm_interaction_layer = LLMInteractionLayer()
+        else:
+            self.persona_memory_manager = None
+            self.llm_interaction_layer = None
         
         # Create a mapping of nodes to parishes if parishes data is available
         self.node_to_parish = {}
@@ -655,6 +668,11 @@ class FifteenMinuteCity(Model):
                     access_distance=access_distance_meters,
                     **agent_props
                 )
+                
+                # Assign persona if LLM behavior is enabled
+                if self.llm_enabled:
+                    self._assign_persona_to_resident(resident)
+                
                 self.grid.place_agent(resident, home_node)
                 self.schedule.add(resident)
                 self.residents.append(resident)
@@ -720,6 +738,11 @@ class FifteenMinuteCity(Model):
                 access_distance=access_distance_meters,
                 **agent_props
             )
+            
+            # Assign persona if LLM behavior is enabled
+            if self.llm_enabled:
+                self._assign_persona_to_resident(resident)
+            
             self.grid.place_agent(resident, home_node)
             self.schedule.add(resident)
             self.residents.append(resident)
@@ -753,3 +776,66 @@ class FifteenMinuteCity(Model):
         final_cleaned = ' '.join(without_accents.split())
         
         return final_cleaned.strip()
+
+    def _assign_persona_to_resident(self, resident):
+        """
+        Assign a persona to a resident based on their demographic characteristics.
+        
+        Args:
+            resident: The resident agent to assign a persona to
+        """
+        if not self.llm_enabled or not self.persona_memory_manager:
+            return
+        
+        # Determine persona type based on resident characteristics
+        persona_type = self._determine_persona_type(resident)
+        
+        # Create persona profile for the resident
+        persona_template, emotional_state = self.persona_memory_manager.create_agent_persona(
+            agent_id=str(resident.unique_id),
+            persona_type=persona_type,
+            variation_factor=0.1  # Add some variation to make agents unique
+        )
+        
+        # Store persona information in the resident
+        resident.persona_type = persona_type
+        resident.persona_template = persona_template
+        resident.emotional_state = emotional_state
+        
+        self.logger.debug(f"Assigned persona {persona_type.value} to resident {resident.unique_id}")
+    
+    def _determine_persona_type(self, resident):
+        """
+        Determine the appropriate persona type for a resident based on their characteristics.
+        
+        Args:
+            resident: The resident agent
+            
+        Returns:
+            PersonaType enum value
+        """
+        # Determine persona based on age and other characteristics
+        age = getattr(resident, 'age', 30)
+        employment_status = getattr(resident, 'employment_status', 'employed')
+        
+        # Age-based persona assignment with some randomness
+        if age >= 65:
+            return PersonaType.ELDERLY_RESIDENT
+        elif age < 25:
+            if employment_status == 'student':
+                return PersonaType.STUDENT
+            else:
+                return PersonaType.YOUNG_PROFESSIONAL
+        elif 25 <= age < 45:
+            # For middle-aged adults, consider family status and employment
+            household_type = getattr(resident, 'household_type', 'single')
+            if 'family' in household_type.lower() or 'parent' in household_type.lower():
+                return PersonaType.WORKING_PARENT
+            else:
+                return PersonaType.YOUNG_PROFESSIONAL
+        else:  # 45-64
+            # Could be working parent or professional
+            if random.random() < 0.6:  # 60% chance of being working parent
+                return PersonaType.WORKING_PARENT
+            else:
+                return PersonaType.YOUNG_PROFESSIONAL

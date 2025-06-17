@@ -418,6 +418,8 @@ class Resident(BaseAgent):
         """
         if self.movement_behavior == 'need-based':
             return self._choose_need_based_target()
+        elif self.movement_behavior == 'llms':
+            return self._choose_llm_based_target()
         else:  # random movement
             target = self._choose_random_target()
             if target is None and self.current_node != self.home_node:
@@ -493,6 +495,128 @@ class Resident(BaseAgent):
             return random.choice(available_poi_types)
         
         # No suitable POIs available - return None to trigger going home
+        return None
+
+    def _choose_llm_based_target(self):
+        """
+        Choose movement target using LLM-based decision making.
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None if no movement should occur
+        """
+        # Check if LLM components are available
+        if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
+            self.logger.warning("LLM interaction layer not available, falling back to need-based movement")
+            return self._choose_need_based_target()
+        
+        try:
+            # Create agent state for LLM
+            agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+            
+            # Create observation for LLM
+            observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
+            
+            # Get episodic memories (recent POI visits)
+            episodic_memories = self._get_episodic_memories()
+            
+            # Get LLM decision
+            decision = self.model.llm_interaction_layer.get_agent_decision(
+                agent_state=agent_state,
+                observation=observation,
+                episodic_memories=episodic_memories,
+                agent_complexity="standard",
+                latency_requirement="normal"
+            )
+            
+            # Parse the LLM decision to extract POI type or action
+            target = self._parse_llm_decision(decision)
+            
+            # Update emotional state based on decision confidence
+            if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
+                experience = {
+                    'type': 'decision_making',
+                    'outcome': 'positive' if decision.confidence > 0.7 else 'neutral',
+                    'satisfaction': decision.confidence,
+                    'details': f"Made decision: {decision.action}"
+                }
+                self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
+            
+            return target
+            
+        except Exception as e:
+            self.logger.error(f"Error in LLM-based target selection: {e}")
+            # Fall back to need-based movement
+            return self._choose_need_based_target()
+    
+    def _get_episodic_memories(self):
+        """
+        Get episodic memories for LLM decision making.
+        
+        Returns:
+            List of EpisodicMemory objects
+        """
+        from simulation.llm_interaction_layer import EpisodicMemory
+        
+        memories = []
+        
+        # Convert recent POI visits to episodic memories
+        if hasattr(self, 'memory') and 'visited_pois' in self.memory:
+            recent_visits = self.memory['visited_pois'][-5:]  # Last 5 visits
+            
+            for visit in recent_visits:
+                memory = EpisodicMemory(
+                    timestamp=visit.get('step', 0),
+                    location=str(visit.get('poi_id', 'unknown')),
+                    action=f"visited_{visit.get('poi_type', 'unknown')}",
+                    outcome="completed",
+                    satisfaction_gained=0.7,  # Default satisfaction
+                    other_agents_involved=[]
+                )
+                memories.append(memory)
+        
+        return memories
+    
+    def _parse_llm_decision(self, decision):
+        """
+        Parse LLM decision to extract movement target.
+        
+        Args:
+            decision: LLMDecision object
+            
+        Returns:
+            POI type to move to, 'home', or None
+        """
+        action = decision.action.lower()
+        
+        # Check if the action is to go home
+        if 'home' in action or 'return' in action:
+            return 'home'
+        
+        # Check if the action is to wait/stay
+        if 'wait' in action or 'stay' in action or 'rest' in action:
+            return None
+        
+        # Try to extract POI type from the action
+        poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
+                    'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
+        
+        for poi_type in poi_types:
+            if poi_type in action:
+                return poi_type
+        
+        # If no specific POI type found, try to infer from action keywords
+        if 'eat' in action or 'food' in action or 'hungry' in action:
+            return 'restaurant'
+        elif 'shop' in action or 'buy' in action:
+            return 'shop'
+        elif 'health' in action or 'medical' in action:
+            return 'hospital'
+        elif 'exercise' in action or 'fitness' in action:
+            return 'gym'
+        elif 'relax' in action or 'nature' in action:
+            return 'park'
+        
+        # Default: return None to stay put
         return None
 
     def _satisfy_needs_at_poi(self, poi_type):
@@ -617,6 +741,10 @@ class Resident(BaseAgent):
                     # Satisfy needs if we're using need-based movement and visited a POI
                     if self.movement_behavior == 'need-based' and visited_poi_type:
                         self._satisfy_needs_at_poi(visited_poi_type)
+                    
+                    # Update emotional state if LLM behavior is enabled
+                    if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
+                        self._update_emotional_state_from_poi_visit(visited_poi_type, visited_poi_agent)
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -751,17 +879,182 @@ class Resident(BaseAgent):
     def _generate_needs_llms(self):
         """
         Generate needs using LLM-inspired approach.
-        This is a placeholder for future LLM integration.
-        Currently uses a sophisticated rule-based system that mimics LLM reasoning.
+        Uses persona template and emotional state for more realistic need generation.
         
         Returns:
             Dictionary of needs based on LLM-inspired reasoning
         """
         needs = {}
         
-
+        # Initialize with base needs
+        for need_type in self.dynamic_needs.keys():
+            needs[need_type] = 0
+        
+        # Check if persona components are available
+        if not hasattr(self, 'persona_template') or not hasattr(self, 'emotional_state'):
+            # Fall back to random generation if persona not available
+            return self._generate_needs_random()
+        
+        try:
+            # Get persona-specific needs based on persona type
+            persona_needs = self._get_persona_based_needs()
+            
+            # Adjust needs based on emotional state
+            emotional_adjustments = self._get_emotional_need_adjustments()
+            
+            # Combine persona needs with emotional adjustments
+            for need_type in needs.keys():
+                base_need = persona_needs.get(need_type, 30)  # Default moderate need
+                emotional_modifier = emotional_adjustments.get(need_type, 1.0)
+                
+                # Apply emotional modifier
+                adjusted_need = base_need * emotional_modifier
+                
+                # Add some randomness for variability
+                random_factor = random.uniform(0.8, 1.2)
+                final_need = adjusted_need * random_factor
+                
+                # Clamp to valid range
+                needs[need_type] = max(0, min(100, int(final_need)))
+            
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error in LLM needs generation: {e}")
+            # Fall back to random generation
+            return self._generate_needs_random()
         
         return needs
+    
+    def _get_persona_based_needs(self):
+        """
+        Get base needs based on persona type.
+        
+        Returns:
+            Dictionary of base needs for the persona
+        """
+        from agents.persona_memory_modules import PersonaType
+        
+        persona_type = getattr(self, 'persona_type', None)
+        
+        # Default needs
+        base_needs = {
+            "hunger": 40,
+            "social": 35,
+            "recreation": 30,
+            "shopping": 25,
+            "healthcare": 20,
+            "education": 15
+        }
+        
+        if persona_type == PersonaType.ELDERLY_RESIDENT:
+            base_needs.update({
+                "healthcare": 60,  # Higher healthcare needs
+                "social": 45,      # Higher social needs
+                "recreation": 25,  # Lower recreation needs
+                "shopping": 35,    # Moderate shopping needs
+                "hunger": 45,      # Regular hunger needs
+                "education": 10    # Lower education needs
+            })
+        elif persona_type == PersonaType.WORKING_PARENT:
+            base_needs.update({
+                "shopping": 50,    # Higher shopping needs (family)
+                "healthcare": 35,  # Moderate healthcare needs
+                "social": 30,      # Lower social needs (busy)
+                "recreation": 20,  # Lower recreation needs
+                "hunger": 50,      # Higher hunger needs
+                "education": 25    # Moderate education needs (children)
+            })
+        elif persona_type == PersonaType.YOUNG_PROFESSIONAL:
+            base_needs.update({
+                "recreation": 45,  # Higher recreation needs
+                "social": 40,      # Higher social needs
+                "shopping": 35,    # Moderate shopping needs
+                "healthcare": 25,  # Lower healthcare needs
+                "hunger": 40,      # Regular hunger needs
+                "education": 30    # Moderate education needs
+            })
+        elif persona_type == PersonaType.STUDENT:
+            base_needs.update({
+                "education": 55,   # Higher education needs
+                "social": 50,      # Higher social needs
+                "recreation": 40,  # Higher recreation needs
+                "shopping": 20,    # Lower shopping needs (budget)
+                "healthcare": 20,  # Lower healthcare needs
+                "hunger": 45       # Regular hunger needs
+            })
+        elif persona_type == PersonaType.CHRONIC_PATIENT:
+            base_needs.update({
+                "healthcare": 70,  # Very high healthcare needs
+                "social": 40,      # Moderate social needs (support)
+                "recreation": 25,  # Lower recreation needs
+                "shopping": 30,    # Moderate shopping needs
+                "hunger": 40,      # Regular hunger needs
+                "education": 20    # Lower education needs
+            })
+        
+        return base_needs
+    
+    def _get_emotional_need_adjustments(self):
+        """
+        Get need adjustments based on current emotional state.
+        
+        Returns:
+            Dictionary of multipliers for each need type
+        """
+        adjustments = {
+            "hunger": 1.0,
+            "social": 1.0,
+            "recreation": 1.0,
+            "shopping": 1.0,
+            "healthcare": 1.0,
+            "education": 1.0
+        }
+        
+        if not hasattr(self, 'emotional_state'):
+            return adjustments
+        
+        try:
+            # Get dominant emotion and stress level
+            emotions = self.emotional_state.current_emotions
+            stress_level = self.emotional_state.stress_level
+            
+            # Find dominant emotion
+            if emotions:
+                dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
+                
+                # Adjust needs based on dominant emotion
+                from agents.persona_memory_modules import EmotionalState
+                
+                if dominant_emotion == EmotionalState.STRESSED:
+                    adjustments["recreation"] *= 1.3  # More recreation when stressed
+                    adjustments["social"] *= 0.8      # Less social when stressed
+                    adjustments["healthcare"] *= 1.2  # More healthcare when stressed
+                elif dominant_emotion == EmotionalState.ANXIOUS:
+                    adjustments["healthcare"] *= 1.4  # More healthcare when anxious
+                    adjustments["social"] *= 1.2      # More social support when anxious
+                    adjustments["recreation"] *= 0.9  # Less recreation when anxious
+                elif dominant_emotion == EmotionalState.FRUSTRATED:
+                    adjustments["recreation"] *= 1.2  # More recreation when frustrated
+                    adjustments["shopping"] *= 1.1    # Slight increase in shopping (retail therapy)
+                elif dominant_emotion == EmotionalState.SATISFIED:
+                    adjustments["recreation"] *= 0.9  # Less urgent recreation when satisfied
+                    adjustments["social"] *= 1.1      # More social when satisfied
+                elif dominant_emotion == EmotionalState.WORRIED:
+                    adjustments["healthcare"] *= 1.3  # More healthcare when worried
+                    adjustments["social"] *= 1.2      # More social support when worried
+            
+            # Adjust based on stress level
+            if stress_level > 0.7:  # High stress
+                adjustments["recreation"] *= 1.2
+                adjustments["healthcare"] *= 1.1
+            elif stress_level < 0.3:  # Low stress
+                adjustments["recreation"] *= 0.9
+                
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error in emotional need adjustments: {e}")
+        
+        return adjustments
             
     def get_parish_info(self):
         """
@@ -811,3 +1104,54 @@ class Resident(BaseAgent):
         
         # Start traveling home
         return self.start_travel(self.home_node, home_geometry)
+
+    def _update_emotional_state_from_poi_visit(self, poi_type, poi_agent):
+        """
+        Update emotional state based on a POI visit.
+        
+        Args:
+            poi_type: The type of POI visited
+            poi_agent: The POI agent visited
+        """
+        try:
+            # Determine satisfaction based on POI type and waiting time
+            base_satisfaction = 0.7  # Default satisfaction
+            
+            # Adjust satisfaction based on POI type
+            poi_satisfaction_map = {
+                'restaurant': 0.8,
+                'cafe': 0.7,
+                'park': 0.8,
+                'hospital': 0.6,  # Lower satisfaction for healthcare visits
+                'shop': 0.7,
+                'supermarket': 0.6,
+                'library': 0.8,
+                'cinema': 0.9,
+                'gym': 0.8,
+                'school': 0.7
+            }
+            
+            base_satisfaction = poi_satisfaction_map.get(poi_type, 0.7)
+            
+            # Adjust satisfaction based on waiting time
+            if poi_agent and hasattr(poi_agent, 'get_waiting_time'):
+                waiting_time = poi_agent.get_waiting_time()
+                if waiting_time > 30:  # Long wait reduces satisfaction
+                    base_satisfaction *= 0.7
+                elif waiting_time > 15:  # Moderate wait slightly reduces satisfaction
+                    base_satisfaction *= 0.9
+            
+            # Create experience for emotional state update
+            experience = {
+                'type': 'healthcare_visit' if poi_type in ['hospital', 'clinic', 'pharmacy'] else 'service_interaction',
+                'outcome': 'positive' if base_satisfaction > 0.6 else 'neutral',
+                'satisfaction': base_satisfaction,
+                'details': f"Visited {poi_type}"
+            }
+            
+            # Update emotional state through persona memory manager
+            self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
+            
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error updating emotional state from POI visit: {e}")
