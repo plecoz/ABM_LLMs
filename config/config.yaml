@@ -1,0 +1,39 @@
+---
+llm:
+- api_key: 8a8922a87b9c404c86a33c9f84890f53.h1orz28xqPNUjLpl # LLM API key
+  #base_url: <https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys> # LLM base URL, used for VLLM
+  model: glm-4-flash # LLM model
+  provider: zhipuai # LLM provider
+  semaphore: 20 # Semaphore for LLM requests, control the max number of concurrent requests
+env:
+  avro:
+    enabled: false # Whether to enable Avro
+    path: <AVRO-OUTPUT-PATH> # Path to the Avro output file
+  mlflow:
+    enabled: true # Whether to enable MLflow
+    mlflow_uri: http://localhost:59000 # MLflow server URI
+    username: admin # MLflow server username
+    password: 2002PIerre # MLflow server password
+  pgsql:
+    enabled: true # Whether to enable PostgreSQL
+    dsn: postgresql://postgres:2002PIerre@localhost:5432/postgres # PostgreSQL connection string
+  redis:
+    server: "host.docker.internal" #<localhost> # Redis server address
+    port: 6379 # Redis port
+    password: 2002PIerre # Redis password
+map:
+  file_path: "/mnt/c/Users/pierr/UNU_macau/AgentSociety/data/beijing_map.pb" # Path to the map file
+  cache_path: <CACHE-FILE-PATH> # Cache path for accelerating map file loading
+agents:
+  citizens:
+  - agent_class: citizen # The class of the agent
+    number: 5 # The number of the agents
+exp:
+  name: test # Experiment name
+  environment:
+    start_tick: 28800 # Start time in seconds
+    total_tick: 180 # Total time in seconds
+  workflow:
+  - day: 1 # The day of the workflow step
+    type: run # The type of the workflow step
+--- 
