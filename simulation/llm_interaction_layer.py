@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-LLM Interaction Layer for ABM Simulation
+General LLM Interaction Layer for ABM Simulations
 
-This layer serves as a bridge between the simulation engine and LLM-based agents,
+This layer serves as a bridge between simulation engines and LLM-based agents,
 providing context-aware decision making through structured prompts and responses.
+This is a general-purpose layer that can be used across different types of simulations
+(healthcare, climate change, immigration, poverty, etc.).
 
 Components:
 1. Prompt Builder: Assembles persona-specific prompts from agent state and observations
@@ -30,23 +32,23 @@ class LLMEndpointType(Enum):
 
 @dataclass
 class AgentObservation:
-    """Structured observation data for an agent."""
+    """Structured observation data for an agent - general purpose."""
     current_location: str
     nearby_agents: List[Dict[str, Any]]
-    nearby_pois: List[Dict[str, Any]]
+    nearby_entities: List[Dict[str, Any]]  # Generic entities (POIs, resources, etc.)
     environmental_context: Dict[str, Any]
     time_step: int
 
 
 @dataclass
 class AgentState:
-    """Current state of an agent."""
+    """Current state of an agent - general purpose."""
     agent_id: str
-    role: str
+    agent_type: str  # More general than 'role'
     demographic: Dict[str, Any]
     current_needs: Dict[str, float]
     utilities: List[str]
-    sdg_constraints: List[str]
+    constraints: List[str]  # More general than 'sdg_constraints'
     location: str
     energy_level: float
     current_activity: Optional[str]
@@ -54,7 +56,7 @@ class AgentState:
 
 @dataclass
 class EpisodicMemory:
-    """Represents a memory from the agent's past experiences."""
+    """Represents a memory from the agent's past experiences - general purpose."""
     timestamp: int
     location: str
     action: str
@@ -65,7 +67,7 @@ class EpisodicMemory:
 
 @dataclass
 class LLMDecision:
-    """Structured decision output from LLM."""
+    """Structured decision output from LLM - general purpose."""
     action: str
     rationale: str
     confidence: float
@@ -74,7 +76,7 @@ class LLMDecision:
 
 
 class PromptBuilder:
-    """Assembles persona-specific prompts from agent state and observations."""
+    """Assembles persona-specific prompts from agent state and observations - general purpose."""
     
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -84,7 +86,8 @@ class PromptBuilder:
         agent_state: AgentState, 
         observation: AgentObservation,
         episodic_memories: List[EpisodicMemory],
-        top_k_memories: int = 3
+        top_k_memories: int = 3,
+        simulation_context: Dict[str, Any] = None
     ) -> str:
         """
         Build a structured prompt for the LLM based on agent state and context.
@@ -94,6 +97,7 @@ class PromptBuilder:
             observation: Current observations
             episodic_memories: Agent's past experiences
             top_k_memories: Number of most relevant memories to include
+            simulation_context: Additional context specific to the simulation type
             
         Returns:
             Formatted prompt string
@@ -105,7 +109,7 @@ class PromptBuilder:
         
         # Build the structured prompt
         prompt = self._construct_prompt_template(
-            agent_state, observation, relevant_memories
+            agent_state, observation, relevant_memories, simulation_context
         )
         
         return prompt
@@ -129,16 +133,17 @@ class PromptBuilder:
         self,
         agent_state: AgentState,
         observation: AgentObservation,
-        memories: List[EpisodicMemory]
+        memories: List[EpisodicMemory],
+        simulation_context: Dict[str, Any] = None
     ) -> str:
-        """Construct the actual prompt template."""
+        """Construct the actual prompt template - general purpose."""
         
         # Format demographic info
         demographic_str = ", ".join([f"{k}: {v}" for k, v in agent_state.demographic.items()])
         
-        # Format utilities and SDG constraints
+        # Format utilities and constraints
         utilities_str = ", ".join(agent_state.utilities) if agent_state.utilities else "general well-being"
-        sdg_str = ", ".join(agent_state.sdg_constraints) if agent_state.sdg_constraints else "sustainable development"
+        constraints_str = ", ".join(agent_state.constraints) if agent_state.constraints else "none specified"
         
         # Format current needs
         needs_str = ", ".join([f"{need}: {level:.1f}" for need, level in agent_state.current_needs.items()])
@@ -156,26 +161,33 @@ class PromptBuilder:
         else:
             memory_str = "No relevant past experiences."
         
-        # Format nearby POIs
-        poi_str = ""
-        if observation.nearby_pois:
-            poi_entries = [f"- {poi['name']} ({poi['type']})" for poi in observation.nearby_pois]
-            poi_str = "\n".join(poi_entries)
+        # Format nearby entities (generic)
+        entities_str = ""
+        if observation.nearby_entities:
+            entity_entries = [f"- {entity.get('name', 'Unknown')} ({entity.get('type', 'Unknown')})" 
+                            for entity in observation.nearby_entities]
+            entities_str = "\n".join(entity_entries)
         else:
-            poi_str = "No nearby points of interest."
+            entities_str = "No nearby entities of interest."
         
         # Format nearby agents
         agents_str = ""
         if observation.nearby_agents:
-            agent_entries = [f"- Agent {agent['id']} ({agent.get('role', 'resident')})" 
+            agent_entries = [f"- Agent {agent['id']} ({agent.get('type', 'unknown')})" 
                            for agent in observation.nearby_agents]
             agents_str = "\n".join(agent_entries)
         else:
             agents_str = "No other agents nearby."
         
+        # Add simulation-specific context if provided
+        context_str = ""
+        if simulation_context:
+            context_entries = [f"- {k}: {v}" for k, v in simulation_context.items()]
+            context_str = f"\n\nSimulation Context:\n" + "\n".join(context_entries)
+        
         # Construct the full prompt
-        prompt = f"""System: You are {agent_state.role}, representing {demographic_str}. 
-Goal: Maximize {utilities_str} while adhering to {sdg_str} constraints.
+        prompt = f"""System: You are a {agent_state.agent_type}, representing {demographic_str}. 
+Goal: Maximize {utilities_str} while adhering to these constraints: {constraints_str}.
 
 Current Status:
 - Location: {agent_state.location}
@@ -188,10 +200,10 @@ Memory (Recent Experiences):
 
 Current Observation:
 - Time Step: {observation.time_step}
-- Nearby Points of Interest:
-{poi_str}
+- Nearby Entities:
+{entities_str}
 - Nearby Agents:
-{agents_str}
+{agents_str}{context_str}
 
 Task: Based on your current needs, past experiences, and observations, decide on ONE specific action to take next. Provide a brief rationale for your choice.
 
@@ -205,7 +217,7 @@ Expected_Utility: [0.0-1.0]"""
 
 
 class InferenceRouter:
-    """Routes prompts to appropriate LLM endpoints based on requirements."""
+    """Routes prompts to appropriate LLM endpoints based on requirements - general purpose."""
     
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -283,7 +295,7 @@ class InferenceRouter:
 
 
 class DecisionPlanningEngine:
-    """Orchestrates the agent's cognitive cycle and decision-making process."""
+    """Orchestrates the agent's cognitive cycle and decision-making process - general purpose."""
     
     def __init__(self):
         self.prompt_builder = PromptBuilder()
@@ -296,7 +308,8 @@ class DecisionPlanningEngine:
         observation: AgentObservation,
         episodic_memories: List[EpisodicMemory],
         agent_complexity: str = "standard",
-        latency_requirement: str = "normal"
+        latency_requirement: str = "normal",
+        simulation_context: Dict[str, Any] = None
     ) -> LLMDecision:
         """
         Execute the full decision-making cycle for an agent.
@@ -307,6 +320,7 @@ class DecisionPlanningEngine:
             episodic_memories: Agent's memory buffer
             agent_complexity: Complexity level for routing
             latency_requirement: Latency requirement for routing
+            simulation_context: Additional context specific to the simulation type
             
         Returns:
             Structured decision object
@@ -314,7 +328,7 @@ class DecisionPlanningEngine:
         try:
             # Step 1: Build the prompt
             prompt = self.prompt_builder.build_prompt(
-                agent_state, observation, episodic_memories
+                agent_state, observation, episodic_memories, simulation_context=simulation_context
             )
             
             # Step 2: Route to appropriate LLM
@@ -335,7 +349,7 @@ class DecisionPlanningEngine:
                 action="wait",
                 rationale="Error in decision process, waiting for next step",
                 confidence=0.1,
-                alternative_actions=["go_home"],
+                alternative_actions=["continue_current_activity"],
                 expected_utility=0.0
             )
     
@@ -389,29 +403,13 @@ class DecisionPlanningEngine:
             )
 
 
-class PathScoringRequest:
-    """Request for LLM to score multiple path options"""
-    def __init__(self, agent_id, path_options, context):
-        self.agent_id = agent_id
-        self.path_options = path_options  # List of path dictionaries with characteristics
-        self.context = context  # Agent context (personality, current needs, time, etc.)
-
-class PathScoringResponse:
-    """Response from LLM path scoring"""
-    def __init__(self, selected_path_id, reasoning, confidence):
-        self.selected_path_id = selected_path_id
-        self.reasoning = reasoning
-        self.confidence = confidence
-
 class LLMInteractionLayer:
-    """Main interface for the LLM Interaction Layer."""
+    """Main interface for the general LLM Interaction Layer."""
     
     def __init__(self):
         self.decision_engine = DecisionPlanningEngine()
         self.logger = logging.getLogger(self.__class__.__name__)
-        self.logger.info("LLM Interaction Layer initialized")
-        self.llm_client = None  # Placeholder for actual LLM client
-        self.path_scoring_enabled = True
+        self.logger.info("General LLM Interaction Layer initialized")
     
     def get_agent_decision(
         self,
@@ -419,7 +417,8 @@ class LLMInteractionLayer:
         observation: AgentObservation,
         episodic_memories: List[EpisodicMemory] = None,
         agent_complexity: str = "standard",
-        latency_requirement: str = "normal"
+        latency_requirement: str = "normal",
+        simulation_context: Dict[str, Any] = None
     ) -> LLMDecision:
         """
         Main entry point for getting LLM-based decisions for agents.
@@ -430,6 +429,7 @@ class LLMInteractionLayer:
             episodic_memories: Agent's memory buffer (optional)
             agent_complexity: Complexity level for LLM routing
             latency_requirement: Latency requirement for LLM routing
+            simulation_context: Additional context specific to the simulation type
             
         Returns:
             Structured decision from LLM
@@ -442,270 +442,6 @@ class LLMInteractionLayer:
             observation=observation,
             episodic_memories=episodic_memories,
             agent_complexity=agent_complexity,
-            latency_requirement=latency_requirement
-        )
-    
-    def create_agent_state_from_resident(self, resident_agent) -> AgentState:
-        """
-        Helper method to create AgentState from a Resident agent.
-        
-        Args:
-            resident_agent: A Resident agent instance
-            
-        Returns:
-            AgentState object
-        """
-        # Extract demographic information
-        demographic = {
-            'age': getattr(resident_agent, 'age', 30),
-            'gender': getattr(resident_agent, 'gender', 'unspecified'),
-            'education': getattr(resident_agent, 'education', 'high_school'),
-            'employment_status': getattr(resident_agent, 'employment_status', 'unknown'),
-            'parish': getattr(resident_agent, 'parish', 'unknown')
-        }
-        
-        # Extract current needs
-        current_needs = getattr(resident_agent, 'current_needs', {})
-        if not current_needs:
-            current_needs = getattr(resident_agent, 'dynamic_needs', {})
-        
-        # Determine utilities based on agent characteristics
-        utilities = self._determine_utilities(resident_agent)
-        
-        # Determine SDG constraints (simplified for now)
-        sdg_constraints = ["sustainable cities", "good health", "quality education"]
-        
-        return AgentState(
-            agent_id=str(resident_agent.unique_id),
-            role="resident",
-            demographic=demographic,
-            current_needs=current_needs,
-            utilities=utilities,
-            sdg_constraints=sdg_constraints,
-            location=getattr(resident_agent, 'current_node', 'unknown'),
-            energy_level=getattr(resident_agent, 'energy_level', 1.0),
-            current_activity=getattr(resident_agent, 'current_activity', None)
-        )
-    
-    def create_observation_from_context(self, agent, model) -> AgentObservation:
-        """
-        Helper method to create AgentObservation from simulation context.
-        
-        Args:
-            agent: The agent making the observation
-            model: The simulation model
-            
-        Returns:
-            AgentObservation object
-        """
-        # Get nearby agents (simplified)
-        nearby_agents = []
-        if hasattr(model, 'get_nearby_agents'):
-            nearby_agents = [
-                {
-                    'id': str(other_agent.unique_id),
-                    'role': 'resident',
-                    'location': getattr(other_agent, 'current_node', 'unknown')
-                }
-                for other_agent in model.get_nearby_agents(agent)
-            ]
-        
-        # Get nearby POIs (simplified)
-        nearby_pois = []
-        if hasattr(agent, 'accessible_nodes') and agent.accessible_nodes:
-            for poi_type, poi_list in agent.accessible_nodes.items():
-                if poi_type != 'all_nodes':  # Skip the 'all_nodes' key
-                    for poi in poi_list[:3]:  # Limit to 3 POIs per type
-                        nearby_pois.append({
-                            'name': f"{poi_type}_{poi}",
-                            'type': poi_type,
-                            'id': poi
-                        })
-        
-        return AgentObservation(
-            current_location=str(getattr(agent, 'current_node', 'unknown')),
-            nearby_agents=nearby_agents,
-            nearby_pois=nearby_pois,
-            environmental_context={'weather': 'normal', 'time_of_day': 'day'},
-            time_step=getattr(model, 'step_count', 0)
-        )
-    
-    def _determine_utilities(self, agent) -> List[str]:
-        """Determine utilities based on agent characteristics."""
-        utilities = ["well-being", "convenience"]
-        
-        # Add age-specific utilities
-        age = getattr(agent, 'age', 30)
-        if age < 25:
-            utilities.extend(["education", "social_interaction"])
-        elif age > 65:
-            utilities.extend(["health", "comfort"])
-        else:
-            utilities.extend(["work_efficiency", "family_time"])
-        
-        return utilities
-    
-    def score_path_options(self, agent_state, path_options, context):
-        """
-        Use LLM to score and select the best path from multiple options.
-        This is the single implementation for path scoring - no duplication.
-        
-        Args:
-            agent_state: Current state of the agent (dict with age, needs, etc.)
-            path_options: List of path dictionaries with OSM metadata
-            context: Additional context (time_of_day, etc.)
-            
-        Returns:
-            PathScoringResponse with selected path and reasoning
-        """
-        if not path_options:
-            return PathScoringResponse(0, "No paths available", 0.0)
-        
-        try:
-            # Create LLM prompt
-            prompt = self._create_path_scoring_prompt(agent_state, path_options, context)
-            
-            # Call LLM (placeholder for actual implementation)
-            selected_path_id = self._call_llm_api(prompt, path_options)
-            
-            # Return response
-            return PathScoringResponse(
-                selected_path_id=selected_path_id,
-                reasoning=f"LLM selected path {selected_path_id + 1} based on efficiency and safety",
-                confidence=0.8
-            )
-            
-        except Exception as e:
-            # Fallback to rule-based selection
-            return self._fallback_selection(path_options)
-
-    def _create_path_scoring_prompt(self, agent_state, path_options, context):
-        """
-        Create LLM prompt for path scoring (1-10 scale).
-        
-        Args:
-            agent_state: Agent characteristics
-            path_options: Available paths with OSM metadata
-            context: Decision context
-            
-        Returns:
-            Formatted prompt string
-        """
-        age = agent_state.get('age', 30)
-        time_of_day = context.get('time_of_day', 12)
-        
-        prompt = f"""You are helping a {age}-year-old resident choose the best path at {time_of_day}:00.
-
-Score each path from 1-10 (10 = best choice) considering:
-- Travel time efficiency
-- Road safety and comfort
-- Road type appropriateness
-- Green area coverage (parks, forests - higher is more pleasant)
-- Overall convenience
-
-Available paths:
-"""
-        
-        for path in path_options:
-            green_desc = f"{path.get('green_area_percentage', 0)}% through green areas"
-            prompt += f"""
-Path {path['path_id']}:
-- Distance: {path['distance_meters']} meters
-- Travel time: {path['travel_time_minutes']} minutes
-- Main road type: {path['dominant_road_type']}
-- Road types: {', '.join(path['road_types'][:3])}
-- Segments: {path['total_segments']}
-- Green coverage: {green_desc}
-"""
-        
-        prompt += f"""
-Respond with ONLY the path number (1-{len(path_options)}) that has the highest score.
-Example: 2
-"""
-        
-        return prompt
-
-    def _call_llm_api(self, prompt, path_options):
-        """
-        Call LLM API for path scoring.
-        
-        Args:
-            prompt: Formatted prompt
-            path_options: Available path options
-            
-        Returns:
-            Index of selected path (0-based)
-        """
-        # PLACEHOLDER: Replace with actual LLM API call
-        # 
-        # Example integration:
-        # response = your_llm_service.generate(prompt)
-        # selected_path_number = int(response.strip())
-        # return selected_path_number - 1  # Convert to 0-based index
-        
-        # For now, use rule-based fallback
-        return self._rule_based_scoring(path_options)
-
-    def _rule_based_scoring(self, path_options):
-        """
-        Rule-based scoring when LLM is not available.
-        Now includes green area coverage in scoring.
-        
-        Args:
-            path_options: Available path options
-            
-        Returns:
-            Index of best path (0-based)
-        """
-        scores = []
-        
-        for path in path_options:
-            score = 0
-            
-            # Time efficiency (50% weight)
-            min_time = min(p['travel_time_minutes'] for p in path_options)
-            max_time = max(p['travel_time_minutes'] for p in path_options)
-            if max_time > min_time:
-                time_score = 1.0 - ((path['travel_time_minutes'] - min_time) / (max_time - min_time))
-            else:
-                time_score = 1.0
-            score += 5.0 * time_score
-            
-            # Road type safety (30% weight)
-            road_type_scores = {
-                'residential': 4.0, 'tertiary': 3.5, 'secondary': 3.0,
-                'primary': 2.5, 'trunk': 2.0, 'motorway': 1.5,
-                'footway': 4.5, 'path': 4.0, 'unclassified': 2.5
-            }
-            road_score = road_type_scores.get(path['dominant_road_type'], 2.5)
-            score += 3.0 * (road_score / 5.0)
-            
-            # Green area coverage (20% weight)
-            green_percentage = path.get('green_area_percentage', 0)
-            green_score = min(1.0, green_percentage / 50.0)  # Normalize to 0-1 (50% green = max score)
-            score += 2.0 * green_score
-            
-            scores.append(score)
-        
-        # Return index of highest scoring path
-        return scores.index(max(scores))
-
-    def _fallback_selection(self, path_options):
-        """
-        Simple fallback path selection.
-        
-        Args:
-            path_options: Available path options
-            
-        Returns:
-            PathScoringResponse
-        """
-        # Select shortest time path as fallback
-        shortest_idx = min(range(len(path_options)), 
-                         key=lambda i: path_options[i]['travel_time_minutes'])
-        
-        return PathScoringResponse(
-            selected_path_id=shortest_idx,
-            reasoning="Selected shortest time path (fallback)",
-            confidence=0.5
+            latency_requirement=latency_requirement,
+            simulation_context=simulation_context
         ) 

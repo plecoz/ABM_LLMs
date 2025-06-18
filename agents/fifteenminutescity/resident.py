@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
+from ...simulation.llm_interaction_layer import EpisodicMemory
 
 class ActionType(Enum):
     """Types of actions residents can perform"""
@@ -664,8 +665,6 @@ class Resident(BaseAgent):
         Returns:
             List of EpisodicMemory objects
         """
-        from ...simulation.llm_interaction_layer import EpisodicMemory
-        
         memories = []
         
         # Convert recent POI visits to episodic memories
