@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .llm_api import LLMWrapper
-from agents.persona_memory_modules import PersonaMemoryManager, PersonaType
+from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
 
 
 class LLMEndpointType(Enum):

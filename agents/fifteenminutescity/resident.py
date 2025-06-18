@@ -1135,7 +1135,7 @@ class Resident(BaseAgent):
         Returns:
             Dictionary of base needs for the persona
         """
-        from agents.persona_memory_modules import PersonaType
+        from agents.fifteenminutescity.persona_memory_modules import PersonaType
         
         persona_type = getattr(self, 'persona_type', None)
         
@@ -1226,7 +1226,7 @@ class Resident(BaseAgent):
                 dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
                 
                 # Adjust needs based on dominant emotion
-                from agents.persona_memory_modules import EmotionalState
+                from agents.fifteenminutescity.persona_memory_modules import EmotionalState
                 
                 if dominant_emotion == EmotionalState.STRESSED:
                     adjustments["recreation"] *= 1.3  # More recreation when stressed

@@ -2,8 +2,8 @@ import mesa
 from mesa import Model
 from mesa.space import NetworkGrid
 import random
-from agents.resident import Resident
-from agents.poi import POI
+from agents.fifteenminutescity.resident import Resident
+from agents.fifteenminutescity.poi import POI
 import networkx as nx
 import osmnx as ox
 from shapely.geometry import Point
@@ -19,7 +19,7 @@ import geopandas as gpd
 from outputs import OutputController
 
 # Add imports for LLM integration
-from agents.persona_memory_modules import PersonaMemoryManager, PersonaType
+from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
 from simulation.llm_interaction_layer import LLMInteractionLayer
 
 # Set up logging
@@ -173,7 +173,7 @@ class FifteenMinuteCity(Model):
         self.action_granularity = kwargs.get('action_granularity', 'basic')
         if isinstance(self.action_granularity, str):
             # Convert string to enum
-            from agents.resident import ActionGranularity
+            from agents.fifteenminutescity.resident import ActionGranularity
             granularity_map = {
                 'simple': ActionGranularity.SIMPLE,
                 'basic': ActionGranularity.BASIC,
