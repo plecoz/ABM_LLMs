@@ -1,5 +1,5 @@
 from mesa.agent import Agent
-from agents.base_agent import BaseAgent
+from ..base_agent import BaseAgent
 import random
 import networkx as nx
 import logging
@@ -664,7 +664,7 @@ class Resident(BaseAgent):
         Returns:
             List of EpisodicMemory objects
         """
-        from simulation.llm_interaction_layer import EpisodicMemory
+        from ...simulation.llm_interaction_layer import EpisodicMemory
         
         memories = []
         
@@ -1135,7 +1135,7 @@ class Resident(BaseAgent):
         Returns:
             Dictionary of base needs for the persona
         """
-        from agents.fifteenminutescity.persona_memory_modules import PersonaType
+        from .persona_memory_modules import PersonaType
         
         persona_type = getattr(self, 'persona_type', None)
         
@@ -1226,7 +1226,7 @@ class Resident(BaseAgent):
                 dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
                 
                 # Adjust needs based on dominant emotion
-                from agents.fifteenminutescity.persona_memory_modules import EmotionalState
+                from .persona_memory_modules import EmotionalState
                 
                 if dominant_emotion == EmotionalState.STRESSED:
                     adjustments["recreation"] *= 1.3  # More recreation when stressed

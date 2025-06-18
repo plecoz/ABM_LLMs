@@ -34,7 +34,7 @@ import threading
 from queue import Queue
 import time
 
-from agents.persona_memory_modules import PersonaType, EmotionalState, MotivationType
+from agents.fifteenminutescity.persona_memory_modules import PersonaType, EmotionalState, MotivationType
 from simulation.policy_intervention_module import PolicyIntervention
 
 

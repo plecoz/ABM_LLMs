@@ -22,7 +22,7 @@ from enum import Enum
 from datetime import datetime, timedelta
 import numpy as np
 
-from agents.persona_memory_modules import PersonaType, PersonaMemoryManager
+from agents.fifteenminutescity.persona_memory_modules import PersonaType, PersonaMemoryManager
 from simulation.llm_interaction_layer import LLMInteractionLayer
 
 

@@ -7,9 +7,9 @@ import json
 import os
 from config.poi_config import get_active_poi_config
 
-from environment.city_network import load_city_network, get_or_load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
-from simulation.model import FifteenMinuteCity
+from environment.fifteenminutescity.city_network import load_city_network, get_or_load_city_network
+from environment.fifteenminutescity.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
+from simulation.fifteenminutescity_model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import sys
 import re
