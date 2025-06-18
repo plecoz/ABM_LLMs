@@ -600,12 +600,14 @@ Score each path from 1-10 (10 = best choice) considering:
 - Travel time efficiency
 - Road safety and comfort
 - Road type appropriateness
+- Green area coverage (parks, forests - higher is more pleasant)
 - Overall convenience
 
 Available paths:
 """
         
         for path in path_options:
+            green_desc = f"{path.get('green_area_percentage', 0)}% through green areas"
             prompt += f"""
 Path {path['path_id']}:
 - Distance: {path['distance_meters']} meters
@@ -613,6 +615,7 @@ Path {path['path_id']}:
 - Main road type: {path['dominant_road_type']}
 - Road types: {', '.join(path['road_types'][:3])}
 - Segments: {path['total_segments']}
+- Green coverage: {green_desc}
 """
         
         prompt += f"""
@@ -646,6 +649,7 @@ Example: 2
     def _rule_based_scoring(self, path_options):
         """
         Rule-based scoring when LLM is not available.
+        Now includes green area coverage in scoring.
         
         Args:
             path_options: Available path options
@@ -658,23 +662,28 @@ Example: 2
         for path in path_options:
             score = 0
             
-            # Time efficiency (60% weight)
+            # Time efficiency (50% weight)
             min_time = min(p['travel_time_minutes'] for p in path_options)
             max_time = max(p['travel_time_minutes'] for p in path_options)
             if max_time > min_time:
                 time_score = 1.0 - ((path['travel_time_minutes'] - min_time) / (max_time - min_time))
             else:
                 time_score = 1.0
-            score += 6.0 * time_score
+            score += 5.0 * time_score
             
-            # Road type safety (40% weight)
+            # Road type safety (30% weight)
             road_type_scores = {
                 'residential': 4.0, 'tertiary': 3.5, 'secondary': 3.0,
                 'primary': 2.5, 'trunk': 2.0, 'motorway': 1.5,
                 'footway': 4.5, 'path': 4.0, 'unclassified': 2.5
             }
             road_score = road_type_scores.get(path['dominant_road_type'], 2.5)
-            score += 4.0 * (road_score / 5.0)
+            score += 3.0 * (road_score / 5.0)
+            
+            # Green area coverage (20% weight)
+            green_percentage = path.get('green_area_percentage', 0)
+            green_score = min(1.0, green_percentage / 50.0)  # Normalize to 0-1 (50% green = max score)
+            score += 2.0 * green_score
             
             scores.append(score)
         

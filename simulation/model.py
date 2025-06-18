@@ -154,6 +154,11 @@ class FifteenMinuteCity(Model):
         # Load residential buildings GeoDataFrame if provided
         self.residential_buildings = kwargs.get('residential_buildings', None)
         
+        # Load environment data if provided
+        self.water_bodies = kwargs.get('water_bodies', None)
+        self.cliffs = kwargs.get('cliffs', None)
+        self.forests = kwargs.get('forests', None)  # Green areas data
+        
         # Get parish distribution and random distribution settings
         self.parish_distribution = kwargs.get('parish_distribution', None)
         self.random_distribution = kwargs.get('random_distribution', False)

@@ -1852,7 +1852,7 @@ class Resident(BaseAgent):
             path_number: Path identifier number
             
         Returns:
-            Dictionary with path metadata
+            Dictionary with path metadata including green area coverage
         """
         try:
             graph = self.model.graph
@@ -1896,6 +1896,9 @@ class Resident(BaseAgent):
             
             dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
             
+            # Calculate green area coverage percentage
+            green_area_percentage = self._calculate_green_area_coverage(path_nodes, path_length)
+            
             # Create simplified metadata for LLM
             return {
                 'path_id': path_number,
@@ -1906,12 +1909,77 @@ class Resident(BaseAgent):
                 'road_types': list(set(road_types)),
                 'surface_types': list(set([s for s in surface_types if s != 'unknown'])),
                 'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
-                'total_segments': len(path_nodes) - 1
+                'total_segments': len(path_nodes) - 1,
+                'green_area_percentage': round(green_area_percentage, 1)
             }
             
         except Exception as e:
             self.logger.error(f"Error extracting path metadata: {e}")
             return None
+
+    def _calculate_green_area_coverage(self, path_nodes, total_path_length):
+        """
+        Calculate the percentage of the path that goes through green areas.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            total_path_length: Total length of the path in meters
+            
+        Returns:
+            Percentage of path in green areas (0-100)
+        """
+        try:
+            # Check if green area data is available
+            if not hasattr(self.model, 'forests') or self.model.forests is None or self.model.forests.empty:
+                return 0.0
+            
+            from shapely.geometry import LineString, Point
+            import geopandas as gpd
+            
+            # Create path geometry from nodes
+            path_coordinates = []
+            for node_id in path_nodes:
+                node_data = self.model.graph.nodes[node_id]
+                path_coordinates.append((node_data['x'], node_data['y']))
+            
+            # Create LineString from path coordinates
+            path_line = LineString(path_coordinates)
+            
+            # Calculate intersection with green areas
+            green_length = 0.0
+            
+            for _, green_area in self.model.forests.iterrows():
+                try:
+                    # Get intersection of path with green area
+                    intersection = path_line.intersection(green_area.geometry)
+                    
+                    # Add length if there's an intersection
+                    if not intersection.is_empty:
+                        if hasattr(intersection, 'length'):
+                            green_length += intersection.length
+                        elif hasattr(intersection, 'geoms'):
+                            # Handle MultiLineString or GeometryCollection
+                            for geom in intersection.geoms:
+                                if hasattr(geom, 'length'):
+                                    green_length += geom.length
+                
+                except Exception as e:
+                    # Skip problematic geometries
+                    continue
+            
+            # Calculate percentage
+            if total_path_length > 0:
+                # Convert from degrees to approximate meters for coordinate systems
+                # This is a rough approximation - for precise calculations, you'd need proper projection
+                green_length_meters = green_length * 111000  # Rough conversion from degrees to meters
+                percentage = min(100.0, (green_length_meters / total_path_length) * 100)
+                return percentage
+            else:
+                return 0.0
+                
+        except Exception as e:
+            self.logger.warning(f"Error calculating green area coverage: {e}")
+            return 0.0
 
     def _select_path_with_llm(self, path_options, from_node, to_node):
         """
