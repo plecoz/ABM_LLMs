@@ -1,2 +1,2 @@
-from .model import FifteenMinuteCity
+from .fifteenminutescity_model import FifteenMinuteCity
 

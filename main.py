@@ -7,9 +7,9 @@ import json
 import os
 from config.poi_config import get_active_poi_config
 
-from environment.city_network import load_city_network, get_or_load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
-from simulation.model import FifteenMinuteCity
+from environment.fifteenminutescity.city_network import load_city_network, get_or_load_city_network
+from environment.fifteenminutescity.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
+from simulation.fifteenminutescity_model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import sys
 import re
@@ -604,7 +604,7 @@ if __name__ == "__main__":
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
     parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
-    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random'], default='random', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) (default: need-based)')
+    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random', 'llms'], default='random', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) or llms (agents move to POIs based on LLM instructions) (default: need-based)')
     
     # Save/Load arguments for faster testing
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')

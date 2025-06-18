@@ -2,8 +2,8 @@ import mesa
 from mesa import Model
 from mesa.space import NetworkGrid
 import random
-from agents.resident import Resident
-from agents.poi import POI
+from agents.fifteenminutescity.resident import Resident
+from agents.fifteenminutescity.poi import POI
 import networkx as nx
 import osmnx as ox
 from shapely.geometry import Point
@@ -19,7 +19,7 @@ import geopandas as gpd
 from outputs import OutputController
 
 # Add imports for LLM integration
-from agents.persona_memory_modules import PersonaMemoryManager, PersonaType
+from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
 from simulation.llm_interaction_layer import LLMInteractionLayer
 
 # Set up logging
@@ -154,6 +154,11 @@ class FifteenMinuteCity(Model):
         # Load residential buildings GeoDataFrame if provided
         self.residential_buildings = kwargs.get('residential_buildings', None)
         
+        # Load environment data if provided
+        self.water_bodies = kwargs.get('water_bodies', None)
+        self.cliffs = kwargs.get('cliffs', None)
+        self.forests = kwargs.get('forests', None)  # Green areas data
+        
         # Get parish distribution and random distribution settings
         self.parish_distribution = kwargs.get('parish_distribution', None)
         self.random_distribution = kwargs.get('random_distribution', False)
@@ -163,6 +168,18 @@ class FifteenMinuteCity(Model):
         
         # Get movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        
+        # Get action granularity setting (for POI activities)
+        self.action_granularity = kwargs.get('action_granularity', 'basic')
+        if isinstance(self.action_granularity, str):
+            # Convert string to enum
+            from agents.fifteenminutescity.resident import ActionGranularity
+            granularity_map = {
+                'simple': ActionGranularity.SIMPLE,
+                'basic': ActionGranularity.BASIC,
+                'detailed': ActionGranularity.DETAILED
+            }
+            self.action_granularity = granularity_map.get(self.action_granularity.lower(), ActionGranularity.BASIC)
         
         # Initialize LLM components if needed
         self.llm_enabled = (self.needs_selection == 'llms' or self.movement_behavior == 'llms')

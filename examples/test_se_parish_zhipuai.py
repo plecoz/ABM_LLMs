@@ -22,14 +22,14 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from simulation.llm_api import LLMWrapper
-from simulation.model import FifteenMinuteCity
+from simulation.fifteenminutescity_model import FifteenMinuteCity
 from simulation.llm_interaction_layer import LLMInteractionLayer
 from simulation.data_management_logging import DataManagementLoggingToolkit
 from simulation.logging_config import DataManagementConfig, LoggingMode
-from agents.resident import Resident
-from agents.persona_memory_modules import PersonaType
-from environment.city_network import get_or_load_city_network
-from environment.pois import get_or_fetch_pois, get_or_fetch_environment_data
+from agents.fifteenminutescity.resident import Resident
+from agents.fifteenminutescity.persona_memory_modules import PersonaType
+from environment.fifteenminutescity.city_network import get_or_load_city_network
+from environment.fifteenminutescity.pois import get_or_fetch_pois, get_or_fetch_environment_data
 import geopandas as gpd
 
 class SeParishTestRunner:

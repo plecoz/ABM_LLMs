@@ -1,9 +1,68 @@
 from mesa.agent import Agent
-from agents.base_agent import BaseAgent
+from ..base_agent import BaseAgent
 import random
 import networkx as nx
 import logging
 import math
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
+from enum import Enum
+
+class ActionType(Enum):
+    """Types of actions residents can perform"""
+    # Basic actions (always available)
+    WAITING = "waiting"
+    TRAVELING = "traveling"
+    SLEEPING = "sleeping"
+    
+    # POI-specific actions
+    EATING = "eating"
+    SHOPPING = "shopping"
+    WORKING = "working"
+    STUDYING = "studying"
+    EXERCISING = "exercising"
+    SOCIALIZING = "socializing"
+    HEALTHCARE = "healthcare"
+    ENTERTAINMENT = "entertainment"
+    WORSHIP = "worship"
+    BANKING = "banking"
+    
+    # Granular actions (for detailed simulations)
+    TALKING = "talking"
+    READING = "reading"
+    WATCHING_MOVIE = "watching_movie"
+    DOING_BUSINESS = "doing_business"
+    BROWSING = "browsing"
+    CONSULTING = "consulting"
+    PRAYING = "praying"
+    PLAYING = "playing"
+
+class ActionGranularity(Enum):
+    """Granularity levels for action simulation"""
+    SIMPLE = "simple"      # Just waiting times
+    BASIC = "basic"        # Basic action types (eating, shopping, etc.)
+    DETAILED = "detailed"  # Granular actions (talking, browsing, etc.)
+
+@dataclass
+class Action:
+    """Represents an action being performed by a resident"""
+    action_type: ActionType
+    duration: int  # Duration in time steps (minutes)
+    poi_type: Optional[str] = None
+    poi_id: Optional[int] = None
+    description: Optional[str] = None
+    needs_satisfied: Optional[Dict[str, int]] = None
+    social_interaction: bool = False
+    other_agents: Optional[List[int]] = None
+    context: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        if self.needs_satisfied is None:
+            self.needs_satisfied = {}
+        if self.other_agents is None:
+            self.other_agents = []
+        if self.context is None:
+            self.context = {}
 
 class Resident(BaseAgent):
     def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
@@ -21,31 +80,50 @@ class Resident(BaseAgent):
         # Pass parameters in the correct order to parent class
         super().__init__(model, unique_id, geometry, **kwargs)
         
-        # Custom attributes
+        # Core location and mobility attributes (keep separate for frequent access)
         self.home_node = home_node
         self.current_node = home_node
         self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
-        # Track the last visited node to prevent consecutive visits to same POI
         self.last_visited_node = None
         
-        # Person-specific attributes
-        self.family_id = kwargs.get('family_id', None)
+        # Household and occupation (keep separate as requested)
         self.household_members = kwargs.get('household_members', [])
-        self.social_network = kwargs.get('social_network', [])
-        self.daily_schedule = kwargs.get('daily_schedule', {})
-        self.personality_traits = kwargs.get('personality_traits', {})
-        self.activity_preferences = kwargs.get('activity_preferences', {})
+        self.household_type = kwargs.get('household_type', "single")
+        self.employment_status = kwargs.get('employment_status', "employed")
         
-        # Parish information
-        self.parish = kwargs.get('parish', None)
+        # Consolidated attributes dictionary
+        self.attributes = {
+            # Demographics
+            'age': kwargs.get('age', 30),
+            'age_class': kwargs.get('age_class', None),
+            'gender': kwargs.get('gender', 'male'),
+            'income': kwargs.get('income', 50000),
+            'education': kwargs.get('education', 'high_school'),
+            
+            # Location and social
+            'parish': kwargs.get('parish', None),
+            'family_id': kwargs.get('family_id', None),
+            'social_network': kwargs.get('social_network', []),
+            
+            # Behavior and preferences
+            'needs_selection': kwargs.get('needs_selection', 'random'),
+            'movement_behavior': kwargs.get('movement_behavior', 'need-based'),
+            'daily_schedule': kwargs.get('daily_schedule', {}),
+            'personality_traits': kwargs.get('personality_traits', {}),
+            'activity_preferences': kwargs.get('activity_preferences', {}),
+            
+            # Physical attributes
+            'access_distance': kwargs.get('access_distance', 0),
+        }
         
-        # Needs selection method
-        self.needs_selection = kwargs.get('needs_selection', 'random')
-        
-        # Movement behavior setting
-        self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        # Convenience properties for frequently accessed attributes
+        self.age = self.attributes['age']
+        self.parish = self.attributes['parish']
+        self.needs_selection = self.attributes['needs_selection']
+        self.movement_behavior = self.attributes['movement_behavior']
+        self.social_network = self.attributes['social_network']
 
         # Employment probabilities - only for Macau
         if hasattr(self.model, 'city') and self.model.city == 'Macau, China':
@@ -103,52 +181,23 @@ class Resident(BaseAgent):
         # Current needs (will be updated each step)
         self.current_needs = self.dynamic_needs.copy()
         
-        # Demographic attributes from model (may vary by parish)
-        self.age = kwargs.get('age', 30)  # Default age
-        self.age_class = kwargs.get('age_class', None)  # Age class from parish demographics (e.g., "20-24")
-        self.gender = kwargs.get('gender', 'male')  # Default gender
-        self.income = kwargs.get('income', 50000)  # Default income
-        self.education = kwargs.get('education', 'high_school')  # Default education level
-        
-        # New attributes
-        # Using default values for employment status and household type
-        self.employment_status = kwargs.get('employment_status', "employed")
-        self.household_type = kwargs.get('household_type', "single")
-        
         # Determine step size based on age for calculating travel times
         is_elderly = False
-        if self.age_class:
-            age_class_str = str(self.age_class).lower()
+        if self.attributes['age_class']:
+            age_class_str = str(self.attributes['age_class']).lower()
             if any(s in age_class_str for s in ['65+', '65-', '70+', '70-', '75+', '75-', '80+', '80-', '85+', '85-']):
                 is_elderly = True
         
         self.step_size = 60.0 if is_elderly else 80.0  # meters per minute
 
         # Calculate home access time penalty based on distance from building to network
-        self.access_distance = kwargs.get('access_distance', 0)
-        if self.access_distance > 0.1:  # Only apply penalty for distances > 0.1 meters
+        if self.attributes['access_distance'] > 0.1:  # Only apply penalty for distances > 0.1 meters
             # Time (in steps/minutes) to walk from building to nearest street node
             # We use ceil to ensure any non-zero distance results in at least a 1-minute penalty
-            self.home_access_time = math.ceil(self.access_distance / self.step_size)
+            self.home_access_time = math.ceil(self.attributes['access_distance'] / self.step_size)
             print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
         else:
             self.home_access_time = 0
-        
-        # Energy levels and mobility constraints
-        # self.max_energy = 100
-        # self.energy = self.max_energy
-        # Age-based energy depletion rate: older agents lose energy faster
-        # if self.age < 18:
-        #     self.energy_depletion_rate = 2  # Children have moderate depletion
-        # elif self.age < 35:
-        #     self.energy_depletion_rate = 1  # Young adults have lowest depletion
-        # elif self.age < 65:
-        #     self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
-        # else:
-        #     self.energy_depletion_rate = 3  # Elderly have highest depletion
-        
-        # Recharge counter when at home
-        # self.home_recharge_counter = 0
         
         # Mobility constraints - speed in km/h
         if self.age >= 65:
@@ -162,14 +211,23 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
-        # Waiting time tracking (new)
-        self.waiting_at_poi = False
-        self.waiting_time_remaining = 0
+        # Action system (replaces simple waiting)
+        self.performing_action = False
+        self.current_action = None  # Current action being performed
+        self.action_time_remaining = 0
+        self.action_history = []  # Track completed actions
         
-        # Memory module
+        # Path selection for LLM agents
+        self.selected_travel_path = None  # Store the path selected by LLM
+        self.path_selection_history = []  # Track path choices for learning
+        
+        # Enhanced memory module
         self.memory = {
-            'income': self.income,
-            'visited_pois': []  # List of dicts: {step, poi_id, poi_type, category, income}
+            'income': self.attributes['income'],
+            'visited_pois': [],  # List of dicts: {step, poi_id, poi_type, category, income}
+            'interactions': [],  # List of interaction records
+            'historical_needs': [],  # List of needs over time: {step, needs_dict}
+            'completed_actions': [],  # List of completed actions with outcomes
         }
         
         # Initialize logger if not provided
@@ -190,6 +248,24 @@ class Resident(BaseAgent):
         Returns:
             Number of time steps needed for travel (each step is 1 minute)
         """
+        # For LLM-enabled agents, use path selection instead of simple shortest path
+        if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+            return self._calculate_travel_time_with_path_selection(from_node, to_node)
+        
+        # Standard shortest path calculation for non-LLM agents
+        return self._calculate_standard_travel_time(from_node, to_node)
+
+    def _calculate_standard_travel_time(self, from_node, to_node):
+        """
+        Calculate travel time using standard shortest path (for non-LLM agents).
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Number of time steps needed for travel
+        """
         # Always calculate the actual shortest path length for consistency
         try:
             # Calculate shortest path length along the street network
@@ -206,8 +282,8 @@ class Resident(BaseAgent):
         # Determine step size based on age_class
         # Check if age_class indicates elderly (65+ years)
         is_elderly = False
-        if self.age_class:
-            age_class_str = str(self.age_class).lower()
+        if self.attributes['age_class']:
+            age_class_str = str(self.attributes['age_class']).lower()
             # Check for age classes that indicate 65+ years
             if ('65+' in age_class_str or '65-' in age_class_str or 
                 '70+' in age_class_str or '70-' in age_class_str or
@@ -225,12 +301,45 @@ class Resident(BaseAgent):
         # Always round UP to ensure no step exceeds the agent's step size
         steps_needed = math.ceil(distance_meters / step_size)
         
-        # Debug output for resident 0
-        #if hasattr(self, 'unique_id') and self.unique_id == 0:
-        #    print(f"Resident 0 (age_class {self.age_class}): Distance {distance_meters:.1f}m → {steps_needed} steps ({step_size}m each)")
-        
         # Ensure at least 1 time step
         return max(1, steps_needed)
+
+    def _calculate_travel_time_with_path_selection(self, from_node, to_node):
+        """
+        Calculate travel time using LLM-based path selection from multiple alternatives.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Number of time steps needed for travel using selected path
+        """
+        try:
+            # Get multiple path options
+            path_options = self._get_multiple_path_options(from_node, to_node)
+            
+            if not path_options:
+                self.logger.warning(f"No path options found from {from_node} to {to_node}")
+                return None
+            
+            # If only one path available, use it directly
+            if len(path_options) == 1:
+                selected_path = path_options[0]
+            else:
+                # Use LLM to score and select the best path
+                selected_path = self._select_path_with_llm(path_options, from_node, to_node)
+            
+            # Store the selected path for actual travel
+            self.selected_travel_path = selected_path
+            
+            # Calculate travel time based on selected path
+            return self._calculate_time_for_path(selected_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error in LLM path selection: {e}")
+            # Fall back to standard calculation
+            return self._calculate_standard_travel_time(from_node, to_node)
 
     def start_travel(self, target_node, target_geometry):
         """
@@ -502,7 +611,7 @@ class Resident(BaseAgent):
         Choose movement target using LLM-based decision making.
         
         Returns:
-            POI type to move to, 'home' to go home, or None if no movement should occur
+            POI type to move to, 'home' to go home, or None to stay put
         """
         # Check if LLM components are available
         if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
@@ -555,7 +664,7 @@ class Resident(BaseAgent):
         Returns:
             List of EpisodicMemory objects
         """
-        from simulation.llm_interaction_layer import EpisodicMemory
+        from ...simulation.llm_interaction_layer import EpisodicMemory
         
         memories = []
         
@@ -655,38 +764,6 @@ class Resident(BaseAgent):
             # Increase needs over time
             self.increase_needs_over_time()
             
-            # Update energy levels
-            # if self.current_node != self.home_node:
-            #     # Deplete energy when not at home - only every 30 minutes to be more realistic
-            #     if self.model.step_count % 30 == 0:
-            #         self.energy = max(0, self.energy - self.energy_depletion_rate)
-            #     self.home_recharge_counter = 0
-            # else:
-            #     # At home - reset recharge counter or recharge energy
-            #     if self.energy < self.max_energy:
-            #         self.home_recharge_counter += 1
-            #         # Recharge after staying home for 120 minutes (2 hours)
-            #         if self.home_recharge_counter >= 120:
-            #             self.energy = self.max_energy
-            #             self.home_recharge_counter = 0
-            
-            # Check energy level - if depleted, go home immediately
-            # if self.energy <= 0 and self.current_node != self.home_node:
-            #     # Cancel any ongoing travel
-            #     self.traveling = False
-            #     self.travel_time_remaining = 0
-            #     
-            #     # Update last visited node before going home
-            #     self.last_visited_node = self.current_node
-            #     
-            #     # Go straight home
-            #     self.current_node = self.home_node
-            #     node_coords = self.model.graph.nodes[self.home_node]
-            #     if 'x' in node_coords and 'y' in node_coords:
-            #         from shapely.geometry import Point
-            #         self.geometry = Point(node_coords['x'], node_coords['y'])
-            #     return  # Skip regular movement behavior
-            
             # Handle ongoing travel
             if self.traveling:
                 self.travel_time_remaining -= 1
@@ -714,7 +791,7 @@ class Resident(BaseAgent):
                                 'poi_id': poi.unique_id,
                                 'poi_type': poi.poi_type,
                                 'category': getattr(poi, 'category', None),
-                                'income': self.income
+                                'income': self.attributes['income']
                             })
                             
                             # Track POI visit in output controller
@@ -728,10 +805,9 @@ class Resident(BaseAgent):
                     if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
                         waiting_time = visited_poi_agent.get_waiting_time()
                         if waiting_time > 0:
-                            self.waiting_at_poi = True
-                            self.waiting_time_remaining = waiting_time
-                            #line to debug
-                            # print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
+                            # Determine action based on POI type and simulation settings
+                            action = self._select_action_at_poi(visited_poi_agent, waiting_time)
+                            self._start_action(action)
                             
                             # Track waiting time in output controller
                             if hasattr(self.model, 'output_controller'):
@@ -753,34 +829,159 @@ class Resident(BaseAgent):
                 # Still traveling, don't take any other movement actions
                 return
             
-            # Handle waiting at POI
-            if self.waiting_at_poi:
-                self.waiting_time_remaining -= 1
+            # Handle ongoing actions at POIs
+            if self.performing_action:
+                self.action_time_remaining -= 1
                 
-                # Check if waiting is finished
-                if self.waiting_time_remaining <= 0:
-                    self.waiting_at_poi = False
-                    print(f"Resident {self.unique_id} finished waiting at POI")
+                # Check if action is finished
+                if self.action_time_remaining <= 0:
+                    self._complete_current_action()
                 
-                # Still waiting, don't take any other movement actions
+                # Still performing action, don't take any other movement actions
                 return
             
-            # Regular movement behavior - only if energy is not depleted and not traveling
-            if not self.traveling:  # Removed energy check
-                # Choose movement target based on behavior setting
-                target_poi_type = self.choose_movement_target()
+            # === MOVEMENT DECISION MAKING ===
+            # This is where all movement decisions are made based on the movement behavior
+            if not self.traveling:
+                target_poi_type = None
                 
+                if self.movement_behavior == 'random':
+                    # Random movement - use existing simple logic
+                    target_poi_type = self._make_random_movement_decision()
+                    
+                elif self.movement_behavior == 'need-based':
+                    # Need-based movement - use existing logic but centralized here
+                    target_poi_type = self._make_need_based_movement_decision()
+                    
+                elif self.movement_behavior == 'llms':
+                    # LLM-based movement - placeholder for future sophisticated decision making
+                    target_poi_type = self._make_llm_movement_decision()
+                
+                # Execute the movement decision
                 if target_poi_type == 'home':
-                    # Force going home
                     self.go_home()
                 elif target_poi_type:
-                    # Move to the specified POI type
                     self.move_to_poi(target_poi_type)
-                
+                # If target_poi_type is None, resident stays put this step
+            
+            # Record needs snapshot periodically (every 15 minutes)
+            if self.model.step_count % 15 == 0:
+                self.record_needs_snapshot()
+            
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
-    
+
+    def _make_random_movement_decision(self):
+        """
+        Make a random movement decision.
+        Uses the existing random movement logic but with step-level decision making.
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # Simple probability check for random movement
+        if random.random() > 0.3:  # 70% chance to stay put for random movement
+            return None
+        
+        # Use existing random target selection
+        target = self._choose_random_target()
+        if target is None and self.current_node != self.home_node:
+            # No suitable POI available and not at home - force going home
+            return 'home'
+        return target
+
+    def _make_need_based_movement_decision(self):
+        """
+        Make a need-based movement decision.
+        This is where we can later add sophisticated need hierarchy and POI attractiveness.
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # Update current needs
+        self.current_needs = self.generate_needs()
+        
+        # Find the highest need
+        highest_need_type, highest_need_value = self.find_highest_need()
+        
+        # Basic decision factors (can be expanded later)
+        base_move_probability = 0.1  # Base 10% chance to move
+        
+        # Adjust based on time of day
+        hour = self.model.hour_of_day
+        time_factor = 1.0
+        if 6 <= hour <= 22:  # Daytime hours
+            time_factor = 1.5
+        elif 22 < hour or hour < 6:  # Night hours
+            time_factor = 0.2
+        
+        # Adjust based on age
+        age_factor = 1.0
+        if self.age >= 65:
+            age_factor = 0.7
+        elif self.age < 25:
+            age_factor = 1.3
+        
+        # Adjust based on current location
+        location_factor = 1.0
+        if self.current_node == self.home_node:
+            location_factor = 0.8  # Less likely to leave home
+        else:
+            location_factor = 1.2  # More likely to move when already out
+        
+        # Adjust based on need urgency (this is where hierarchy comes in)
+        need_factor = 1.0
+        if highest_need_value > 80:
+            need_factor = 3.0  # Very urgent needs
+        elif highest_need_value > 60:
+            need_factor = 2.0  # Moderate needs
+        elif highest_need_value > 40:
+            need_factor = 1.2  # Mild needs
+        elif highest_need_value < 30:
+            need_factor = 0.3  # Low needs
+        
+        # Calculate final probability
+        move_probability = base_move_probability * time_factor * age_factor * location_factor * need_factor
+        move_probability = min(1.0, move_probability)  # Cap at 100%
+        
+        # Make the decision
+        if random.random() > move_probability:
+            return None  # Stay put
+        
+        # If we decide to move, find POI types that can satisfy the highest need
+        available_poi_types = self.find_poi_for_need(highest_need_type)
+        
+        if available_poi_types:
+            # TODO: This is where POI attractiveness/popularity could be considered
+            # For now, choose randomly from available options
+            return random.choice(available_poi_types)
+        
+        return None
+
+    def _make_llm_movement_decision(self):
+        """
+        Make an LLM-based movement decision.
+        This is a placeholder for future sophisticated LLM decision making.
+        
+        In the future, this could:
+        - Evaluate specific POI options with their attractiveness
+        - Consider complex need hierarchies
+        - Factor in social context, weather, events, etc.
+        - Make more human-like decisions
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # For now, fall back to existing LLM logic
+        # This will be replaced with more sophisticated decision making later
+        try:
+            return self._choose_llm_based_target()
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"LLM decision making failed, falling back to need-based: {e}")
+            return self._make_need_based_movement_decision()
+
     def set_activity_preferences(self, preferences):
         """
         Update the agent's activity preferences.
@@ -788,7 +989,7 @@ class Resident(BaseAgent):
         Args:
             preferences: Dictionary of activity types and their weights
         """
-        self.activity_preferences = preferences
+        self.attributes['activity_preferences'] = preferences
     
     def add_to_social_network(self, agent_id):
         """
@@ -799,6 +1000,7 @@ class Resident(BaseAgent):
         """
         if agent_id != self.unique_id and agent_id not in self.social_network:
             self.social_network.append(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
     
     def remove_from_social_network(self, agent_id):
         """
@@ -809,6 +1011,7 @@ class Resident(BaseAgent):
         """
         if agent_id in self.social_network:
             self.social_network.remove(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
     
     def generate_needs(self, method=None):
         """
@@ -932,7 +1135,7 @@ class Resident(BaseAgent):
         Returns:
             Dictionary of base needs for the persona
         """
-        from agents.persona_memory_modules import PersonaType
+        from .persona_memory_modules import PersonaType
         
         persona_type = getattr(self, 'persona_type', None)
         
@@ -1023,7 +1226,7 @@ class Resident(BaseAgent):
                 dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
                 
                 # Adjust needs based on dominant emotion
-                from agents.persona_memory_modules import EmotionalState
+                from .persona_memory_modules import EmotionalState
                 
                 if dominant_emotion == EmotionalState.STRESSED:
                     adjustments["recreation"] *= 1.3  # More recreation when stressed
@@ -1071,10 +1274,10 @@ class Resident(BaseAgent):
             "home_location": (self.geometry.x, self.geometry.y),
             "demographic_info": {
                 "age": self.age,
-                "age_class": self.age_class,
-                "gender": self.gender,
-                "income": self.income,
-                "education": self.education,
+                "age_class": self.attributes['age_class'],
+                "gender": self.attributes['gender'],
+                "income": self.attributes['income'],
+                "education": self.attributes['education'],
                 "employment_status": self.employment_status,
                 "household_type": self.household_type
             }
@@ -1155,28 +1358,3 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error updating emotional state from POI visit: {e}")
-
-
-#### 1. the decision-making should be on "step" level, not only need-assessment level
-#### because the agent should be able to choose to not move
-
-#### 2. have more memory
-#### interactions (messages), historical needs
-#### put all attributes (except household, occupation) into one "attributes" dict (later can be used for LLM)
-
-#### 3. Add social network
-#### consider using direct link (existing) or adjacent matrix/graph
-#### can refer to AgentSociety
-
-#### 4. Add more types of actions (sleep, work, etc.)
-#### how to have flexible actions? (later can be decided/generated for LLM)
-#### replace the "waiting" with real actions (talking, eating, doing business, watching movies, KTVs, etc.)
-#### but should be flexible in terms of granularity, some simulation requires only staying time..
-
-#### 5. finish the Env parts, household locations, etc.
-#### when calculating travel times: 
-##### 1)generate several routes, 
-##### 2)score the routes based on rule (trafic, weather, good view, etc.)
-##### 3)can be decided by LLM
-#### provide more information about the POIs for LLM, and historical visits can be accecible
-
