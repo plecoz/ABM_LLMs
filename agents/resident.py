@@ -655,38 +655,6 @@ class Resident(BaseAgent):
             # Increase needs over time
             self.increase_needs_over_time()
             
-            # Update energy levels
-            # if self.current_node != self.home_node:
-            #     # Deplete energy when not at home - only every 30 minutes to be more realistic
-            #     if self.model.step_count % 30 == 0:
-            #         self.energy = max(0, self.energy - self.energy_depletion_rate)
-            #     self.home_recharge_counter = 0
-            # else:
-            #     # At home - reset recharge counter or recharge energy
-            #     if self.energy < self.max_energy:
-            #         self.home_recharge_counter += 1
-            #         # Recharge after staying home for 120 minutes (2 hours)
-            #         if self.home_recharge_counter >= 120:
-            #             self.energy = self.max_energy
-            #             self.home_recharge_counter = 0
-            
-            # Check energy level - if depleted, go home immediately
-            # if self.energy <= 0 and self.current_node != self.home_node:
-            #     # Cancel any ongoing travel
-            #     self.traveling = False
-            #     self.travel_time_remaining = 0
-            #     
-            #     # Update last visited node before going home
-            #     self.last_visited_node = self.current_node
-            #     
-            #     # Go straight home
-            #     self.current_node = self.home_node
-            #     node_coords = self.model.graph.nodes[self.home_node]
-            #     if 'x' in node_coords and 'y' in node_coords:
-            #         from shapely.geometry import Point
-            #         self.geometry = Point(node_coords['x'], node_coords['y'])
-            #     return  # Skip regular movement behavior
-            
             # Handle ongoing travel
             if self.traveling:
                 self.travel_time_remaining -= 1
@@ -730,8 +698,6 @@ class Resident(BaseAgent):
                         if waiting_time > 0:
                             self.waiting_at_poi = True
                             self.waiting_time_remaining = waiting_time
-                            #line to debug
-                            # print(f"Resident {self.unique_id} waiting {waiting_time} minutes at {visited_poi_type}")
                             
                             # Track waiting time in output controller
                             if hasattr(self.model, 'output_controller'):
@@ -765,22 +731,144 @@ class Resident(BaseAgent):
                 # Still waiting, don't take any other movement actions
                 return
             
-            # Regular movement behavior - only if energy is not depleted and not traveling
-            if not self.traveling:  # Removed energy check
-                # Choose movement target based on behavior setting
-                target_poi_type = self.choose_movement_target()
+            # === MOVEMENT DECISION MAKING ===
+            # This is where all movement decisions are made based on the movement behavior
+            if not self.traveling:
+                target_poi_type = None
                 
+                if self.movement_behavior == 'random':
+                    # Random movement - use existing simple logic
+                    target_poi_type = self._make_random_movement_decision()
+                    
+                elif self.movement_behavior == 'need-based':
+                    # Need-based movement - use existing logic but centralized here
+                    target_poi_type = self._make_need_based_movement_decision()
+                    
+                elif self.movement_behavior == 'llms':
+                    # LLM-based movement - placeholder for future sophisticated decision making
+                    target_poi_type = self._make_llm_movement_decision()
+                
+                # Execute the movement decision
                 if target_poi_type == 'home':
-                    # Force going home
                     self.go_home()
                 elif target_poi_type:
-                    # Move to the specified POI type
                     self.move_to_poi(target_poi_type)
-                
+                # If target_poi_type is None, resident stays put this step
+            
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
-    
+
+    def _make_random_movement_decision(self):
+        """
+        Make a random movement decision.
+        Uses the existing random movement logic but with step-level decision making.
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # Simple probability check for random movement
+        if random.random() > 0.3:  # 70% chance to stay put for random movement
+            return None
+        
+        # Use existing random target selection
+        target = self._choose_random_target()
+        if target is None and self.current_node != self.home_node:
+            # No suitable POI available and not at home - force going home
+            return 'home'
+        return target
+
+    def _make_need_based_movement_decision(self):
+        """
+        Make a need-based movement decision.
+        This is where we can later add sophisticated need hierarchy and POI attractiveness.
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # Update current needs
+        self.current_needs = self.generate_needs()
+        
+        # Find the highest need
+        highest_need_type, highest_need_value = self.find_highest_need()
+        
+        # Basic decision factors (can be expanded later)
+        base_move_probability = 0.1  # Base 10% chance to move
+        
+        # Adjust based on time of day
+        hour = self.model.hour_of_day
+        time_factor = 1.0
+        if 6 <= hour <= 22:  # Daytime hours
+            time_factor = 1.5
+        elif 22 < hour or hour < 6:  # Night hours
+            time_factor = 0.2
+        
+        # Adjust based on age
+        age_factor = 1.0
+        if self.age >= 65:
+            age_factor = 0.7
+        elif self.age < 25:
+            age_factor = 1.3
+        
+        # Adjust based on current location
+        location_factor = 1.0
+        if self.current_node == self.home_node:
+            location_factor = 0.8  # Less likely to leave home
+        else:
+            location_factor = 1.2  # More likely to move when already out
+        
+        # Adjust based on need urgency (this is where hierarchy comes in)
+        need_factor = 1.0
+        if highest_need_value > 80:
+            need_factor = 3.0  # Very urgent needs
+        elif highest_need_value > 60:
+            need_factor = 2.0  # Moderate needs
+        elif highest_need_value > 40:
+            need_factor = 1.2  # Mild needs
+        elif highest_need_value < 30:
+            need_factor = 0.3  # Low needs
+        
+        # Calculate final probability
+        move_probability = base_move_probability * time_factor * age_factor * location_factor * need_factor
+        move_probability = min(1.0, move_probability)  # Cap at 100%
+        
+        # Make the decision
+        if random.random() > move_probability:
+            return None  # Stay put
+        
+        # If we decide to move, find POI types that can satisfy the highest need
+        available_poi_types = self.find_poi_for_need(highest_need_type)
+        
+        if available_poi_types:
+            # TODO: This is where POI attractiveness/popularity could be considered
+            # For now, choose randomly from available options
+            return random.choice(available_poi_types)
+        
+        return None
+
+    def _make_llm_movement_decision(self):
+        """
+        Make an LLM-based movement decision.
+        This is a placeholder for future sophisticated LLM decision making.
+        
+        In the future, this could:
+        - Evaluate specific POI options with their attractiveness
+        - Consider complex need hierarchies
+        - Factor in social context, weather, events, etc.
+        - Make more human-like decisions
+        
+        Returns:
+            POI type to move to, 'home' to go home, or None to stay put
+        """
+        # For now, fall back to existing LLM logic
+        # This will be replaced with more sophisticated decision making later
+        try:
+            return self._choose_llm_based_target()
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"LLM decision making failed, falling back to need-based: {e}")
+            return self._make_need_based_movement_decision()
+
     def set_activity_preferences(self, preferences):
         """
         Update the agent's activity preferences.
