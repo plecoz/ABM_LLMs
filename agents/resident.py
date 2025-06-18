@@ -811,3 +811,28 @@ class Resident(BaseAgent):
         
         # Start traveling home
         return self.start_travel(self.home_node, home_geometry)
+
+
+#### 1. the decision-making should be on "step" level, not only need-assessment level
+#### because the agent should be able to choose to not move
+
+#### 2. have more memory
+#### interactions (messages), historical needs
+#### put all attributes (except household, occupation) into one "attributes" dict (later can be used for LLM)
+
+#### 3. Add social network
+#### consider using direct link (existing) or adjacent matrix/graph
+#### can refer to AgentSociety
+
+#### 4. Add more types of actions (sleep, work, etc.)
+#### how to have flexible actions? (later can be decided/generated for LLM)
+#### replace the "waiting" with real actions (talking, eating, doing business, watching movies, KTVs, etc.)
+#### but should be flexible in terms of granularity, some simulation requires only staying time..
+
+#### 5. finish the Env parts, household locations, etc.
+#### when calculating travel times: 
+##### 1)generate several routes, 
+##### 2)score the routes based on rule (trafic, weather, good view, etc.)
+##### 3)can be decided by LLM
+#### provide more information about the POIs for LLM, and historical visits can be accecible
+
