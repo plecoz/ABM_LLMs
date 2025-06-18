@@ -82,44 +82,8 @@ class BaseAgent(GeoAgent):
             if action:
                 self.planned_activities.append(action)
     
-    def _move(self):
-        """
-        Move the agent along its planned path.
-        """
-        # If we have a movement path, follow it
-        if self.movement_path:
-            next_point = self.movement_path.pop(0)
-            self.geometry = Point(next_point)
-        # If we need to go somewhere but don't have a path yet
-        elif self.planned_activities and 'location' in self.planned_activities[0]:
-            destination = self.planned_activities[0]['location']
-            self._plan_route(destination)
     
-    def _plan_route(self, destination):
-        """
-        Plan a route to the destination using Google Maps API or simple path.
-        In this initial implementation, we'll use a simplified straight path.
-        """
-        if hasattr(self.model, 'route_planner') and self.model.route_planner:
-            # Use the model's route planner (could be Google Maps API wrapper)
-            self.movement_path = self.model.route_planner.get_route(
-                origin=self.geometry, 
-                destination=destination
-            )
-        else:
-            # Simple linear path as fallback
-            start_x, start_y = self.geometry.x, self.geometry.y
-            end_x, end_y = destination.x, destination.y
-            
-            # Create a simple path with 5 points
-            steps = 5
-            self.movement_path = [
-                Point(
-                    start_x + (end_x - start_x) * i / steps,
-                    start_y + (end_y - start_y) * i / steps
-                )
-                for i in range(1, steps + 1)
-            ]
+
     
     def _interact(self):
         """
