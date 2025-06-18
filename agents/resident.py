@@ -217,6 +217,10 @@ class Resident(BaseAgent):
         self.action_time_remaining = 0
         self.action_history = []  # Track completed actions
         
+        # Path selection for LLM agents
+        self.selected_travel_path = None  # Store the path selected by LLM
+        self.path_selection_history = []  # Track path choices for learning
+        
         # Enhanced memory module
         self.memory = {
             'income': self.attributes['income'],
@@ -243,6 +247,24 @@ class Resident(BaseAgent):
             
         Returns:
             Number of time steps needed for travel (each step is 1 minute)
+        """
+        # For LLM-enabled agents, use path selection instead of simple shortest path
+        if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+            return self._calculate_travel_time_with_path_selection(from_node, to_node)
+        
+        # Standard shortest path calculation for non-LLM agents
+        return self._calculate_standard_travel_time(from_node, to_node)
+
+    def _calculate_standard_travel_time(self, from_node, to_node):
+        """
+        Calculate travel time using standard shortest path (for non-LLM agents).
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Number of time steps needed for travel
         """
         # Always calculate the actual shortest path length for consistency
         try:
@@ -279,12 +301,45 @@ class Resident(BaseAgent):
         # Always round UP to ensure no step exceeds the agent's step size
         steps_needed = math.ceil(distance_meters / step_size)
         
-        # Debug output for resident 0
-        #if hasattr(self, 'unique_id') and self.unique_id == 0:
-        #    print(f"Resident 0 (age_class {self.attributes['age_class']}): Distance {distance_meters:.1f}m → {steps_needed} steps ({step_size}m each)")
-        
         # Ensure at least 1 time step
         return max(1, steps_needed)
+
+    def _calculate_travel_time_with_path_selection(self, from_node, to_node):
+        """
+        Calculate travel time using LLM-based path selection from multiple alternatives.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Number of time steps needed for travel using selected path
+        """
+        try:
+            # Get multiple path options
+            path_options = self._get_multiple_path_options(from_node, to_node)
+            
+            if not path_options:
+                self.logger.warning(f"No path options found from {from_node} to {to_node}")
+                return None
+            
+            # If only one path available, use it directly
+            if len(path_options) == 1:
+                selected_path = path_options[0]
+            else:
+                # Use LLM to score and select the best path
+                selected_path = self._select_path_with_llm(path_options, from_node, to_node)
+            
+            # Store the selected path for actual travel
+            self.selected_travel_path = selected_path
+            
+            # Calculate travel time based on selected path
+            return self._calculate_time_for_path(selected_path)
+            
+        except Exception as e:
+            self.logger.error(f"Error in LLM path selection: {e}")
+            # Fall back to standard calculation
+            return self._calculate_standard_travel_time(from_node, to_node)
 
     def start_travel(self, target_node, target_geometry):
         """
@@ -1696,3 +1751,281 @@ class Resident(BaseAgent):
             actions = [a for a in actions if a['action_type'] == action_type]
         
         return actions[-limit:] if actions else []
+
+    def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
+        """
+        Generate 4 shortest path options between two nodes.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            max_paths: Maximum number of paths to generate (default: 4)
+            
+        Returns:
+            List of path dictionaries with OSM metadata for LLM scoring
+        """
+        try:
+            # Generate k-shortest paths using NetworkX
+            paths = self._get_k_shortest_paths(from_node, to_node, max_paths)
+            
+            # Extract OSM metadata for each path
+            path_options = []
+            for i, path_nodes in enumerate(paths):
+                if path_nodes:  # Ensure path exists
+                    path_data = self._extract_path_metadata(path_nodes, i + 1)
+                    if path_data:
+                        path_options.append(path_data)
+            
+            return path_options
+            
+        except Exception as e:
+            self.logger.error(f"Error generating path options: {e}")
+            return []
+
+    def _get_k_shortest_paths(self, from_node, to_node, k):
+        """
+        Get k shortest paths using simple approach.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            k: Number of paths to find
+            
+        Returns:
+            List of path node lists
+        """
+        try:
+            import itertools
+            
+            paths = []
+            graph = self.model.graph.copy()
+            
+            # Get the shortest path first
+            try:
+                shortest_path = nx.shortest_path(graph, from_node, to_node, weight='length')
+                paths.append(shortest_path)
+            except nx.NetworkXNoPath:
+                return []
+            
+            # Try to find alternative paths by temporarily removing edges
+            for attempt in range(k - 1):
+                if len(paths) >= k:
+                    break
+                
+                # Create a copy of the graph and remove some edges from previous paths
+                temp_graph = graph.copy()
+                
+                # Remove some edges from existing paths to force alternatives
+                for existing_path in paths:
+                    if len(existing_path) > 2:  # Only if path has enough edges
+                        # Remove middle edges to force different routes
+                        edges_to_remove = []
+                        for i in range(1, min(3, len(existing_path) - 1)):  # Remove 1-2 middle edges
+                            if i < len(existing_path) - 1:
+                                edges_to_remove.append((existing_path[i], existing_path[i + 1]))
+                        
+                        for edge in edges_to_remove:
+                            if temp_graph.has_edge(edge[0], edge[1]):
+                                temp_graph.remove_edge(edge[0], edge[1])
+                
+                # Try to find a path in the modified graph
+                try:
+                    alt_path = nx.shortest_path(temp_graph, from_node, to_node, weight='length')
+                    # Check if this path is sufficiently different
+                    if not any(self._paths_are_same(alt_path, existing) for existing in paths):
+                        paths.append(alt_path)
+                except nx.NetworkXNoPath:
+                    continue
+            
+            return paths
+            
+        except Exception as e:
+            self.logger.error(f"Error in k-shortest paths: {e}")
+            return []
+
+    def _extract_path_metadata(self, path_nodes, path_number):
+        """
+        Extract OSM metadata from a path for LLM scoring.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            path_number: Path identifier number
+            
+        Returns:
+            Dictionary with path metadata
+        """
+        try:
+            graph = self.model.graph
+            
+            # Calculate basic metrics
+            path_length = 0
+            road_types = []
+            surface_types = []
+            max_speeds = []
+            
+            # Analyze each edge in the path
+            for i in range(len(path_nodes) - 1):
+                node1, node2 = path_nodes[i], path_nodes[i + 1]
+                
+                # Get edge data
+                edge_data = graph.get_edge_data(node1, node2, {})
+                
+                # Extract length
+                edge_length = edge_data.get('length', 0)
+                path_length += edge_length
+                
+                # Extract road type (highway tag)
+                highway_type = edge_data.get('highway', 'unclassified')
+                road_types.append(highway_type)
+                
+                # Extract surface type if available
+                surface = edge_data.get('surface', 'unknown')
+                surface_types.append(surface)
+                
+                # Extract max speed if available
+                max_speed = edge_data.get('maxspeed', 'unknown')
+                max_speeds.append(max_speed)
+            
+            # Calculate travel time
+            travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
+            
+            # Determine dominant road types
+            road_type_counts = {}
+            for road_type in road_types:
+                road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
+            
+            dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
+            
+            # Create simplified metadata for LLM
+            return {
+                'path_id': path_number,
+                'path_nodes': path_nodes,
+                'distance_meters': round(path_length, 0),
+                'travel_time_minutes': round(travel_time_minutes, 1),
+                'dominant_road_type': dominant_road_type,
+                'road_types': list(set(road_types)),
+                'surface_types': list(set([s for s in surface_types if s != 'unknown'])),
+                'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
+                'total_segments': len(path_nodes) - 1
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting path metadata: {e}")
+            return None
+
+    def _select_path_with_llm(self, path_options, from_node, to_node):
+        """
+        Use LLM to score paths and select the best one.
+        Delegates to LLM interaction layer to avoid code duplication.
+        
+        Args:
+            path_options: List of path dictionaries with metadata
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Selected path nodes or None if LLM fails
+        """
+        if not self.model.llm_enabled or not path_options:
+            # Fallback to shortest path when LLM disabled
+            return self._fallback_path_selection(path_options)
+        
+        try:
+            # Prepare context for LLM
+            context = {
+                'time_of_day': self.model.hour_of_day,
+                'from_node': from_node,
+                'to_node': to_node
+            }
+            
+            # Create agent state for LLM
+            agent_state = {
+                'age': getattr(self, 'age', 30),
+                'current_needs': getattr(self, 'needs', {}),
+                'agent_id': str(self.unique_id)
+            }
+            
+            # Delegate to LLM interaction layer
+            response = self.model.llm_interaction_layer.score_path_options(
+                agent_state, path_options, context
+            )
+            
+            # Extract selected path
+            if 0 <= response.selected_path_id < len(path_options):
+                selected_path = path_options[response.selected_path_id]
+                self.logger.info(f"LLM selected path {response.selected_path_id + 1}: {response.reasoning}")
+                return selected_path['path_nodes']
+            else:
+                return self._fallback_path_selection(path_options)
+                
+        except Exception as e:
+            self.logger.error(f"Error in LLM path selection: {e}")
+            return self._fallback_path_selection(path_options)
+
+    def _fallback_path_selection(self, path_options):
+        """
+        Fallback path selection - choose shortest time.
+        
+        Args:
+            path_options: Available path options
+            
+        Returns:
+            Path nodes of shortest time path or None
+        """
+        if not path_options:
+            return None
+        
+        # Select path with shortest travel time
+        shortest_path = min(path_options, key=lambda p: p['travel_time_minutes'])
+        return shortest_path['path_nodes']
+
+    def _paths_are_same(self, path1, path2):
+        """
+        Check if two paths are essentially the same.
+        
+        Args:
+            path1: First path dictionary
+            path2: Second path dictionary
+            
+        Returns:
+            Boolean indicating if paths are the same
+        """
+        if not path1 or not path2:
+            return False
+            
+        return path1['path_nodes'] == path2['path_nodes']
+
+    def _calculate_time_for_path(self, path_data):
+        """
+        Calculate travel time for a specific path.
+        
+        Args:
+            path_data: Path dictionary with characteristics
+            
+        Returns:
+            Travel time in minutes
+        """
+        return self._calculate_time_for_path_nodes(path_data['path_nodes'])
+
+    def _calculate_time_for_path_nodes(self, path_nodes):
+        """
+        Calculate travel time for a list of path nodes.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            
+        Returns:
+            Travel time in minutes
+        """
+        total_distance = 0
+        
+        for i in range(len(path_nodes) - 1):
+            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1], {})
+            edge_length = edge_data.get('length', 100)  # Default 100m if no data
+            total_distance += edge_length
+        
+        # Use agent's step size to calculate time
+        is_elderly = self.age >= 65
+        step_size = 60.0 if is_elderly else 80.0
+        
+        return max(1, math.ceil(total_distance / step_size))

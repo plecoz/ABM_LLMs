@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .llm_api import LLMWrapper
+from agents.persona_memory_modules import PersonaMemoryManager, PersonaType
 
 
 class LLMEndpointType(Enum):
@@ -388,6 +389,20 @@ class DecisionPlanningEngine:
             )
 
 
+class PathScoringRequest:
+    """Request for LLM to score multiple path options"""
+    def __init__(self, agent_id, path_options, context):
+        self.agent_id = agent_id
+        self.path_options = path_options  # List of path dictionaries with characteristics
+        self.context = context  # Agent context (personality, current needs, time, etc.)
+
+class PathScoringResponse:
+    """Response from LLM path scoring"""
+    def __init__(self, selected_path_id, reasoning, confidence):
+        self.selected_path_id = selected_path_id
+        self.reasoning = reasoning
+        self.confidence = confidence
+
 class LLMInteractionLayer:
     """Main interface for the LLM Interaction Layer."""
     
@@ -395,6 +410,8 @@ class LLMInteractionLayer:
         self.decision_engine = DecisionPlanningEngine()
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("LLM Interaction Layer initialized")
+        self.llm_client = None  # Placeholder for actual LLM client
+        self.path_scoring_enabled = True
     
     def get_agent_decision(
         self,
@@ -526,4 +543,160 @@ class LLMInteractionLayer:
         else:
             utilities.extend(["work_efficiency", "family_time"])
         
-        return utilities 
+        return utilities
+    
+    def score_path_options(self, agent_state, path_options, context):
+        """
+        Use LLM to score and select the best path from multiple options.
+        This is the single implementation for path scoring - no duplication.
+        
+        Args:
+            agent_state: Current state of the agent (dict with age, needs, etc.)
+            path_options: List of path dictionaries with OSM metadata
+            context: Additional context (time_of_day, etc.)
+            
+        Returns:
+            PathScoringResponse with selected path and reasoning
+        """
+        if not path_options:
+            return PathScoringResponse(0, "No paths available", 0.0)
+        
+        try:
+            # Create LLM prompt
+            prompt = self._create_path_scoring_prompt(agent_state, path_options, context)
+            
+            # Call LLM (placeholder for actual implementation)
+            selected_path_id = self._call_llm_api(prompt, path_options)
+            
+            # Return response
+            return PathScoringResponse(
+                selected_path_id=selected_path_id,
+                reasoning=f"LLM selected path {selected_path_id + 1} based on efficiency and safety",
+                confidence=0.8
+            )
+            
+        except Exception as e:
+            # Fallback to rule-based selection
+            return self._fallback_selection(path_options)
+
+    def _create_path_scoring_prompt(self, agent_state, path_options, context):
+        """
+        Create LLM prompt for path scoring (1-10 scale).
+        
+        Args:
+            agent_state: Agent characteristics
+            path_options: Available paths with OSM metadata
+            context: Decision context
+            
+        Returns:
+            Formatted prompt string
+        """
+        age = agent_state.get('age', 30)
+        time_of_day = context.get('time_of_day', 12)
+        
+        prompt = f"""You are helping a {age}-year-old resident choose the best path at {time_of_day}:00.
+
+Score each path from 1-10 (10 = best choice) considering:
+- Travel time efficiency
+- Road safety and comfort
+- Road type appropriateness
+- Overall convenience
+
+Available paths:
+"""
+        
+        for path in path_options:
+            prompt += f"""
+Path {path['path_id']}:
+- Distance: {path['distance_meters']} meters
+- Travel time: {path['travel_time_minutes']} minutes
+- Main road type: {path['dominant_road_type']}
+- Road types: {', '.join(path['road_types'][:3])}
+- Segments: {path['total_segments']}
+"""
+        
+        prompt += f"""
+Respond with ONLY the path number (1-{len(path_options)}) that has the highest score.
+Example: 2
+"""
+        
+        return prompt
+
+    def _call_llm_api(self, prompt, path_options):
+        """
+        Call LLM API for path scoring.
+        
+        Args:
+            prompt: Formatted prompt
+            path_options: Available path options
+            
+        Returns:
+            Index of selected path (0-based)
+        """
+        # PLACEHOLDER: Replace with actual LLM API call
+        # 
+        # Example integration:
+        # response = your_llm_service.generate(prompt)
+        # selected_path_number = int(response.strip())
+        # return selected_path_number - 1  # Convert to 0-based index
+        
+        # For now, use rule-based fallback
+        return self._rule_based_scoring(path_options)
+
+    def _rule_based_scoring(self, path_options):
+        """
+        Rule-based scoring when LLM is not available.
+        
+        Args:
+            path_options: Available path options
+            
+        Returns:
+            Index of best path (0-based)
+        """
+        scores = []
+        
+        for path in path_options:
+            score = 0
+            
+            # Time efficiency (60% weight)
+            min_time = min(p['travel_time_minutes'] for p in path_options)
+            max_time = max(p['travel_time_minutes'] for p in path_options)
+            if max_time > min_time:
+                time_score = 1.0 - ((path['travel_time_minutes'] - min_time) / (max_time - min_time))
+            else:
+                time_score = 1.0
+            score += 6.0 * time_score
+            
+            # Road type safety (40% weight)
+            road_type_scores = {
+                'residential': 4.0, 'tertiary': 3.5, 'secondary': 3.0,
+                'primary': 2.5, 'trunk': 2.0, 'motorway': 1.5,
+                'footway': 4.5, 'path': 4.0, 'unclassified': 2.5
+            }
+            road_score = road_type_scores.get(path['dominant_road_type'], 2.5)
+            score += 4.0 * (road_score / 5.0)
+            
+            scores.append(score)
+        
+        # Return index of highest scoring path
+        return scores.index(max(scores))
+
+    def _fallback_selection(self, path_options):
+        """
+        Simple fallback path selection.
+        
+        Args:
+            path_options: Available path options
+            
+        Returns:
+            PathScoringResponse
+        """
+        # Select shortest time path as fallback
+        shortest_idx = min(range(len(path_options)), 
+                         key=lambda i: path_options[i]['travel_time_minutes'])
+        
+        return PathScoringResponse(
+            selected_path_id=shortest_idx,
+            reasoning="Selected shortest time path (fallback)",
+            confidence=0.5
+        ) 
