@@ -148,9 +148,10 @@ class BaseAgent(GeoAgent):
         nearby_agents = self.model.get_nearby_agents(self)
         
         for agent in nearby_agents:
-            # Add to contacts
+            # Add to contacts - but only if both agents have contacts (i.e., are people)
             self.contacts.add(agent.unique_id)
-            agent.contacts.add(self.unique_id)
+            if hasattr(agent, 'contacts'):
+                agent.contacts.add(self.unique_id)
             
             # Random chance to communicate (can be replaced with more complex logic)
             if hasattr(self.model, 'random') and self.model.random.random() < 0.3:  # 30% chance

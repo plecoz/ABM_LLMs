@@ -1,5 +1,5 @@
 from mesa.agent import Agent
-from ..base_agent import BaseAgent
+from agents.base_person_agent import BaseAgent
 import random
 import networkx as nx
 import logging
@@ -7,7 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
-from ...simulation.llm_interaction_layer import EpisodicMemory
+from simulation.llm_interaction_layer import EpisodicMemory
 
 class ActionType(Enum):
     """Types of actions residents can perform"""
