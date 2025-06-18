@@ -164,6 +164,18 @@ class FifteenMinuteCity(Model):
         # Get movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
         
+        # Get action granularity setting (for POI activities)
+        self.action_granularity = kwargs.get('action_granularity', 'basic')
+        if isinstance(self.action_granularity, str):
+            # Convert string to enum
+            from agents.resident import ActionGranularity
+            granularity_map = {
+                'simple': ActionGranularity.SIMPLE,
+                'basic': ActionGranularity.BASIC,
+                'detailed': ActionGranularity.DETAILED
+            }
+            self.action_granularity = granularity_map.get(self.action_granularity.lower(), ActionGranularity.BASIC)
+        
         # Initialize LLM components if needed
         self.llm_enabled = (self.needs_selection == 'llms' or self.movement_behavior == 'llms')
         if self.llm_enabled:

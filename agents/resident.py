@@ -4,6 +4,65 @@ import random
 import networkx as nx
 import logging
 import math
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
+from enum import Enum
+
+class ActionType(Enum):
+    """Types of actions residents can perform"""
+    # Basic actions (always available)
+    WAITING = "waiting"
+    TRAVELING = "traveling"
+    SLEEPING = "sleeping"
+    
+    # POI-specific actions
+    EATING = "eating"
+    SHOPPING = "shopping"
+    WORKING = "working"
+    STUDYING = "studying"
+    EXERCISING = "exercising"
+    SOCIALIZING = "socializing"
+    HEALTHCARE = "healthcare"
+    ENTERTAINMENT = "entertainment"
+    WORSHIP = "worship"
+    BANKING = "banking"
+    
+    # Granular actions (for detailed simulations)
+    TALKING = "talking"
+    READING = "reading"
+    WATCHING_MOVIE = "watching_movie"
+    DOING_BUSINESS = "doing_business"
+    BROWSING = "browsing"
+    CONSULTING = "consulting"
+    PRAYING = "praying"
+    PLAYING = "playing"
+
+class ActionGranularity(Enum):
+    """Granularity levels for action simulation"""
+    SIMPLE = "simple"      # Just waiting times
+    BASIC = "basic"        # Basic action types (eating, shopping, etc.)
+    DETAILED = "detailed"  # Granular actions (talking, browsing, etc.)
+
+@dataclass
+class Action:
+    """Represents an action being performed by a resident"""
+    action_type: ActionType
+    duration: int  # Duration in time steps (minutes)
+    poi_type: Optional[str] = None
+    poi_id: Optional[int] = None
+    description: Optional[str] = None
+    needs_satisfied: Optional[Dict[str, int]] = None
+    social_interaction: bool = False
+    other_agents: Optional[List[int]] = None
+    context: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        if self.needs_satisfied is None:
+            self.needs_satisfied = {}
+        if self.other_agents is None:
+            self.other_agents = []
+        if self.context is None:
+            self.context = {}
 
 class Resident(BaseAgent):
     def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
@@ -152,9 +211,11 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
-        # Waiting time tracking
-        self.waiting_at_poi = False
-        self.waiting_time_remaining = 0
+        # Action system (replaces simple waiting)
+        self.performing_action = False
+        self.current_action = None  # Current action being performed
+        self.action_time_remaining = 0
+        self.action_history = []  # Track completed actions
         
         # Enhanced memory module
         self.memory = {
@@ -162,6 +223,7 @@ class Resident(BaseAgent):
             'visited_pois': [],  # List of dicts: {step, poi_id, poi_type, category, income}
             'interactions': [],  # List of interaction records
             'historical_needs': [],  # List of needs over time: {step, needs_dict}
+            'completed_actions': [],  # List of completed actions with outcomes
         }
         
         # Initialize logger if not provided
@@ -688,8 +750,9 @@ class Resident(BaseAgent):
                     if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
                         waiting_time = visited_poi_agent.get_waiting_time()
                         if waiting_time > 0:
-                            self.waiting_at_poi = True
-                            self.waiting_time_remaining = waiting_time
+                            # Determine action based on POI type and simulation settings
+                            action = self._select_action_at_poi(visited_poi_agent, waiting_time)
+                            self._start_action(action)
                             
                             # Track waiting time in output controller
                             if hasattr(self.model, 'output_controller'):
@@ -711,16 +774,15 @@ class Resident(BaseAgent):
                 # Still traveling, don't take any other movement actions
                 return
             
-            # Handle waiting at POI
-            if self.waiting_at_poi:
-                self.waiting_time_remaining -= 1
+            # Handle ongoing actions at POIs
+            if self.performing_action:
+                self.action_time_remaining -= 1
                 
-                # Check if waiting is finished
-                if self.waiting_time_remaining <= 0:
-                    self.waiting_at_poi = False
-                    print(f"Resident {self.unique_id} finished waiting at POI")
+                # Check if action is finished
+                if self.action_time_remaining <= 0:
+                    self._complete_current_action()
                 
-                # Still waiting, don't take any other movement actions
+                # Still performing action, don't take any other movement actions
                 return
             
             # === MOVEMENT DECISION MAKING ===
@@ -1356,3 +1418,281 @@ class Resident(BaseAgent):
             self.movement_behavior = value
         elif key == 'social_network':
             self.social_network = value
+
+    def _select_action_at_poi(self, poi_agent, waiting_time):
+        """
+        Select an action to perform at a POI based on simulation granularity and LLM settings.
+        
+        Args:
+            poi_agent: The POI agent visited
+            waiting_time: The base waiting time at the POI
+            
+        Returns:
+            Action object representing the selected action
+        """
+        # Get simulation granularity setting (default to BASIC)
+        granularity = getattr(self.model, 'action_granularity', ActionGranularity.BASIC)
+        
+        # Simple granularity - just waiting
+        if granularity == ActionGranularity.SIMPLE:
+            return Action(
+                action_type=ActionType.WAITING,
+                duration=waiting_time,
+                poi_type=poi_agent.poi_type,
+                poi_id=poi_agent.unique_id,
+                description=f"Waiting at {poi_agent.poi_type}"
+            )
+        
+        # LLM-based action selection (if enabled)
+        if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+            return self._select_llm_action(poi_agent, waiting_time)
+        
+        # Rule-based action selection for BASIC and DETAILED granularity
+        return self._select_rule_based_action(poi_agent, waiting_time, granularity)
+
+    def _select_rule_based_action(self, poi_agent, waiting_time, granularity):
+        """
+        Select action using rule-based logic based on POI type and granularity.
+        
+        Args:
+            poi_agent: The POI agent visited
+            waiting_time: The base waiting time
+            granularity: The simulation granularity level
+            
+        Returns:
+            Action object
+        """
+        poi_type = poi_agent.poi_type.lower()
+        
+        # Map POI types to possible actions
+        poi_action_mapping = {
+            'restaurant': {
+                ActionGranularity.BASIC: [ActionType.EATING, ActionType.SOCIALIZING],
+                ActionGranularity.DETAILED: [ActionType.EATING, ActionType.TALKING, ActionType.SOCIALIZING]
+            },
+            'cafe': {
+                ActionGranularity.BASIC: [ActionType.EATING, ActionType.SOCIALIZING],
+                ActionGranularity.DETAILED: [ActionType.EATING, ActionType.TALKING, ActionType.READING]
+            },
+            'shop': {
+                ActionGranularity.BASIC: [ActionType.SHOPPING],
+                ActionGranularity.DETAILED: [ActionType.SHOPPING, ActionType.BROWSING, ActionType.DOING_BUSINESS]
+            },
+            'supermarket': {
+                ActionGranularity.BASIC: [ActionType.SHOPPING],
+                ActionGranularity.DETAILED: [ActionType.SHOPPING, ActionType.BROWSING]
+            },
+            'hospital': {
+                ActionGranularity.BASIC: [ActionType.HEALTHCARE],
+                ActionGranularity.DETAILED: [ActionType.HEALTHCARE, ActionType.CONSULTING, ActionType.WAITING]
+            },
+            'clinic': {
+                ActionGranularity.BASIC: [ActionType.HEALTHCARE],
+                ActionGranularity.DETAILED: [ActionType.HEALTHCARE, ActionType.CONSULTING]
+            },
+            'school': {
+                ActionGranularity.BASIC: [ActionType.STUDYING],
+                ActionGranularity.DETAILED: [ActionType.STUDYING, ActionType.READING, ActionType.SOCIALIZING]
+            },
+            'library': {
+                ActionGranularity.BASIC: [ActionType.STUDYING],
+                ActionGranularity.DETAILED: [ActionType.READING, ActionType.STUDYING]
+            },
+            'cinema': {
+                ActionGranularity.BASIC: [ActionType.ENTERTAINMENT],
+                ActionGranularity.DETAILED: [ActionType.WATCHING_MOVIE, ActionType.SOCIALIZING]
+            },
+            'gym': {
+                ActionGranularity.BASIC: [ActionType.EXERCISING],
+                ActionGranularity.DETAILED: [ActionType.EXERCISING, ActionType.SOCIALIZING]
+            },
+            'park': {
+                ActionGranularity.BASIC: [ActionType.ENTERTAINMENT, ActionType.EXERCISING],
+                ActionGranularity.DETAILED: [ActionType.PLAYING, ActionType.EXERCISING, ActionType.SOCIALIZING]
+            },
+            'bank': {
+                ActionGranularity.BASIC: [ActionType.BANKING],
+                ActionGranularity.DETAILED: [ActionType.BANKING, ActionType.DOING_BUSINESS, ActionType.WAITING]
+            },
+            'place_of_worship': {
+                ActionGranularity.BASIC: [ActionType.WORSHIP],
+                ActionGranularity.DETAILED: [ActionType.WORSHIP, ActionType.PRAYING, ActionType.SOCIALIZING]
+            }
+        }
+        
+        # Get possible actions for this POI type and granularity
+        possible_actions = poi_action_mapping.get(poi_type, {}).get(granularity, [ActionType.WAITING])
+        
+        # Select action (could be random or based on needs/preferences)
+        selected_action_type = random.choice(possible_actions)
+        
+        # Determine needs satisfied based on action type
+        needs_satisfied = self._get_needs_satisfied_by_action(selected_action_type, poi_type)
+        
+        # Create action with context
+        return Action(
+            action_type=selected_action_type,
+            duration=waiting_time,
+            poi_type=poi_type,
+            poi_id=poi_agent.unique_id,
+            description=f"{selected_action_type.value.replace('_', ' ').title()} at {poi_type}",
+            needs_satisfied=needs_satisfied,
+            social_interaction=selected_action_type in [ActionType.SOCIALIZING, ActionType.TALKING],
+            context={'granularity': granularity.value}
+        )
+
+    def _select_llm_action(self, poi_agent, waiting_time):
+        """
+        Select action using LLM-based decision making.
+        
+        Args:
+            poi_agent: The POI agent visited
+            waiting_time: The base waiting time
+            
+        Returns:
+            Action object selected by LLM
+        """
+        try:
+            # This would integrate with your LLM system to make sophisticated action choices
+            # For now, return a placeholder that falls back to rule-based selection
+            granularity = getattr(self.model, 'action_granularity', ActionGranularity.DETAILED)
+            
+            # TODO: Implement actual LLM integration here
+            # The LLM could consider:
+            # - Current needs and emotional state
+            # - Social context (other agents present)
+            # - Time of day and personal schedule
+            # - Past experiences at similar POIs
+            # - Personal preferences and personality
+            
+            return self._select_rule_based_action(poi_agent, waiting_time, granularity)
+            
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"LLM action selection failed, falling back to rule-based: {e}")
+            return self._select_rule_based_action(poi_agent, waiting_time, ActionGranularity.BASIC)
+
+    def _get_needs_satisfied_by_action(self, action_type, poi_type):
+        """
+        Determine which needs are satisfied by performing a specific action.
+        
+        Args:
+            action_type: The type of action being performed
+            poi_type: The type of POI where the action occurs
+            
+        Returns:
+            Dictionary of needs satisfied and their amounts
+        """
+        needs_map = {
+            ActionType.EATING: {'hunger': 40},
+            ActionType.SHOPPING: {'shopping': 35},
+            ActionType.SOCIALIZING: {'social': 30},
+            ActionType.TALKING: {'social': 25},
+            ActionType.HEALTHCARE: {'healthcare': 50},
+            ActionType.CONSULTING: {'healthcare': 45},
+            ActionType.STUDYING: {'education': 40},
+            ActionType.READING: {'education': 30},
+            ActionType.EXERCISING: {'recreation': 35},
+            ActionType.ENTERTAINMENT: {'recreation': 40},
+            ActionType.WATCHING_MOVIE: {'recreation': 45},
+            ActionType.WORSHIP: {'social': 20, 'recreation': 15},
+            ActionType.PRAYING: {'social': 15, 'recreation': 20},
+            ActionType.BANKING: {'shopping': 25},  # Administrative needs
+            ActionType.DOING_BUSINESS: {'shopping': 30},
+            ActionType.BROWSING: {'shopping': 15, 'recreation': 10},
+            ActionType.PLAYING: {'recreation': 35, 'social': 20},
+            ActionType.WAITING: {}  # No needs satisfied by waiting
+        }
+        
+        return needs_map.get(action_type, {})
+
+    def _start_action(self, action):
+        """
+        Start performing an action.
+        
+        Args:
+            action: The Action object to perform
+        """
+        self.performing_action = True
+        self.current_action = action
+        self.action_time_remaining = action.duration
+        
+        # Record action start
+        if hasattr(self, 'logger'):
+            self.logger.debug(f"Resident {self.unique_id} started {action.description} for {action.duration} minutes")
+        
+        # Record interaction if it's a social action
+        if action.social_interaction:
+            self.record_interaction(
+                other_agent_id=action.poi_id,
+                interaction_type='social_activity',
+                context={'action': action.action_type.value, 'poi_type': action.poi_type}
+            )
+
+    def _complete_current_action(self):
+        """
+        Complete the current action being performed.
+        """
+        if not self.current_action:
+            self.performing_action = False
+            return
+        
+        action = self.current_action
+        
+        # Satisfy needs based on the action performed
+        for need_type, satisfaction_amount in action.needs_satisfied.items():
+            if need_type in self.current_needs:
+                self.current_needs[need_type] = max(0, self.current_needs[need_type] - satisfaction_amount)
+        
+        # Record completed action in memory
+        action_record = {
+            'step': getattr(self.model, 'step_count', 0),
+            'timestamp': self.model.get_current_time() if hasattr(self.model, 'get_current_time') else None,
+            'action_type': action.action_type.value,
+            'duration': action.duration,
+            'poi_type': action.poi_type,
+            'poi_id': action.poi_id,
+            'description': action.description,
+            'needs_satisfied': action.needs_satisfied,
+            'social_interaction': action.social_interaction,
+            'context': action.context
+        }
+        
+        self.memory['completed_actions'].append(action_record)
+        self.action_history.append(action_record)
+        
+        # Keep only last 50 completed actions to prevent memory bloat
+        if len(self.memory['completed_actions']) > 50:
+            self.memory['completed_actions'] = self.memory['completed_actions'][-50:]
+        
+        if len(self.action_history) > 50:
+            self.action_history = self.action_history[-50:]
+        
+        # Log completion
+        if hasattr(self, 'logger'):
+            self.logger.debug(f"Resident {self.unique_id} completed {action.description}")
+        
+        # Reset action state
+        self.performing_action = False
+        self.current_action = None
+        self.action_time_remaining = 0
+
+    def get_recent_actions(self, action_type=None, limit=10):
+        """
+        Get recent completed actions, optionally filtered by type.
+        
+        Args:
+            action_type: Filter by action type (optional)
+            limit: Maximum number of actions to return
+            
+        Returns:
+            List of recent action records
+        """
+        actions = self.memory['completed_actions']
+        
+        if action_type:
+            if isinstance(action_type, ActionType):
+                action_type = action_type.value
+            actions = [a for a in actions if a['action_type'] == action_type]
+        
+        return actions[-limit:] if actions else []
