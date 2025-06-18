@@ -990,27 +990,7 @@ class Resident(BaseAgent):
         """
         self.attributes['activity_preferences'] = preferences
     
-    def add_to_social_network(self, agent_id):
-        """
-        Add an agent to this agent's social network.
-        
-        Args:
-            agent_id: ID of the agent to add
-        """
-        if agent_id != self.unique_id and agent_id not in self.social_network:
-            self.social_network.append(agent_id)
-            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
-    
-    def remove_from_social_network(self, agent_id):
-        """
-        Remove an agent from this agent's social network.
-        
-        Args:
-            agent_id: ID of the agent to remove
-        """
-        if agent_id in self.social_network:
-            self.social_network.remove(agent_id)
-            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
+
     
     def generate_needs(self, method=None):
         """
