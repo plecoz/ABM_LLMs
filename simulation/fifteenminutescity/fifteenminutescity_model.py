@@ -20,7 +20,7 @@ from outputs import OutputController
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
-from simulation.llm_interaction_layer_fifteenminutescity import FifteenMinuteCityLLMLayer
+from simulation.fifteenminutescity.llm_interaction_layer_fifteenminutescity import FifteenMinuteCityLLMLayer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

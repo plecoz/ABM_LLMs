@@ -16,7 +16,7 @@ import logging
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 
-from .llm_interaction_layer import LLMInteractionLayer, AgentState, AgentObservation, LLMDecision
+from ..llm_interaction_layer import LLMInteractionLayer, AgentState, AgentObservation, LLMDecision
 
 
 @dataclass
