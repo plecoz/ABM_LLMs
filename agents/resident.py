@@ -21,31 +21,50 @@ class Resident(BaseAgent):
         # Pass parameters in the correct order to parent class
         super().__init__(model, unique_id, geometry, **kwargs)
         
-        # Custom attributes
+        # Core location and mobility attributes (keep separate for frequent access)
         self.home_node = home_node
         self.current_node = home_node
         self.accessible_nodes = accessible_nodes
         self.visited_pois = []
         self.mobility_mode = "walk"
-        # Track the last visited node to prevent consecutive visits to same POI
         self.last_visited_node = None
         
-        # Person-specific attributes
-        self.family_id = kwargs.get('family_id', None)
+        # Household and occupation (keep separate as requested)
         self.household_members = kwargs.get('household_members', [])
-        self.social_network = kwargs.get('social_network', [])
-        self.daily_schedule = kwargs.get('daily_schedule', {})
-        self.personality_traits = kwargs.get('personality_traits', {})
-        self.activity_preferences = kwargs.get('activity_preferences', {})
+        self.household_type = kwargs.get('household_type', "single")
+        self.employment_status = kwargs.get('employment_status', "employed")
         
-        # Parish information
-        self.parish = kwargs.get('parish', None)
+        # Consolidated attributes dictionary
+        self.attributes = {
+            # Demographics
+            'age': kwargs.get('age', 30),
+            'age_class': kwargs.get('age_class', None),
+            'gender': kwargs.get('gender', 'male'),
+            'income': kwargs.get('income', 50000),
+            'education': kwargs.get('education', 'high_school'),
+            
+            # Location and social
+            'parish': kwargs.get('parish', None),
+            'family_id': kwargs.get('family_id', None),
+            'social_network': kwargs.get('social_network', []),
+            
+            # Behavior and preferences
+            'needs_selection': kwargs.get('needs_selection', 'random'),
+            'movement_behavior': kwargs.get('movement_behavior', 'need-based'),
+            'daily_schedule': kwargs.get('daily_schedule', {}),
+            'personality_traits': kwargs.get('personality_traits', {}),
+            'activity_preferences': kwargs.get('activity_preferences', {}),
+            
+            # Physical attributes
+            'access_distance': kwargs.get('access_distance', 0),
+        }
         
-        # Needs selection method
-        self.needs_selection = kwargs.get('needs_selection', 'random')
-        
-        # Movement behavior setting
-        self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        # Convenience properties for frequently accessed attributes
+        self.age = self.attributes['age']
+        self.parish = self.attributes['parish']
+        self.needs_selection = self.attributes['needs_selection']
+        self.movement_behavior = self.attributes['movement_behavior']
+        self.social_network = self.attributes['social_network']
 
         # Employment probabilities - only for Macau
         if hasattr(self.model, 'city') and self.model.city == 'Macau, China':
@@ -103,52 +122,23 @@ class Resident(BaseAgent):
         # Current needs (will be updated each step)
         self.current_needs = self.dynamic_needs.copy()
         
-        # Demographic attributes from model (may vary by parish)
-        self.age = kwargs.get('age', 30)  # Default age
-        self.age_class = kwargs.get('age_class', None)  # Age class from parish demographics (e.g., "20-24")
-        self.gender = kwargs.get('gender', 'male')  # Default gender
-        self.income = kwargs.get('income', 50000)  # Default income
-        self.education = kwargs.get('education', 'high_school')  # Default education level
-        
-        # New attributes
-        # Using default values for employment status and household type
-        self.employment_status = kwargs.get('employment_status', "employed")
-        self.household_type = kwargs.get('household_type', "single")
-        
         # Determine step size based on age for calculating travel times
         is_elderly = False
-        if self.age_class:
-            age_class_str = str(self.age_class).lower()
+        if self.attributes['age_class']:
+            age_class_str = str(self.attributes['age_class']).lower()
             if any(s in age_class_str for s in ['65+', '65-', '70+', '70-', '75+', '75-', '80+', '80-', '85+', '85-']):
                 is_elderly = True
         
         self.step_size = 60.0 if is_elderly else 80.0  # meters per minute
 
         # Calculate home access time penalty based on distance from building to network
-        self.access_distance = kwargs.get('access_distance', 0)
-        if self.access_distance > 0.1:  # Only apply penalty for distances > 0.1 meters
+        if self.attributes['access_distance'] > 0.1:  # Only apply penalty for distances > 0.1 meters
             # Time (in steps/minutes) to walk from building to nearest street node
             # We use ceil to ensure any non-zero distance results in at least a 1-minute penalty
-            self.home_access_time = math.ceil(self.access_distance / self.step_size)
+            self.home_access_time = math.ceil(self.attributes['access_distance'] / self.step_size)
             print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
         else:
             self.home_access_time = 0
-        
-        # Energy levels and mobility constraints
-        # self.max_energy = 100
-        # self.energy = self.max_energy
-        # Age-based energy depletion rate: older agents lose energy faster
-        # if self.age < 18:
-        #     self.energy_depletion_rate = 2  # Children have moderate depletion
-        # elif self.age < 35:
-        #     self.energy_depletion_rate = 1  # Young adults have lowest depletion
-        # elif self.age < 65:
-        #     self.energy_depletion_rate = 2  # Middle-aged adults have moderate depletion
-        # else:
-        #     self.energy_depletion_rate = 3  # Elderly have highest depletion
-        
-        # Recharge counter when at home
-        # self.home_recharge_counter = 0
         
         # Mobility constraints - speed in km/h
         if self.age >= 65:
@@ -162,14 +152,16 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
-        # Waiting time tracking (new)
+        # Waiting time tracking
         self.waiting_at_poi = False
         self.waiting_time_remaining = 0
         
-        # Memory module
+        # Enhanced memory module
         self.memory = {
-            'income': self.income,
-            'visited_pois': []  # List of dicts: {step, poi_id, poi_type, category, income}
+            'income': self.attributes['income'],
+            'visited_pois': [],  # List of dicts: {step, poi_id, poi_type, category, income}
+            'interactions': [],  # List of interaction records
+            'historical_needs': [],  # List of needs over time: {step, needs_dict}
         }
         
         # Initialize logger if not provided
@@ -206,8 +198,8 @@ class Resident(BaseAgent):
         # Determine step size based on age_class
         # Check if age_class indicates elderly (65+ years)
         is_elderly = False
-        if self.age_class:
-            age_class_str = str(self.age_class).lower()
+        if self.attributes['age_class']:
+            age_class_str = str(self.attributes['age_class']).lower()
             # Check for age classes that indicate 65+ years
             if ('65+' in age_class_str or '65-' in age_class_str or 
                 '70+' in age_class_str or '70-' in age_class_str or
@@ -227,7 +219,7 @@ class Resident(BaseAgent):
         
         # Debug output for resident 0
         #if hasattr(self, 'unique_id') and self.unique_id == 0:
-        #    print(f"Resident 0 (age_class {self.age_class}): Distance {distance_meters:.1f}m → {steps_needed} steps ({step_size}m each)")
+        #    print(f"Resident 0 (age_class {self.attributes['age_class']}): Distance {distance_meters:.1f}m → {steps_needed} steps ({step_size}m each)")
         
         # Ensure at least 1 time step
         return max(1, steps_needed)
@@ -502,7 +494,7 @@ class Resident(BaseAgent):
         Choose movement target using LLM-based decision making.
         
         Returns:
-            POI type to move to, 'home' to go home, or None if no movement should occur
+            POI type to move to, 'home' to go home, or None to stay put
         """
         # Check if LLM components are available
         if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
@@ -682,7 +674,7 @@ class Resident(BaseAgent):
                                 'poi_id': poi.unique_id,
                                 'poi_type': poi.poi_type,
                                 'category': getattr(poi, 'category', None),
-                                'income': self.income
+                                'income': self.attributes['income']
                             })
                             
                             # Track POI visit in output controller
@@ -754,6 +746,10 @@ class Resident(BaseAgent):
                 elif target_poi_type:
                     self.move_to_poi(target_poi_type)
                 # If target_poi_type is None, resident stays put this step
+            
+            # Record needs snapshot periodically (every 15 minutes)
+            if self.model.step_count % 15 == 0:
+                self.record_needs_snapshot()
             
         except Exception as e:
             if hasattr(self, 'logger'):
@@ -876,7 +872,7 @@ class Resident(BaseAgent):
         Args:
             preferences: Dictionary of activity types and their weights
         """
-        self.activity_preferences = preferences
+        self.attributes['activity_preferences'] = preferences
     
     def add_to_social_network(self, agent_id):
         """
@@ -887,6 +883,7 @@ class Resident(BaseAgent):
         """
         if agent_id != self.unique_id and agent_id not in self.social_network:
             self.social_network.append(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
     
     def remove_from_social_network(self, agent_id):
         """
@@ -897,6 +894,7 @@ class Resident(BaseAgent):
         """
         if agent_id in self.social_network:
             self.social_network.remove(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
     
     def generate_needs(self, method=None):
         """
@@ -1159,10 +1157,10 @@ class Resident(BaseAgent):
             "home_location": (self.geometry.x, self.geometry.y),
             "demographic_info": {
                 "age": self.age,
-                "age_class": self.age_class,
-                "gender": self.gender,
-                "income": self.income,
-                "education": self.education,
+                "age_class": self.attributes['age_class'],
+                "gender": self.attributes['gender'],
+                "income": self.attributes['income'],
+                "education": self.attributes['education'],
                 "employment_status": self.employment_status,
                 "household_type": self.household_type
             }
@@ -1243,3 +1241,118 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error updating emotional state from POI visit: {e}")
+
+    def record_interaction(self, other_agent_id, interaction_type, message=None, context=None):
+        """
+        Record an interaction with another agent.
+        
+        Args:
+            other_agent_id: ID of the other agent involved
+            interaction_type: Type of interaction ('message', 'meeting', 'service', etc.)
+            message: The message content (if applicable)
+            context: Additional context information
+        """
+        interaction_record = {
+            'step': getattr(self.model, 'step_count', 0),
+            'timestamp': self.model.get_current_time() if hasattr(self.model, 'get_current_time') else None,
+            'other_agent_id': other_agent_id,
+            'interaction_type': interaction_type,
+            'message': message,
+            'context': context,
+            'my_location': self.current_node,
+            'my_parish': self.parish
+        }
+        
+        self.memory['interactions'].append(interaction_record)
+        
+        # Keep only last 100 interactions to prevent memory bloat
+        if len(self.memory['interactions']) > 100:
+            self.memory['interactions'] = self.memory['interactions'][-100:]
+
+    def record_needs_snapshot(self):
+        """
+        Record current needs state for historical tracking.
+        Called periodically to track how needs evolve over time.
+        """
+        needs_snapshot = {
+            'step': getattr(self.model, 'step_count', 0),
+            'timestamp': self.model.get_current_time() if hasattr(self.model, 'get_current_time') else None,
+            'needs': self.current_needs.copy(),
+            'location': self.current_node,
+            'at_home': self.current_node == self.home_node,
+            'traveling': self.traveling
+        }
+        
+        self.memory['historical_needs'].append(needs_snapshot)
+        
+        # Keep only last 200 snapshots (roughly 3+ hours if recorded every minute)
+        if len(self.memory['historical_needs']) > 200:
+            self.memory['historical_needs'] = self.memory['historical_needs'][-200:]
+
+    def get_recent_interactions(self, interaction_type=None, limit=10):
+        """
+        Get recent interactions, optionally filtered by type.
+        
+        Args:
+            interaction_type: Filter by interaction type (optional)
+            limit: Maximum number of interactions to return
+            
+        Returns:
+            List of recent interaction records
+        """
+        interactions = self.memory['interactions']
+        
+        if interaction_type:
+            interactions = [i for i in interactions if i['interaction_type'] == interaction_type]
+        
+        return interactions[-limit:] if interactions else []
+
+    def get_needs_history(self, steps_back=60):
+        """
+        Get historical needs data for analysis.
+        
+        Args:
+            steps_back: How many steps back to retrieve (default: 60 = 1 hour)
+            
+        Returns:
+            List of needs snapshots
+        """
+        current_step = getattr(self.model, 'step_count', 0)
+        cutoff_step = current_step - steps_back
+        
+        return [
+            snapshot for snapshot in self.memory['historical_needs']
+            if snapshot['step'] >= cutoff_step
+        ]
+
+    def get_attributes_dict(self):
+        """
+        Get a copy of the attributes dictionary for external use.
+        Useful for LLM integration and serialization.
+        
+        Returns:
+            Dictionary copy of agent attributes
+        """
+        return self.attributes.copy()
+
+    def update_attribute(self, key, value):
+        """
+        Update an attribute and sync convenience properties if needed.
+        
+        Args:
+            key: Attribute key to update
+            value: New value
+        """
+        self.attributes[key] = value
+        
+        # Update convenience properties that might be affected
+        if key == 'age':
+            self.age = value
+        elif key == 'parish':
+            self.parish = value
+        elif key == 'needs_selection':
+            self.needs_selection = value
+        elif key == 'movement_behavior':
+            self.movement_behavior = value
+        elif key == 'social_network':
+            self.social_network = value
