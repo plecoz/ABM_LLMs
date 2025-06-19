@@ -959,26 +959,37 @@ class Resident(BaseAgent):
         return None
 
     def _make_llm_movement_decision(self):
-        """
-        Make an LLM-based movement decision.
-        This is a placeholder for future sophisticated LLM decision making.
-        
-        In the future, this could:
-        - Evaluate specific POI options with their attractiveness
-        - Consider complex need hierarchies
-        - Factor in social context, weather, events, etc.
-        - Make more human-like decisions
-        
-        Returns:
-            POI type to move to, 'home' to go home, or None to stay put
-        """
-        # For now, fall back to existing LLM logic
-        # This will be replaced with more sophisticated decision making later
+        """Make an LLM-based movement decision."""
+        if not self.model.llm_enabled:
+            return self._make_need_based_movement_decision()
+
         try:
-            return self._choose_llm_based_target()
+            # Use the LLM interaction layer to get a decision
+            llm_decision = self.model.llm_interaction_layer.get_urban_decision(
+                resident_agent=self,
+                model=self.model,
+                episodic_memories=self._get_episodic_memories()
+            )
+            
+            # Parse the LLM's decision and act on it
+            if llm_decision and llm_decision.action:
+                action = llm_decision.action.lower()
+                
+                if 'move' in action and 'poi' in action:
+                    poi_type = llm_decision.details.get('poi_type')
+                    if poi_type:
+                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.reasoning}")
+                        return poi_type
+                
+                elif 'go_home' in action:
+                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.reasoning}")
+                    return 'home'
+            
+            # Fallback if no valid action is returned
+            return None
+
         except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.warning(f"LLM decision making failed, falling back to need-based: {e}")
+            self.logger.error(f"Error in LLM movement decision: {e}")
             return self._make_need_based_movement_decision()
 
     def set_activity_preferences(self, preferences):
