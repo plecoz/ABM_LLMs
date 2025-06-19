@@ -213,7 +213,7 @@ class FifteenMinuteCityLLMLayer(LLMInteractionLayer):
             'accessibility_goal': '15_minutes_max'
         }
         
-        return self.get_agent_decision(
+        return self.get_agent_target_decision(
             agent_state=agent_state,
             observation=observation,
             episodic_memories=episodic_memories or [],
@@ -222,6 +222,254 @@ class FifteenMinuteCityLLMLayer(LLMInteractionLayer):
             simulation_context=simulation_context
         )
     
+    def get_agent_target_decision(self, agent_state, observation,
+                                   episodic_memories, agent_complexity, latency_requirement, simulation_context):
+        """
+        Get LLM-based target decision for a resident using Chain-of-Thought reasoning.
+        
+        Args:
+            agent_state: Current state of the agent (AgentState object)
+            observation: Current observation (AgentObservation object)
+            episodic_memories: List of recent memories/experiences
+            agent_complexity: Complexity level for decision making
+            latency_requirement: Latency requirement for response
+            simulation_context: Fifteen-minute city simulation context
+            
+        Returns:
+            LLMDecision object with action and rationale
+        """
+        try:
+            # Build the Chain-of-Thought prompt
+            prompt = self.build_prompt_for_target_decision(
+                agent_state, observation, episodic_memories, 
+                agent_complexity, latency_requirement, simulation_context
+            )
+            
+            # Make LLM API call using the base class method
+            response = self.get_agent_decision(
+                agent_state=agent_state,
+                observation=observation,
+                episodic_memories=episodic_memories,
+                agent_complexity=agent_complexity,
+                latency_requirement=latency_requirement,
+                custom_prompt=prompt  # Use our custom CoT prompt
+            )
+            
+            # Parse the response to extract decision and rationale
+            if response and hasattr(response, 'action'):
+                return response
+            else:
+                # If response format is different, try to parse it
+                return self._parse_target_decision_response(response)
+                
+        except Exception as e:
+            self.logger.error(f"Error in get_agent_target_decision: {e}")
+            # Return a fallback decision
+            return LLMDecision(
+                action="stay_put",
+                rationale="Error occurred in LLM decision making, staying at current location for safety",
+                confidence=0.3
+            )
+    
+    def _parse_target_decision_response(self, response):
+        """
+        Parse the LLM response to extract the decision and rationale.
+        
+        Args:
+            response: Raw LLM response text or object
+            
+        Returns:
+            LLMDecision object
+        """
+        try:
+            # Handle different response formats
+            response_text = ""
+            if isinstance(response, str):
+                response_text = response
+            elif hasattr(response, 'content'):
+                response_text = response.content
+            elif hasattr(response, 'text'):
+                response_text = response.text
+            else:
+                response_text = str(response)
+            
+            # Extract decision from response
+            decision_action = "stay_put"  # Default fallback
+            rationale = "No clear decision found in response"
+            
+            # Look for DECISION: pattern
+            import re
+            decision_match = re.search(r'\*\*DECISION:\s*([^*\n]+)', response_text, re.IGNORECASE)
+            if decision_match:
+                decision_text = decision_match.group(1).strip()
+                
+                # Map decision text to action
+                decision_mapping = {
+                    'go_home': 'go_home',
+                    'restaurant': 'restaurant',
+                    'shop': 'shop',
+                    'hospital': 'hospital',
+                    'park': 'park',
+                    'library': 'library',
+                    'cinema': 'cinema',
+                    'gym': 'gym',
+                    'pharmacy': 'pharmacy',
+                    'bank': 'bank',
+                    'supermarket': 'supermarket',
+                    'stay_put': 'stay_put'
+                }
+                
+                # Find matching action
+                for key, action in decision_mapping.items():
+                    if key in decision_text.lower():
+                        decision_action = action
+                        break
+            
+            # Look for RATIONALE: pattern
+            rationale_match = re.search(r'\*\*RATIONALE:\s*([^*\n]+)', response_text, re.IGNORECASE)
+            if rationale_match:
+                rationale = rationale_match.group(1).strip()
+            
+            return LLMDecision(
+                action=decision_action,
+                rationale=rationale,
+                confidence=0.8 if decision_match else 0.5
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing target decision response: {e}")
+            return LLMDecision(
+                action="stay_put",
+                rationale="Error parsing LLM response",
+                confidence=0.3
+            )
+
+    def build_prompt_for_target_decision(self, agent_state, observation,
+                                         episodic_memories, agent_complexity, latency_requirement, simulation_context):
+        """
+        Build a Chain-of-Thought prompt for LLM to decide the resident's next target destination.
+        
+        Args:
+            agent_state: Current state of the agent (AgentState object)
+            observation: Current observation (AgentObservation object)
+            episodic_memories: List of recent memories/experiences
+            agent_complexity: Complexity level for decision making
+            latency_requirement: Latency requirement for response
+            simulation_context: Fifteen-minute city simulation context
+            
+        Returns:
+            Formatted CoT prompt string
+        """
+        # Extract key information
+        age = agent_state.demographic.get('age', 30)
+        gender = agent_state.demographic.get('gender', 'unspecified')
+        employment = agent_state.demographic.get('employment_status', 'unknown')
+        parish = agent_state.demographic.get('parish', 'unknown')
+        
+        current_location = observation.current_location
+        time_of_day = observation.environmental_context.get('time_of_day', 12)
+        day_of_week = observation.environmental_context.get('day_of_week', 0)
+        
+        # Convert day of week to readable format
+        days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        day_name = days[day_of_week] if 0 <= day_of_week < 7 else 'Unknown'
+        
+        # Format current needs
+        needs_text = ""
+        if agent_state.current_needs:
+            high_needs = {k: v for k, v in agent_state.current_needs.items() if v > 60}
+            if high_needs:
+                needs_list = [f"{need}: {value}/100" for need, value in high_needs.items()]
+                needs_text = f"High needs: {', '.join(needs_list)}"
+            else:
+                needs_list = [f"{need}: {value}/100" for need, value in list(agent_state.current_needs.items())[:3]]
+                needs_text = f"Current needs: {', '.join(needs_list)}"
+        
+        # Format nearby entities (POIs)
+        nearby_pois = []
+        if observation.nearby_entities:
+            for entity in observation.nearby_entities[:8]:  # Limit to 8 for prompt clarity
+                nearby_pois.append(f"- {entity['type']} (ID: {entity['id']})")
+        
+        # Format recent memories
+        memory_text = ""
+        if episodic_memories:
+            recent_visits = []
+            for memory in episodic_memories[-3:]:  # Last 3 memories
+                if isinstance(memory, dict) and 'poi_type' in memory:
+                    recent_visits.append(f"- Visited {memory['poi_type']} recently")
+                elif isinstance(memory, str):
+                    recent_visits.append(f"- {memory}")
+            if recent_visits:
+                memory_text = "Recent activities:\n" + "\n".join(recent_visits)
+        
+        # Build the Chain-of-Thought prompt
+        prompt = f"""You are an urban mobility assistant helping a resident in a fifteen-minute city decide their next destination. Use step-by-step reasoning to make the best decision.
+
+## RESIDENT PROFILE
+- Age: {age}, Gender: {gender}
+- Employment: {employment}
+- Parish: {parish}
+- Current location: Node {current_location}
+- Energy level: {agent_state.energy_level:.1f}/1.0
+
+## CURRENT CONTEXT
+- Time: {time_of_day}:00 on {day_name}
+- {needs_text}
+- {memory_text}
+
+## AVAILABLE DESTINATIONS
+{chr(10).join(nearby_pois) if nearby_pois else "- No specific POIs detected in immediate area"}
+
+## DECISION FRAMEWORK
+Please think through this step-by-step:
+
+### Step 1: Analyze Current Situation
+Consider the resident's profile, current time, and immediate needs. What factors are most important right now?
+
+### Step 2: Evaluate Timing Appropriateness
+Given it's {time_of_day}:00 on {day_name}, what activities make sense? Consider:
+- Business hours for different POI types
+- Typical daily routines for someone of this age/employment status
+- Meal times, work hours, leisure periods
+
+### Step 3: Prioritize Needs and Goals
+Based on the resident's current needs and recent activities:
+- Which needs are most urgent (>70/100)?
+- What activities would best satisfy multiple needs?
+- Are there any critical daily activities missing?
+
+### Step 4: Consider Fifteen-Minute City Principles
+- Prefer destinations within 15-minute walking distance
+- Choose locations that support sustainable urban living
+- Consider mixed-use accessibility and community engagement
+
+### Step 5: Make Final Decision
+Based on your analysis, what is the most appropriate next destination?
+
+## RESPONSE FORMAT
+Provide your reasoning following the steps above, then conclude with:
+
+**DECISION: [Choose ONE]**
+- go_home (return to residence)
+- restaurant (for meals/food)
+- shop (for shopping/retail)
+- hospital (for healthcare)
+- park (for recreation/nature)
+- library (for study/reading)
+- cinema (for entertainment)
+- gym (for exercise/fitness)
+- pharmacy (for medicine)
+- bank (for financial services)
+- supermarket (for groceries)
+- stay_put (remain at current location)
+
+**RATIONALE:** [Brief explanation of why this choice best serves the resident's needs and fits the fifteen-minute city context]
+
+Think through each step carefully before making your final decision."""
+
+        return prompt
+
     def score_path_options(self, agent_state, path_options, context):
         """
         Use LLM to score and select the best path from multiple options for urban mobility.

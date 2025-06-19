@@ -625,6 +625,7 @@ class Resident(BaseAgent):
             # Create agent state for LLM using the helper method if available
             if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
                 agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
             else:
                 # Fallback: create a basic agent state dict
                 agent_state = {
@@ -635,63 +636,89 @@ class Resident(BaseAgent):
             
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
+            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
             
             # Get episodic memories (recent POI visits)
             episodic_memories = self._get_episodic_memories()
+            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
             
-            # Get LLM decision using the standard method
-            llm_decision = self.model.llm_interaction_layer.get_agent_decision(
-                agent_state=agent_state,
-                observation=observation,
-                episodic_memories=episodic_memories,
-                agent_complexity="standard",
-                latency_requirement="normal"
-            )
+            # Get LLM decision using the new target decision method with CoT
+            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
+                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal",
+                    simulation_context={'simulation_type': 'fifteen_minute_city'}
+                )
+            else:
+                # Fallback to generic method
+                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal"
+                )
+            
+            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
+            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
+            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
             
             # Parse the LLM's decision and act on it
             if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
-                action = llm_decision.action.lower()
+                action = llm_decision.action.lower().strip()
+                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
                 
-                if 'move' in action and 'poi' in action:
-                    # Parse POI type from the action string itself
-                    poi_type = None
-                    
-                    # Try to extract POI type from action string
-                    poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
-                                'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
-                    
-                    for candidate_poi in poi_types:
-                        if candidate_poi in action:
-                            poi_type = candidate_poi
-                            break
-                    
-                    # If no specific POI type found, try to infer from action keywords
-                    if not poi_type:
-                        if 'eat' in action or 'food' in action or 'hungry' in action:
-                            poi_type = 'restaurant'
-                        elif 'shop' in action or 'buy' in action:
-                            poi_type = 'shop'
-                        elif 'health' in action or 'medical' in action:
-                            poi_type = 'hospital'
-                        elif 'exercise' in action or 'fitness' in action:
-                            poi_type = 'gym'
-                        elif 'relax' in action or 'nature' in action:
-                            poi_type = 'park'
-                    
-                    if poi_type:
-                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.rationale}")
-                        return poi_type
-                
-                elif 'go_home' in action or 'home' in action:
-                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.rationale}")
+                # Map standardized decision actions to POI types or special actions
+                if action == 'go_home':
+                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
                     return 'home'
+                elif action == 'stay_put':
+                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
+                    return None
+                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
+                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
+                    return action
+                else:
+                    # Try to map other actions to POI types
+                    action_to_poi = {
+                        'eat': 'restaurant',
+                        'food': 'restaurant',
+                        'shopping': 'shop',
+                        'buy': 'shop',
+                        'health': 'hospital',
+                        'medical': 'hospital',
+                        'exercise': 'gym',
+                        'fitness': 'gym',
+                        'relax': 'park',
+                        'nature': 'park',
+                        'study': 'library',
+                        'read': 'library',
+                        'movie': 'cinema',
+                        'entertainment': 'cinema',
+                        'medicine': 'pharmacy',
+                        'money': 'bank',
+                        'groceries': 'supermarket'
+                    }
+                    
+                    for keyword, poi_type in action_to_poi.items():
+                        if keyword in action:
+                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
+                            return poi_type
+                    
+                    # If no mapping found, log and return None
+                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
+                    return None
             
             # Fallback if no valid action is returned
-            return None
+            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
+            return self._make_need_based_movement_decision()
 
         except Exception as e:
-            self.logger.error(f"Error in LLM-based target selection: {e}")
-            return self._choose_need_based_target()
+            self.logger.error(f"Error in LLM movement decision: {e}")
+            return self._make_need_based_movement_decision()
     
     def _get_episodic_memories(self):
         """
@@ -1029,62 +1056,88 @@ class Resident(BaseAgent):
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
             print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
+            
             # Get episodic memories (recent POI visits)
             episodic_memories = self._get_episodic_memories()
             print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
-            # Get LLM decision using the standard method
-            llm_decision = self.model.llm_interaction_layer.get_agent_decision(
-                agent_state=agent_state,
-                observation=observation,
-                episodic_memories=episodic_memories,
-                agent_complexity="standard",
-                latency_requirement="normal"
-            )
+            
+            # Get LLM decision using the new target decision method with CoT
+            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
+                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal",
+                    simulation_context={'simulation_type': 'fifteen_minute_city'}
+                )
+            else:
+                # Fallback to generic method
+                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal"
+                )
+            
             print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
+            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
+            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
+            
             # Parse the LLM's decision and act on it
             if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
-                action = llm_decision.action.lower()
+                action = llm_decision.action.lower().strip()
                 print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
-                if 'move' in action and 'poi' in action:
-                    # Parse POI type from the action string itself
-                    poi_type = None
-                    
-                    # Try to extract POI type from action string
-                    poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
-                                'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
-                    
-                    for candidate_poi in poi_types:
-                        if candidate_poi in action:
-                            poi_type = candidate_poi
-                            break
-                    
-                    # If no specific POI type found, try to infer from action keywords
-                    if not poi_type:
-                        if 'eat' in action or 'food' in action or 'hungry' in action:
-                            poi_type = 'restaurant'
-                        elif 'shop' in action or 'buy' in action:
-                            poi_type = 'shop'
-                        elif 'health' in action or 'medical' in action:
-                            poi_type = 'hospital'
-                        elif 'exercise' in action or 'fitness' in action:
-                            poi_type = 'gym'
-                        elif 'relax' in action or 'nature' in action:
-                            poi_type = 'park'
-                    
-                    if poi_type:
-                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.rationale}")
-                        return poi_type
                 
-                elif 'go_home' in action or 'home' in action:
-                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.rationale}")
+                # Map standardized decision actions to POI types or special actions
+                if action == 'go_home':
+                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
                     return 'home'
+                elif action == 'stay_put':
+                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
+                    return None
+                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
+                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
+                    return action
+                else:
+                    # Try to map other actions to POI types
+                    action_to_poi = {
+                        'eat': 'restaurant',
+                        'food': 'restaurant',
+                        'shopping': 'shop',
+                        'buy': 'shop',
+                        'health': 'hospital',
+                        'medical': 'hospital',
+                        'exercise': 'gym',
+                        'fitness': 'gym',
+                        'relax': 'park',
+                        'nature': 'park',
+                        'study': 'library',
+                        'read': 'library',
+                        'movie': 'cinema',
+                        'entertainment': 'cinema',
+                        'medicine': 'pharmacy',
+                        'money': 'bank',
+                        'groceries': 'supermarket'
+                    }
+                    
+                    for keyword, poi_type in action_to_poi.items():
+                        if keyword in action:
+                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
+                            return poi_type
+                    
+                    # If no mapping found, log and return None
+                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
+                    return None
             
             # Fallback if no valid action is returned
-            return None
+            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
+            return self._make_need_based_movement_decision()
 
         except Exception as e:
-            self.logger.error(f"Error in LLM-based movement decision: {e}")
-            return self._choose_need_based_target()
+            self.logger.error(f"Error in LLM movement decision: {e}")
+            return self._make_need_based_movement_decision()
         
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
         """
