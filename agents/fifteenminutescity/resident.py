@@ -946,6 +946,39 @@ class Resident(BaseAgent):
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
 
+    def record_needs_snapshot(self):
+        """
+        Record a snapshot of the current needs for historical tracking and analysis.
+        This is called periodically (every 15 minutes) to track how needs evolve over time.
+        """
+        snapshot = {
+            'step': self.model.step_count,
+            'time_info': self.model.get_current_time(),
+            'needs': self.current_needs.copy(),
+            'location': {
+                'current_node': self.current_node,
+                'parish': self.parish,
+                'traveling': self.traveling,
+                'performing_action': self.performing_action
+            }
+        }
+        
+        # Add current action info if performing an action
+        if self.performing_action and self.current_action:
+            snapshot['current_action'] = {
+                'action_type': self.current_action.action_type.value,
+                'poi_type': self.current_action.poi_type,
+                'time_remaining': self.action_time_remaining
+            }
+        
+        # Store in memory for historical tracking
+        self.memory['historical_needs'].append(snapshot)
+        
+        # Optional: Log high-need situations for debugging
+        high_needs = {need: value for need, value in self.current_needs.items() if value >= 80}
+        if high_needs:
+            self.logger.debug(f"Agent {self.unique_id} has high needs: {high_needs}")
+
     def _select_action_at_poi(self, poi_agent, waiting_time):
         """
         Select an appropriate action to perform at a POI based on the POI type and simulation granularity.
