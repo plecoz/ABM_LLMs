@@ -251,6 +251,7 @@ class Resident(BaseAgent):
         """
         # For LLM-enabled agents, use path selection instead of simple shortest path
         if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+            print(f"DEBUG: Resident {self.unique_id} using LLM for travel time calculation")
             return self._calculate_travel_time_with_path_selection(from_node, to_node)
         
         # Standard shortest path calculation for non-LLM agents
@@ -330,6 +331,7 @@ class Resident(BaseAgent):
             else:
                 # Use LLM to score and select the best path
                 selected_path = self._select_path_with_llm(path_options, from_node, to_node)
+                print(f"DEBUG: Resident {self.unique_id} has selected a path between multiple ones : {selected_path}")
             
             # Store the selected path for actual travel
             self.selected_travel_path = selected_path
@@ -620,12 +622,16 @@ class Resident(BaseAgent):
             return self._choose_need_based_target()
         
         try:
-            # Create agent state for LLM
-            agent_state = {
-                'age': getattr(self, 'age', 30),
-                'current_needs': getattr(self, 'current_needs', {}),
-                'agent_id': str(self.unique_id)
-            }
+            # Create agent state for LLM using the helper method if available
+            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
+                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+            else:
+                # Fallback: create a basic agent state dict
+                agent_state = {
+                    'age': getattr(self, 'age', 30),
+                    'current_needs': getattr(self, 'current_needs', {}),
+                    'agent_id': str(self.unique_id)
+                }
             
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
@@ -633,8 +639,8 @@ class Resident(BaseAgent):
             # Get episodic memories (recent POI visits)
             episodic_memories = self._get_episodic_memories()
             
-            # Get LLM decision
-            decision = self.model.llm_interaction_layer.get_agent_decision(
+            # Get LLM decision using the standard method
+            llm_decision = self.model.llm_interaction_layer.get_agent_decision(
                 agent_state=agent_state,
                 observation=observation,
                 episodic_memories=episodic_memories,
@@ -642,24 +648,49 @@ class Resident(BaseAgent):
                 latency_requirement="normal"
             )
             
-            # Parse the LLM decision to extract POI type or action
-            target = self._parse_llm_decision(decision)
+            # Parse the LLM's decision and act on it
+            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
+                action = llm_decision.action.lower()
+                
+                if 'move' in action and 'poi' in action:
+                    # Parse POI type from the action string itself
+                    poi_type = None
+                    
+                    # Try to extract POI type from action string
+                    poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
+                                'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
+                    
+                    for candidate_poi in poi_types:
+                        if candidate_poi in action:
+                            poi_type = candidate_poi
+                            break
+                    
+                    # If no specific POI type found, try to infer from action keywords
+                    if not poi_type:
+                        if 'eat' in action or 'food' in action or 'hungry' in action:
+                            poi_type = 'restaurant'
+                        elif 'shop' in action or 'buy' in action:
+                            poi_type = 'shop'
+                        elif 'health' in action or 'medical' in action:
+                            poi_type = 'hospital'
+                        elif 'exercise' in action or 'fitness' in action:
+                            poi_type = 'gym'
+                        elif 'relax' in action or 'nature' in action:
+                            poi_type = 'park'
+                    
+                    if poi_type:
+                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.rationale}")
+                        return poi_type
+                
+                elif 'go_home' in action or 'home' in action:
+                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.rationale}")
+                    return 'home'
             
-            # Update emotional state based on decision confidence
-            if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
-                experience = {
-                    'type': 'decision_making',
-                    'outcome': 'positive' if decision.confidence > 0.7 else 'neutral',
-                    'satisfaction': decision.confidence,
-                    'details': f"Made decision: {decision.action}"
-                }
-                self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
-            
-            return target
-            
+            # Fallback if no valid action is returned
+            return None
+
         except Exception as e:
             self.logger.error(f"Error in LLM-based target selection: {e}")
-            # Fall back to need-based movement
             return self._choose_need_based_target()
     
     def _get_episodic_memories(self):
@@ -978,11 +1009,35 @@ class Resident(BaseAgent):
             return self._make_need_based_movement_decision()
 
         try:
-            # Use the LLM interaction layer to get a decision
-            llm_decision = self.model.llm_interaction_layer.get_urban_decision(
-                resident_agent=self,
-                model=self.model,
-                episodic_memories=self._get_episodic_memories()
+            # Check if LLM components are available
+            if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
+                self.logger.warning("LLM interaction layer not available, falling back to need-based movement")
+                return self._make_need_based_movement_decision()
+            
+            # Create agent state for LLM using the helper method if available
+            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
+                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+            else:
+                # Fallback: create a basic agent state dict
+                agent_state = {
+                    'age': getattr(self, 'age', 30),
+                    'current_needs': getattr(self, 'current_needs', {}),
+                    'agent_id': str(self.unique_id)
+                }
+            
+            # Create observation for LLM
+            observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
+            
+            # Get episodic memories (recent POI visits)
+            episodic_memories = self._get_episodic_memories()
+            
+            # Get LLM decision using the standard method
+            llm_decision = self.model.llm_interaction_layer.get_agent_decision(
+                agent_state=agent_state,
+                observation=observation,
+                episodic_memories=episodic_memories,
+                agent_complexity="standard",
+                latency_requirement="normal"
             )
             
             # Parse the LLM's decision and act on it
@@ -990,26 +1045,45 @@ class Resident(BaseAgent):
                 action = llm_decision.action.lower()
                 
                 if 'move' in action and 'poi' in action:
-                    # Safely handle details - check if it's a dictionary
+                    # Parse POI type from the action string itself
                     poi_type = None
-                    if hasattr(llm_decision, 'details'):
-                        if isinstance(llm_decision.details, dict):
-                            poi_type = llm_decision.details.get('poi_type')
+                    
+                    # Try to extract POI type from action string
+                    poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
+                                'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
+                    
+                    for candidate_poi in poi_types:
+                        if candidate_poi in action:
+                            poi_type = candidate_poi
+                            break
+                    
+                    # If no specific POI type found, try to infer from action keywords
+                    if not poi_type:
+                        if 'eat' in action or 'food' in action or 'hungry' in action:
+                            poi_type = 'restaurant'
+                        elif 'shop' in action or 'buy' in action:
+                            poi_type = 'shop'
+                        elif 'health' in action or 'medical' in action:
+                            poi_type = 'hospital'
+                        elif 'exercise' in action or 'fitness' in action:
+                            poi_type = 'gym'
+                        elif 'relax' in action or 'nature' in action:
+                            poi_type = 'park'
                     
                     if poi_type:
-                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.reasoning}")
+                        self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.rationale}")
                         return poi_type
                 
-                elif 'go_home' in action:
-                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.reasoning}")
+                elif 'go_home' in action or 'home' in action:
+                    self.logger.info(f"LLM decided to go home based on reason: {llm_decision.rationale}")
                     return 'home'
             
             # Fallback if no valid action is returned
             return None
 
         except Exception as e:
-            self.logger.error(f"Error in LLM movement decision: {e}")
-            return self._make_need_based_movement_decision()
+            self.logger.error(f"Error in LLM-based target selection: {e}")
+            return self._choose_need_based_target()
         
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
         """
@@ -1035,7 +1109,7 @@ class Resident(BaseAgent):
                     path_data = self._extract_path_metadata(path_nodes, i + 1)
                     if path_data:
                         path_options.append(path_data)
-            
+            print(f"DEBUG: Resident {self.unique_id} has generated {len(path_options)} path options")
             return path_options
             
         except Exception as e:
@@ -1077,16 +1151,26 @@ class Resident(BaseAgent):
                 
                 # Remove some edges from existing paths to force alternatives
                 for existing_path in paths:
-                    if len(existing_path) > 2:  # Only if path has enough edges
-                        # Remove middle edges to force different routes
-                        edges_to_remove = []
+                    # Ensure existing_path is actually a list of nodes
+                    if not isinstance(existing_path, (list, tuple)) or len(existing_path) <= 2:
+                        continue
+                    
+                    # Remove middle edges to force different routes
+                    edges_to_remove = []
+                    try:
                         for i in range(1, min(3, len(existing_path) - 1)):  # Remove 1-2 middle edges
                             if i < len(existing_path) - 1:
-                                edges_to_remove.append((existing_path[i], existing_path[i + 1]))
+                                node1, node2 = existing_path[i], existing_path[i + 1]
+                                # Ensure nodes are valid
+                                if node1 is not None and node2 is not None:
+                                    edges_to_remove.append((node1, node2))
                         
                         for edge in edges_to_remove:
                             if temp_graph.has_edge(edge[0], edge[1]):
                                 temp_graph.remove_edge(edge[0], edge[1])
+                    except (IndexError, TypeError) as e:
+                        self.logger.warning(f"Error processing path for edge removal: {e}")
+                        continue
                 
                 # Try to find a path in the modified graph
                 try:
@@ -1352,6 +1436,7 @@ class Resident(BaseAgent):
         # Use agent's step size to calculate time
         is_elderly = self.age >= 65
         step_size = 60.0 if is_elderly else 80.0
+        print(f"DEBUG: path time calculated!")
         
         return max(1, math.ceil(total_distance / step_size))
 
