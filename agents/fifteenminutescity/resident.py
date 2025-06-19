@@ -621,7 +621,11 @@ class Resident(BaseAgent):
         
         try:
             # Create agent state for LLM
-            agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+            agent_state = {
+                'age': getattr(self, 'age', 30),
+                'current_needs': getattr(self, 'current_needs', {}),
+                'agent_id': str(self.unique_id)
+            }
             
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
@@ -694,38 +698,48 @@ class Resident(BaseAgent):
         Returns:
             POI type to move to, 'home', or None
         """
-        action = decision.action.lower()
-        
-        # Check if the action is to go home
-        if 'home' in action or 'return' in action:
-            return 'home'
-        
-        # Check if the action is to wait/stay
-        if 'wait' in action or 'stay' in action or 'rest' in action:
+        try:
+            # Check if decision has the expected action attribute
+            if not hasattr(decision, 'action') or decision.action is None:
+                self.logger.warning(f"Decision object missing action attribute: {decision}")
+                return None
+            
+            action = str(decision.action).lower()
+            
+            # Check if the action is to go home
+            if 'home' in action or 'return' in action:
+                return 'home'
+            
+            # Check if the action is to wait/stay
+            if 'wait' in action or 'stay' in action or 'rest' in action:
+                return None
+            
+            # Try to extract POI type from the action
+            poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
+                        'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
+            
+            for poi_type in poi_types:
+                if poi_type in action:
+                    return poi_type
+            
+            # If no specific POI type found, try to infer from action keywords
+            if 'eat' in action or 'food' in action or 'hungry' in action:
+                return 'restaurant'
+            elif 'shop' in action or 'buy' in action:
+                return 'shop'
+            elif 'health' in action or 'medical' in action:
+                return 'hospital'
+            elif 'exercise' in action or 'fitness' in action:
+                return 'gym'
+            elif 'relax' in action or 'nature' in action:
+                return 'park'
+            
+            # Default: return None to stay put
             return None
-        
-        # Try to extract POI type from the action
-        poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
-                    'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
-        
-        for poi_type in poi_types:
-            if poi_type in action:
-                return poi_type
-        
-        # If no specific POI type found, try to infer from action keywords
-        if 'eat' in action or 'food' in action or 'hungry' in action:
-            return 'restaurant'
-        elif 'shop' in action or 'buy' in action:
-            return 'shop'
-        elif 'health' in action or 'medical' in action:
-            return 'hospital'
-        elif 'exercise' in action or 'fitness' in action:
-            return 'gym'
-        elif 'relax' in action or 'nature' in action:
-            return 'park'
-        
-        # Default: return None to stay put
-        return None
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing LLM decision: {e}, decision: {decision}")
+            return None
 
     def _satisfy_needs_at_poi(self, poi_type):
         """
@@ -972,11 +986,16 @@ class Resident(BaseAgent):
             )
             
             # Parse the LLM's decision and act on it
-            if llm_decision and llm_decision.action:
+            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
                 action = llm_decision.action.lower()
                 
                 if 'move' in action and 'poi' in action:
-                    poi_type = llm_decision.details.get('poi_type')
+                    # Safely handle details - check if it's a dictionary
+                    poi_type = None
+                    if hasattr(llm_decision, 'details'):
+                        if isinstance(llm_decision.details, dict):
+                            poi_type = llm_decision.details.get('poi_type')
+                    
                     if poi_type:
                         self.logger.info(f"LLM decided to move to POI: {poi_type} based on reason: {llm_decision.reasoning}")
                         return poi_type
@@ -1000,7 +1019,7 @@ class Resident(BaseAgent):
             from_node: Starting node ID
             to_node: Destination node ID
             max_paths: Maximum number of paths to generate (default: 4)
-            
+        
         Returns:
             List of path dictionaries with OSM metadata for LLM scoring
         """
@@ -1010,6 +1029,7 @@ class Resident(BaseAgent):
             
             # Extract OSM metadata for each path
             path_options = []
+            
             for i, path_nodes in enumerate(paths):
                 if path_nodes:  # Ensure path exists
                     path_data = self._extract_path_metadata(path_nodes, i + 1)
@@ -1107,24 +1127,55 @@ class Resident(BaseAgent):
             for i in range(len(path_nodes) - 1):
                 node1, node2 = path_nodes[i], path_nodes[i + 1]
                 
-                # Get edge data
-                edge_data = graph.get_edge_data(node1, node2, {})
+                # Get edge data - handle both single edge and multi-edge cases
+                edge_data = graph.get_edge_data(node1, node2)
+                if edge_data is None:
+                    continue
+                
+                # Handle MultiGraph case where edge_data might be a dict of dicts
+                if isinstance(edge_data, dict) and not any(key in edge_data for key in ['length', 'highway']):
+                    # This is likely a MultiGraph with multiple edges, take the first one
+                    edge_data = list(edge_data.values())[0] if edge_data else {}
                 
                 # Extract length
                 edge_length = edge_data.get('length', 0)
                 path_length += edge_length
                 
-                # Extract road type (highway tag)
+                # Extract road type (highway tag) - handle complex data types
                 highway_type = edge_data.get('highway', 'unclassified')
-                road_types.append(highway_type)
                 
-                # Extract surface type if available
+                if isinstance(highway_type, (list, tuple)):
+                    highway_type = highway_type[0] if highway_type else 'unclassified'
+                elif isinstance(highway_type, dict):
+                    highway_type = 'complex_type'  # Handle complex highway data
+                elif not isinstance(highway_type, str):
+                    highway_type = str(highway_type)
+                
+                road_types.append(str(highway_type))
+                
+                # Extract surface type if available - handle complex data types
                 surface = edge_data.get('surface', 'unknown')
-                surface_types.append(surface)
                 
-                # Extract max speed if available
+                if isinstance(surface, (list, tuple)):
+                    surface = surface[0] if surface else 'unknown'
+                elif isinstance(surface, dict):
+                    surface = 'complex_surface'  # Handle complex surface data
+                elif not isinstance(surface, str):
+                    surface = str(surface)
+                
+                surface_types.append(str(surface))
+                
+                # Extract max speed if available - handle complex data types
                 max_speed = edge_data.get('maxspeed', 'unknown')
-                max_speeds.append(max_speed)
+                
+                if isinstance(max_speed, (list, tuple)):
+                    max_speed = max_speed[0] if max_speed else 'unknown'
+                elif isinstance(max_speed, dict):
+                    max_speed = 'complex_speed'  # Handle complex speed data
+                elif not isinstance(max_speed, str):
+                    max_speed = str(max_speed)
+                
+                max_speeds.append(str(max_speed))
             
             # Calculate travel time
             travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
@@ -1132,19 +1183,34 @@ class Resident(BaseAgent):
             # Determine dominant road types
             road_type_counts = {}
             for road_type in road_types:
+                if not isinstance(road_type, str):
+                    road_type = str(road_type)
                 road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
             
             dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
             
-            # Create simplified metadata for LLM
+            # Create simplified metadata for LLM - safely handle sets with proper string conversion
+            try:
+                unique_road_types = list(set(road_types))
+            except TypeError:
+                # Fallback if any road_types are unhashable
+                unique_road_types = list(dict.fromkeys(road_types))  # Remove duplicates preserving order
+            
+            try:
+                unique_surface_types = list(set([s for s in surface_types if s != 'unknown']))
+            except TypeError:
+                # Fallback if any surface_types are unhashable
+                filtered_surfaces = [s for s in surface_types if s != 'unknown']
+                unique_surface_types = list(dict.fromkeys(filtered_surfaces))
+            
             return {
                 'path_id': path_number,
                 'path_nodes': path_nodes,
                 'distance_meters': round(path_length, 0),
                 'travel_time_minutes': round(travel_time_minutes, 1),
                 'dominant_road_type': dominant_road_type,
-                'road_types': list(set(road_types)),
-                'surface_types': list(set([s for s in surface_types if s != 'unknown'])),
+                'road_types': unique_road_types,
+                'surface_types': unique_surface_types,
                 'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
                 'total_segments': len(path_nodes) - 1
             }
@@ -1181,7 +1247,7 @@ class Resident(BaseAgent):
             # Create agent state for LLM
             agent_state = {
                 'age': getattr(self, 'age', 30),
-                'current_needs': getattr(self, 'needs', {}),
+                'current_needs': getattr(self, 'current_needs', {}),
                 'agent_id': str(self.unique_id)
             }
             
@@ -1224,8 +1290,8 @@ class Resident(BaseAgent):
         Check if two paths are essentially the same.
         
         Args:
-            path1: First path dictionary
-            path2: Second path dictionary
+            path1: First path (list of node IDs)
+            path2: Second path (list of node IDs)
             
         Returns:
             Boolean indicating if paths are the same
@@ -1233,7 +1299,8 @@ class Resident(BaseAgent):
         if not path1 or not path2:
             return False
             
-        return path1['path_nodes'] == path2['path_nodes']
+        # Compare the actual node lists
+        return path1 == path2
 
     def _calculate_time_for_path(self, path_data):
         """
@@ -1260,8 +1327,26 @@ class Resident(BaseAgent):
         total_distance = 0
         
         for i in range(len(path_nodes) - 1):
-            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1], {})
-            edge_length = edge_data.get('length', 100)  # Default 100m if no data
+            # Handle both simple graphs and MultiGraphs properly
+            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1])
+            
+            if edge_data is None:
+                # No edge found, use default distance
+                edge_length = 100  # Default 100m if no data
+            elif isinstance(edge_data, dict):
+                # Check if this is a MultiGraph (dict of dicts) or simple graph (single dict)
+                if any(key in edge_data for key in ['length', 'highway', 'osmid']):
+                    # Simple graph - edge_data is the actual edge attributes
+                    edge_length = edge_data.get('length', 100)
+                else:
+                    # MultiGraph - edge_data is a dict of edge keys, take the first one
+                    first_edge_key = list(edge_data.keys())[0] if edge_data else 0
+                    actual_edge_data = edge_data.get(first_edge_key, {})
+                    edge_length = actual_edge_data.get('length', 100)
+            else:
+                # Unexpected data type
+                edge_length = 100
+            
             total_distance += edge_length
         
         # Use agent's step size to calculate time
@@ -1503,7 +1588,6 @@ class Resident(BaseAgent):
                 elif dominant_emotion == EmotionalState.ANXIOUS:
                     adjustments["healthcare"] *= 1.4  # More healthcare when anxious
                     adjustments["social"] *= 1.2      # More social support when anxious
-                    adjustments["recreation"] *= 0.9  # Less recreation when anxious
                 elif dominant_emotion == EmotionalState.FRUSTRATED:
                     adjustments["recreation"] *= 1.2  # More recreation when frustrated
                     adjustments["shopping"] *= 1.1    # Slight increase in shopping (retail therapy)
