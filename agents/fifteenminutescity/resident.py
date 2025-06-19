@@ -1082,7 +1082,7 @@ class Resident(BaseAgent):
             return None
 
         except Exception as e:
-            self.logger.error(f"Error in LLM-based target selection: {e}")
+            self.logger.error(f"Error in LLM-based movement decision: {e}")
             return self._choose_need_based_target()
         
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
