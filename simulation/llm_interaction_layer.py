@@ -233,7 +233,7 @@ class InferenceRouter:
                 platform="OpenAI"
             )
         except Exception as e:
-            self.logger.warning(f"Failed to initialize high-capacity endpoint: {e}")
+            self.logger.warning(f"Failed to initialize high-capacity endpoint: 'OpenAI_API_KEY'")
         
         # Fast local models for low-latency responses
         try:
@@ -242,7 +242,16 @@ class InferenceRouter:
                 platform="SiliconFlow"
             )
         except Exception as e:
-            self.logger.warning(f"Failed to initialize fast local endpoint: {e}")
+            self.logger.warning(f"Failed to initialize fast local endpoint: 'SiliconFlow_API_KEY'")
+
+        # Add ZhipuAI as a fine-tuned or general-purpose endpoint
+        try:
+            self.llm_endpoints[LLMEndpointType.FINE_TUNED] = LLMWrapper(
+                model_name="glm-4-flash",  # A capable and fast model from ZhipuAI
+                platform="zhipuai"
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize ZhipuAI endpoint: {e}")
         
         # Log available endpoints
         available = list(self.llm_endpoints.keys())
