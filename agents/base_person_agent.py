@@ -35,6 +35,7 @@ class BaseAgent(GeoAgent):
         self.planned_activities = []
         self.movement_path = []
         self.speed = kwargs.get('speed', 1.0)  # movement speed in arbitrary units
+        self.social_propensity = kwargs.get('social_propensity', 0.5)  # Likelihood to initiate social interaction
     
         # Communication and social network related attributes
         self.contacts = set()
@@ -66,10 +67,8 @@ class BaseAgent(GeoAgent):
         # Make decisions about next actions
         self._decide_next_action() 
         
-        # Interact with other agents
-        self._interact()
-        
-
+        # Interact with other agents in the current location
+        self._check_for_social_interaction()
         
 
     def _decide_next_action(self):
@@ -82,27 +81,22 @@ class BaseAgent(GeoAgent):
             if action:
                 self.planned_activities.append(action)
     
-    
-
+    def _check_for_social_interaction(self):
+        """
+        Check for and execute social interactions with other agents at the same location.
+        This method is a placeholder to be implemented by subclasses, as the logic
+        depends on how the model tracks co-located agents (e.g., at a POI).
+        """
+        pass
     
     def _interact(self):
         """
-        Interact with nearby agents.
+        DEPRECATED: This method is too generic.
+        Interaction logic is now handled by `_check_for_social_interaction`
+        which is triggered by specific contexts (e.g., waiting at a POI).
         """
-        # Check if the model has the get_nearby_agents method
-        if not hasattr(self.model, 'get_nearby_agents'):
-            return
+        pass
             
-        # Find nearby agents
-        nearby_agents = self.model.get_nearby_agents(self)
-        
-        for agent in nearby_agents:
-            # Add to contacts - but only if both agents have contacts (i.e., are people)
-            self.contacts.add(agent.unique_id)
-            if hasattr(agent, 'contacts'):
-                agent.contacts.add(self.unique_id)
-            
-    
     def _communicate_with(self, other_agent, online=False):
         """
         Communicate with another agent.

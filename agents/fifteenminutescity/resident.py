@@ -848,50 +848,50 @@ class Resident(BaseAgent):
                     self.geometry = self.destination_geometry
                     self.visited_pois.append(self.destination_node)
                     
-                    # Add resident to POI's visitors if it's a POI agent
-                    visited_poi_type = None
+                    # Find the POI agent at the destination
                     visited_poi_agent = None
                     for poi in self.model.poi_agents:
-                        if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
-                            poi.visitors.add(self.unique_id)
-                            visited_poi_type = poi.poi_type
+                        if poi.node_id == self.destination_node:
                             visited_poi_agent = poi
-                            # --- MEMORY MODULE: Record visit ---
-                            self.memory['visited_pois'].append({
-                                'step': getattr(self.model, 'step_count', None),
-                                'poi_id': poi.unique_id,
-                                'poi_type': poi.poi_type,
-                                'category': getattr(poi, 'category', None),
-                                'income': self.attributes['income']
-                            })
-                            
-                            # Track POI visit in output controller
-                            if visited_poi_agent and hasattr(self.model, 'output_controller'):
-                                poi_category = getattr(visited_poi_agent, 'category', 'other')
-                                self.model.output_controller.track_poi_visit(poi_category)
-                            
                             break
                     
-                    # Start waiting at POI if it has waiting time
-                    if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
-                        waiting_time = visited_poi_agent.get_waiting_time()
-                        if waiting_time > 0:
-                            # Determine action based on POI type and simulation settings
-                            action = self._select_action_at_poi(visited_poi_agent, waiting_time)
-                            self._start_action(action)
-                            
-                            # Track waiting time in output controller
-                            if hasattr(self.model, 'output_controller'):
-                                poi_category = getattr(visited_poi_agent, 'category', 'other')
-                                self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
-                    
-                    # Satisfy needs if we're using need-based movement and visited a POI
-                    if self.movement_behavior == 'need-based' and visited_poi_type:
-                        self._satisfy_needs_at_poi(visited_poi_type)
-                    
-                    # Update emotional state if LLM behavior is enabled
-                    if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
-                        self._update_emotional_state_from_poi_visit(visited_poi_type, visited_poi_agent)
+                    if visited_poi_agent:
+                        # Add self to the POI's visitor list
+                        visited_poi_agent.add_visitor(self.unique_id)
+                        
+                        # --- MEMORY MODULE: Record visit ---
+                        self.memory['visited_pois'].append({
+                            'step': getattr(self.model, 'step_count', None),
+                            'poi_id': visited_poi_agent.unique_id,
+                            'poi_type': visited_poi_agent.poi_type,
+                            'category': getattr(visited_poi_agent, 'category', None),
+                            'income': self.attributes['income']
+                        })
+                        
+                        # Track POI visit in output controller
+                        if hasattr(self.model, 'output_controller'):
+                            poi_category = getattr(visited_poi_agent, 'category', 'other')
+                            self.model.output_controller.track_poi_visit(poi_category)
+                        
+                        # Start waiting at POI if it has waiting time
+                        if hasattr(visited_poi_agent, 'get_waiting_time'):
+                            waiting_time = visited_poi_agent.get_waiting_time()
+                            if waiting_time > 0:
+                                # Determine action based on POI type and simulation settings
+                                action = self._select_action_at_poi(visited_poi_agent, waiting_time)
+                                self._start_action(action)
+                                
+                                # Track waiting time in output controller
+                                if hasattr(self.model, 'output_controller'):
+                                    self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
+                        
+                        # Satisfy needs if we're using need-based movement
+                        if self.movement_behavior == 'need-based':
+                            self._satisfy_needs_at_poi(visited_poi_agent.poi_type)
+                        
+                        # Update emotional state if LLM behavior is enabled
+                        if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
+                            self._update_emotional_state_from_poi_visit(visited_poi_agent.poi_type, visited_poi_agent)
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -903,6 +903,9 @@ class Resident(BaseAgent):
             # Handle ongoing actions at POIs
             if self.performing_action:
                 self.action_time_remaining -= 1
+                
+                # While performing an action, check for social interactions
+                self._check_for_social_interaction()
                 
                 # Check if action is finished
                 if self.action_time_remaining <= 0:
@@ -942,6 +945,224 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
+
+    def _select_action_at_poi(self, poi_agent, waiting_time):
+        """
+        Select an appropriate action to perform at a POI based on the POI type and simulation granularity.
+        
+        Args:
+            poi_agent: The POI agent where the action will be performed
+            waiting_time: Duration in minutes for the action
+            
+        Returns:
+            Action object representing what the resident will do at the POI
+        """
+        poi_type = poi_agent.poi_type
+        
+        # Map POI types to appropriate actions based on granularity
+        if self.model.action_granularity == ActionGranularity.SIMPLE:
+            # Simple: just waiting
+            action_type = ActionType.WAITING
+            description = f"Waiting at {poi_type}"
+            
+        elif self.model.action_granularity == ActionGranularity.BASIC:
+            # Basic: map POI types to basic action types
+            poi_to_action = {
+                'restaurant': ActionType.EATING,
+                'cafe': ActionType.EATING,
+                'bar': ActionType.SOCIALIZING,
+                'pub': ActionType.SOCIALIZING,
+                'shop': ActionType.SHOPPING,
+                'supermarket': ActionType.SHOPPING,
+                'mall': ActionType.SHOPPING,
+                'hospital': ActionType.HEALTHCARE,
+                'clinic': ActionType.HEALTHCARE,
+                'pharmacy': ActionType.HEALTHCARE,
+                'library': ActionType.STUDYING,
+                'school': ActionType.STUDYING,
+                'university': ActionType.STUDYING,
+                'gym': ActionType.EXERCISING,
+                'sports_centre': ActionType.EXERCISING,
+                'park': ActionType.SOCIALIZING,
+                'cinema': ActionType.ENTERTAINMENT,
+                'theatre': ActionType.ENTERTAINMENT,
+                'bank': ActionType.BANKING,
+                'church': ActionType.WORSHIP,
+                'mosque': ActionType.WORSHIP,
+                'temple': ActionType.WORSHIP,
+                'community_centre': ActionType.SOCIALIZING
+            }
+            action_type = poi_to_action.get(poi_type, ActionType.WAITING)
+            description = f"{action_type.value.title()} at {poi_type}"
+            
+        else:  # DETAILED granularity
+            # Detailed: more specific actions based on POI type
+            poi_to_detailed_action = {
+                'restaurant': ActionType.EATING,
+                'cafe': ActionType.TALKING,
+                'bar': ActionType.SOCIALIZING,
+                'pub': ActionType.SOCIALIZING,
+                'shop': ActionType.BROWSING,
+                'supermarket': ActionType.SHOPPING,
+                'mall': ActionType.BROWSING,
+                'hospital': ActionType.CONSULTING,
+                'clinic': ActionType.CONSULTING,
+                'pharmacy': ActionType.DOING_BUSINESS,
+                'library': ActionType.READING,
+                'school': ActionType.STUDYING,
+                'university': ActionType.STUDYING,
+                'gym': ActionType.EXERCISING,
+                'sports_centre': ActionType.PLAYING,
+                'park': ActionType.SOCIALIZING,
+                'cinema': ActionType.WATCHING_MOVIE,
+                'theatre': ActionType.ENTERTAINMENT,
+                'bank': ActionType.DOING_BUSINESS,
+                'church': ActionType.PRAYING,
+                'mosque': ActionType.PRAYING,
+                'temple': ActionType.PRAYING,
+                'community_centre': ActionType.TALKING
+            }
+            action_type = poi_to_detailed_action.get(poi_type, ActionType.WAITING)
+            description = f"{action_type.value.title()} at {poi_type}"
+        
+        # Determine which needs this action might satisfy
+        needs_satisfied = {}
+        if action_type in [ActionType.EATING]:
+            needs_satisfied['food'] = random.randint(20, 40)
+        elif action_type in [ActionType.SOCIALIZING, ActionType.TALKING]:
+            needs_satisfied['social'] = random.randint(15, 30)
+        elif action_type in [ActionType.EXERCISING, ActionType.PLAYING]:
+            needs_satisfied['health'] = random.randint(10, 25)
+            needs_satisfied['recreation'] = random.randint(15, 30)
+        elif action_type in [ActionType.SHOPPING, ActionType.BROWSING]:
+            needs_satisfied['shopping'] = random.randint(20, 35)
+        elif action_type in [ActionType.HEALTHCARE, ActionType.CONSULTING]:
+            needs_satisfied['health'] = random.randint(25, 50)
+        elif action_type in [ActionType.ENTERTAINMENT, ActionType.WATCHING_MOVIE]:
+            needs_satisfied['recreation'] = random.randint(20, 40)
+        elif action_type in [ActionType.STUDYING, ActionType.READING]:
+            needs_satisfied['education'] = random.randint(15, 30)
+        elif action_type in [ActionType.WORSHIP, ActionType.PRAYING]:
+            needs_satisfied['spiritual'] = random.randint(20, 40)
+        elif action_type in [ActionType.BANKING, ActionType.DOING_BUSINESS]:
+            needs_satisfied['financial'] = random.randint(15, 25)
+        
+        # Create and return the action
+        return Action(
+            action_type=action_type,
+            duration=waiting_time,
+            poi_type=poi_type,
+            poi_id=poi_agent.unique_id,
+            description=description,
+            needs_satisfied=needs_satisfied,
+            social_interaction=(action_type in [ActionType.SOCIALIZING, ActionType.TALKING]),
+            context={'poi_category': getattr(poi_agent, 'category', poi_type)}
+        )
+
+    def _start_action(self, action: Action):
+        """Begin an action at a POI."""
+        self.performing_action = True
+        self.current_action = action
+        self.action_time_remaining = action.duration
+        self.action_history.append(action)
+
+    def _complete_current_action(self):
+        """Complete the current action and clean up."""
+        if self.current_action and self.current_action.poi_id:
+            # Find the POI agent to notify them of departure
+            poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
+            if poi_agent:
+                poi_agent.remove_visitor(self.unique_id)
+        
+        self.performing_action = False
+        self.current_action = None
+        self.action_time_remaining = 0
+
+    def _get_poi_socialness_factor(self, poi_type: str) -> float:
+        """Get a factor representing how 'social' a POI type is."""
+        social_pois = {
+            # High socialness
+            "cafe": 1.5, "bar": 1.5, "pub": 1.5, "community_centre": 1.5, "park": 1.4,
+            # Medium socialness
+            "restaurant": 1.2, "library": 1.1, "gym": 1.1, "sports_centre": 1.1,
+            # Low socialness
+            "shop": 0.8, "supermarket": 0.7, "mall": 0.8,
+            # Very low socialness
+            "hospital": 0.5, "clinic": 0.5, "pharmacy": 0.4, "bank": 0.6
+        }
+        return social_pois.get(poi_type, 1.0) # Default to 1.0
+
+    def _check_for_social_interaction(self):
+        """Check for and execute social interactions with co-located agents."""
+        if not self.performing_action or not self.current_action.poi_id:
+            return
+
+        # Get the POI agent where the action is happening
+        poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
+        if not poi_agent or len(poi_agent.visitors) < 2:
+            return
+
+        # Don't check at every single step. Chance to check is proportional to social_propensity.
+        if random.random() > (self.social_propensity * 0.1): # e.g., 5% chance per step for 0.5 propensity
+            return
+
+        # Check for interactions with other visitors
+        for other_agent_id in poi_agent.visitors:
+            if other_agent_id == self.unique_id:
+                continue
+
+            other_agent = self.model.get_agent_by_id(other_agent_id)
+            if not other_agent or not isinstance(other_agent, Resident):
+                continue
+
+            # --- Calculate Interaction Score ---
+            # 1. Base score from POI socialness
+            interaction_score = self._get_poi_socialness_factor(poi_agent.poi_type)
+
+            # 2. Boost score if already in contacts
+            if other_agent_id in self.contacts:
+                interaction_score *= 5.0
+            
+            # 3. Boost score based on homophily (age similarity)
+            age_difference = abs(self.age - other_agent.age)
+            age_factor = max(0, 1 - (age_difference / 20)) # 1.0 if same age, 0.0 if 20+ years apart
+            interaction_score *= (1 + age_factor)
+
+            # 4. Factor in this agent's social propensity
+            interaction_score *= self.social_propensity
+
+            # --- Decide if Interaction Happens ---
+            # Interaction happens if score > random threshold (e.g., 1.5)
+            if interaction_score > (random.random() * 5 + 1.0): # Threshold between 1.0 and 6.0
+                self._execute_social_interaction(other_agent)
+                # Only one interaction per check to keep it simple
+                break
+    
+    def _execute_social_interaction(self, other_agent):
+        """Execute the outcomes of a social interaction."""
+        self.logger.info(f"Agent {self.unique_id} is interacting with {other_agent.unique_id}")
+
+        # Increment the model's interaction counter
+        # Each agent involved increments it by 0.5 to make 1 full interaction.
+        self.model.interactions_this_step += 0.5
+
+        # 1. Record the interaction
+        timestamp = self.model.step_count
+        interaction = {'type': 'social', 'with': other_agent.unique_id, 'timestamp': timestamp}
+        self.interaction_history.append(interaction)
+        other_agent.interaction_history.append({'type': 'social', 'with': self.unique_id, 'timestamp': timestamp})
+
+        # 2. Update social needs (decrease them)
+        satisfaction = random.randint(10, 25)
+        self.satisfy_need_at_poi('social', satisfaction)
+        other_agent.satisfy_need_at_poi('social', satisfaction)
+
+        # 3. Form a new connection if they are strangers
+        if other_agent.unique_id not in self.contacts:
+            if random.random() < 0.25: # 25% chance to form a lasting connection
+                self.contacts.add(other_agent.unique_id)
+                other_agent.contacts.add(self.unique_id)
+                self.logger.info(f"New social connection formed between {self.unique_id} and {other_agent.unique_id}")
 
     def _make_random_movement_decision(self):
         """

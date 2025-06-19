@@ -111,8 +111,9 @@ class FifteenMinuteCity(Model):
         self.pois = pois
         self.grid = NetworkGrid(graph)
         
-        # Add a step counter
+        # Add a step counter and interaction counter
         self.step_count = 0
+        self.interactions_this_step = 0
         
         # Add time simulation
         self.hour_of_day = kwargs.get('start_hour', 8)  # Start at 8 AM by default
@@ -207,7 +208,8 @@ class FifteenMinuteCity(Model):
             model_reporters={
                 "Total Agents": lambda m: m.get_agent_count(),
                 "Person Agents": lambda m: m.get_agent_count(agent_type=Resident),
-                "POI Agents": lambda m: m.get_agent_count(agent_type=POI)
+                "POI Agents": lambda m: m.get_agent_count(agent_type=POI),
+                "Interactions": lambda m: m.interactions_this_step
             },
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
@@ -318,10 +320,10 @@ class FifteenMinuteCity(Model):
         """
         return self.node_to_parish.get(node_id, None)
     
-    # Add a method to get agent by ID
     def get_agent_by_id(self, agent_id):
-        """Get an agent by its ID"""
-        for agent in self.all_agents:
+        """Get an agent by its unique_id from the model's agent list."""
+        # The CustomRandomActivation scheduler uses a simple list `agents`
+        for agent in self.schedule.agents:
             if agent.unique_id == agent_id:
                 return agent
         return None
@@ -373,6 +375,9 @@ class FifteenMinuteCity(Model):
 
     def step(self):
         """Advance the model by one step"""
+        # Reset per-step counters
+        self.interactions_this_step = 0
+        
         # Increment step counter
         self.step_count += 1
         

@@ -191,14 +191,19 @@ class POI(GeoAgent):
         print(f"  Result: {poi_type} → {category}")
         return category
     
+    def add_visitor(self, agent_id):
+        """Adds an agent to the visitor list."""
+        self.visitors.add(agent_id)
+
+    def remove_visitor(self, agent_id):
+        """Removes an agent from the visitor list."""
+        self.visitors.discard(agent_id)
+    
     def step(self):
         """
-        POIs are mostly static but can update visitor information and popularity.
+        POIs are mostly static but can update their internal state, like waiting time.
         """
-        # Update visitors
-        self._update_visitors()
-        
-        # Update waiting time
+        # Update waiting time based on the current number of visitors
         self._update_waiting_time()
         
         # Update popularity based on visitor count
@@ -210,21 +215,6 @@ class POI(GeoAgent):
         POIs are mostly static but can update visitor information and popularity.
         """
     
-    def _update_visitors(self):
-        """
-        Update the set of visitors at this POI.
-        """
-        # Clear previous visitors
-        self.visitors = set()
-        
-        # Get agents at this location's node
-        if hasattr(self.model, 'residents'):
-            for resident in self.model.residents:
-                if hasattr(resident, 'current_node') and resident.current_node == self.node_id:
-                    self.visitors.add(resident.unique_id)
-                # Also check for residents who have moved directly to this POI's location
-                elif hasattr(resident, 'geometry') and self.geometry.distance(resident.geometry) < 0.001:
-                    self.visitors.add(resident.unique_id)
     
     def _update_waiting_time(self):
         """
