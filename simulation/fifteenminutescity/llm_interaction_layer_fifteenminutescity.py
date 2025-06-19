@@ -113,18 +113,29 @@ class FifteenMinuteCityLLMLayer(LLMInteractionLayer):
                 for other_agent in model.get_nearby_agents(agent)
             ]
         
-        # Get nearby POIs (convert to generic entities)
+        # Get nearby POIs from the model's POI agents
         nearby_entities = []
-        if hasattr(agent, 'accessible_nodes') and agent.accessible_nodes:
-            for poi_type, poi_list in agent.accessible_nodes.items():
-                if poi_type != 'all_nodes':  # Skip the 'all_nodes' key
-                    for poi in poi_list[:3]:  # Limit to 3 POIs per type
-                        nearby_entities.append({
-                            'name': f"{poi_type}_{poi}",
-                            'type': poi_type,
-                            'id': poi,
-                            'category': 'poi'  # Fifteen-minute city specific
-                        })
+        if hasattr(model, 'poi_agents') and model.poi_agents:
+            # Get POIs that are within the agent's accessible nodes
+            accessible_node_ids = set()
+            if hasattr(agent, 'accessible_nodes') and agent.accessible_nodes:
+                # accessible_nodes is a dict of {node_id: distance}
+                accessible_node_ids = set(agent.accessible_nodes.keys())
+            
+            # Find POI agents at accessible nodes
+            accessible_pois = []
+            for poi_agent in model.poi_agents:
+                if hasattr(poi_agent, 'node_id') and poi_agent.node_id in accessible_node_ids:
+                    accessible_pois.append(poi_agent)
+            
+            # Limit to a reasonable number and create entity entries
+            for poi_agent in accessible_pois[:10]:  # Limit to 10 nearby POIs
+                nearby_entities.append({
+                    'name': f"{poi_agent.poi_type}_{poi_agent.node_id}",
+                    'type': poi_agent.poi_type,
+                    'id': poi_agent.node_id,
+                    'category': getattr(poi_agent, 'category', 'poi')
+                })
         
         # Add fifteen-minute city specific environmental context
         environmental_context = {

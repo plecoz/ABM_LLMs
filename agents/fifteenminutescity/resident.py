@@ -1017,6 +1017,7 @@ class Resident(BaseAgent):
             # Create agent state for LLM using the helper method if available
             if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
                 agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
             else:
                 # Fallback: create a basic agent state dict
                 agent_state = {
@@ -1027,10 +1028,10 @@ class Resident(BaseAgent):
             
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
-            
+            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
             # Get episodic memories (recent POI visits)
             episodic_memories = self._get_episodic_memories()
-            
+            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
             # Get LLM decision using the standard method
             llm_decision = self.model.llm_interaction_layer.get_agent_decision(
                 agent_state=agent_state,
@@ -1039,11 +1040,11 @@ class Resident(BaseAgent):
                 agent_complexity="standard",
                 latency_requirement="normal"
             )
-            
+            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
             # Parse the LLM's decision and act on it
             if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
                 action = llm_decision.action.lower()
-                
+                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
                 if 'move' in action and 'poi' in action:
                     # Parse POI type from the action string itself
                     poi_type = None
