@@ -88,6 +88,7 @@ class FifteenMinuteCity(Model):
                 - random_distribution: Whether to distribute residents randomly
                 - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
                 - movement_behavior: Agent movement behavior ('need-based' or 'random')
+                - threshold: Time threshold in minutes for accessibility (default: 15 for 15-minute city)
                 - seed: Random seed for reproducible results (default: 42)
         """
         # Get random seed from kwargs
@@ -106,6 +107,10 @@ class FifteenMinuteCity(Model):
         
         # Store city name
         self.city = kwargs.get('city', 'Macau, China')
+        
+        # Store accessibility threshold (in minutes)
+        self.threshold = kwargs.get('threshold', 15)
+        self.logger.info(f"Using accessibility threshold: {self.threshold} minutes")
         
         self.graph = graph
         self.pois = pois
@@ -668,17 +673,17 @@ class FifteenMinuteCity(Model):
                     lat1=point_geometry.y, lon1=point_geometry.x,
                     lat2=home_node_geom['y'], lon2=home_node_geom['x']
                 )
-                print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
+                # print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 parish = self._get_parish_for_node(home_node)
                 agent_props = self._generate_agent_properties(parish)
 
-                # Determine step size and 15-minute radius based on agent's age
+                # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
                 step_size = 60.0 if is_elderly else 80.0
-                fifteen_minute_radius = 15 * step_size
+                accessibility_radius = self.threshold * step_size
 
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                    self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+                    self.graph, home_node, cutoff=accessibility_radius, weight='length'
                 ))
                 
                 
@@ -738,17 +743,17 @@ class FifteenMinuteCity(Model):
                 lat1=point_geometry.y, lon1=point_geometry.x,
                 lat2=home_node_geom['y'], lon2=home_node_geom['x']
             )
-            print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
+            # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
             agent_props = self._generate_agent_properties(parish)
 
-            # Determine step size and 15-minute radius based on agent's age
+            # Determine step size and accessibility radius based on agent's age
             is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
             step_size = 60.0 if is_elderly else 80.0
-            fifteen_minute_radius = 15 * step_size
+            accessibility_radius = self.threshold * step_size
 
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+                self.graph, home_node, cutoff=accessibility_radius, weight='length'
             ))
             parish = self._get_parish_for_node(home_node)
             
