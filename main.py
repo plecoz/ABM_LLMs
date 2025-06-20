@@ -319,7 +319,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15):
     """
     Run the 15-minute city simulation.
     
@@ -332,6 +332,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_environment: Path to load the environment data from (instead of OSM)
         save_json_report: Path to save the detailed JSON report (optional)
         city: Name of the city for the simulation (default: 'Macau, China')
+        threshold: Time threshold in minutes for accessibility (default: 15)
     """
     # Get parishes path based on city if not explicitly provided
     if parishes_path is None:
@@ -457,7 +458,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         movement_behavior=movement_behavior,
         city=city,
         residential_buildings=residential_buildings,
-        seed=seed
+        seed=seed,
+        threshold=threshold
     )
     
     print("Starting simulation...")
@@ -502,8 +504,9 @@ if __name__ == "__main__":
     # Add seed argument at the top for visibility
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
-    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=5000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--residents', type=int, default=1000, help='Number of resident agents')
+    parser.add_argument('--steps', type=int, default=500, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
     
@@ -558,5 +561,6 @@ if __name__ == "__main__":
         city=args.city,
         save_environment=args.save_environment,
         load_environment=args.load_environment,
-        seed=args.seed
+        seed=args.seed,
+        threshold=args.threshold
     )
