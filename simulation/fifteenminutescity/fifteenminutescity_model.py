@@ -633,19 +633,34 @@ class FifteenMinuteCity(Model):
                     buildings_in_parish = self.residential_buildings[self.residential_buildings.within(parish_geom)]
                     
                     if not buildings_in_parish.empty:
-                        # Sample buildings with replacement for the number of residents
-                        selected_buildings = buildings_in_parish.sample(n=num_parish_residents, replace=True, random_state=self.random.randint(0, 1000000))
+                        # Calculate building areas for proportional sampling using projected coordinates
+                        buildings_in_parish = self._calculate_building_areas(buildings_in_parish)
                         
-                        for _, building in selected_buildings.iterrows():
-                            # Use centroid for agent geometry
-                            point_geometry = building.geometry.centroid
-                            # Find nearest network node for travel
-                            home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
-                            home_locations.append({'geometry': point_geometry, 'node': home_node})
+                        # Remove buildings with zero or negative area
+                        buildings_in_parish = buildings_in_parish[buildings_in_parish['area'] > 0]
+                        
+                        if not buildings_in_parish.empty:
+                            # Sample buildings proportionally to their area
+                            weights = buildings_in_parish['area'] / buildings_in_parish['area'].sum()
+                            selected_buildings = buildings_in_parish.sample(
+                                n=num_parish_residents, 
+                                replace=True, 
+                                weights=weights,
+                                random_state=self.random.randint(0, 1000000)
+                            )
+                            
+                            self.logger.info(f"Parish {parish_name}: Selected {num_parish_residents} residents from {len(buildings_in_parish)} buildings (area-weighted)")
+                            
+                            for _, building in selected_buildings.iterrows():
+                                # Use centroid for agent geometry
+                                point_geometry = building.geometry.centroid
+                                # Find nearest network node for travel
+                                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                                home_locations.append({'geometry': point_geometry, 'node': home_node})
+                        else:
+                            self.logger.warning(f"No residential buildings with valid area found in parish {parish_name}. Falling back to random nodes for this parish.")
                     else:
                         self.logger.warning(f"No residential buildings found in parish {parish_name}. Falling back to random nodes for this parish.")
-                else:
-                    self.logger.warning(f"Could not find geometry for parish {parish_name}. Falling back to random nodes.")
             
             # Fallback or default behavior: use random nodes
             if not home_locations:
@@ -720,11 +735,32 @@ class FifteenMinuteCity(Model):
 
         if use_buildings:
             self.logger.info("Initializing residents at random residential building locations.")
-            selected_buildings = self.residential_buildings.sample(n=num_residents, replace=True, random_state=self.random.randint(0, 1000000))
-            for _, building in selected_buildings.iterrows():
-                point_geometry = building.geometry.centroid
-                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
-                home_locations.append({'geometry': point_geometry, 'node': home_node})
+            
+            # Calculate building areas for proportional sampling using projected coordinates
+            residential_buildings_copy = self._calculate_building_areas(self.residential_buildings)
+            
+            # Remove buildings with zero or negative area
+            residential_buildings_copy = residential_buildings_copy[residential_buildings_copy['area'] > 0]
+            
+            if not residential_buildings_copy.empty:
+                # Sample buildings proportionally to their area
+                weights = residential_buildings_copy['area'] / residential_buildings_copy['area'].sum()
+                selected_buildings = residential_buildings_copy.sample(
+                    n=num_residents, 
+                    replace=True, 
+                    weights=weights,
+                    random_state=self.random.randint(0, 1000000)
+                )
+                
+                self.logger.info(f"Selected {num_residents} residents from {len(residential_buildings_copy)} buildings (area-weighted)")
+                
+                for _, building in selected_buildings.iterrows():
+                    point_geometry = building.geometry.centroid
+                    home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                    home_locations.append({'geometry': point_geometry, 'node': home_node})
+            else:
+                self.logger.warning("No residential buildings with valid area found. Falling back to random network nodes.")
+                use_buildings = False
         else:
             self.logger.info("No residential building data. Initializing residents at random network nodes.")
             random_nodes = random.choices(list(self.graph.nodes()), k=num_residents)
@@ -866,3 +902,45 @@ class FifteenMinuteCity(Model):
                 return PersonaType.WORKING_PARENT
             else:
                 return PersonaType.YOUNG_PROFESSIONAL
+
+    def _calculate_building_areas(self, buildings_gdf):
+        """
+        Calculate building areas using proper projected coordinates to avoid geographic CRS warnings.
+        
+        Args:
+            buildings_gdf: GeoDataFrame with building geometries
+            
+        Returns:
+            GeoDataFrame with 'area' column added using projected coordinates
+        """
+        if buildings_gdf.empty:
+            return buildings_gdf
+        
+        # Make a copy to avoid modifying the original
+        buildings_copy = buildings_gdf.copy()
+        
+        # Check if we're in a geographic CRS (lat/lon)
+        if buildings_copy.crs and buildings_copy.crs.is_geographic:
+            # For Macau, use UTM Zone 49N (EPSG:32649) which is appropriate for the region
+            # For other cities, we could use a more general approach like Web Mercator (EPSG:3857)
+            if 'Macau' in self.city:
+                projected_crs = 'EPSG:32649'  # UTM Zone 49N for Macau
+            elif 'Barcelona' in self.city:
+                projected_crs = 'EPSG:32631'  # UTM Zone 31N for Barcelona
+            elif 'Hong Kong' in self.city:
+                projected_crs = 'EPSG:32650'  # UTM Zone 50N for Hong Kong
+            else:
+                # Default to Web Mercator for other cities
+                projected_crs = 'EPSG:3857'
+            
+            # Project to appropriate UTM zone and calculate area
+            buildings_projected = buildings_copy.to_crs(projected_crs)
+            buildings_copy['area'] = buildings_projected.geometry.area
+            
+            self.logger.debug(f"Calculated building areas using projected CRS: {projected_crs}")
+        else:
+            # Already in projected coordinates, calculate area directly
+            buildings_copy['area'] = buildings_copy.geometry.area
+            self.logger.debug("Calculated building areas using existing projected CRS")
+        
+        return buildings_copy
