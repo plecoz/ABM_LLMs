@@ -1,9 +1,9 @@
-from ..base_agent import BaseAgent
+from mesa_geo.geoagent import GeoAgent
 from shapely.geometry import Point
 import logging
 import random
 
-class POI(BaseAgent):
+class POI(GeoAgent):
     """
     Point of Interest (POI) agent representing locations like shops, hospitals, schools, etc.
     
@@ -22,21 +22,31 @@ class POI(BaseAgent):
             poi_type: Type of POI (e.g., 'hospital', 'school', 'supermarket')
             **kwargs: Additional agent properties that can be customized
         """
-        super().__init__(model, unique_id, geometry, **kwargs)
+        # Extract custom parameters that GeoAgent doesn't expect
+        category = kwargs.get('category', None)
+        parish = kwargs.get('parish', None)
+        capacity = kwargs.get('capacity', 50)
+        open_hours = kwargs.get('open_hours', {'start': 8, 'end': 20})
         
+        # Call parent constructor with only the parameters it expects
+        super().__init__(model=model, geometry=geometry, crs="EPSG:4326")
+        self.unique_id = unique_id
         self.node_id = node_id
         self.poi_type = poi_type
         
         # If category is explicitly provided, use it, otherwise determine it from poi_type
-        if 'category' in kwargs:
-            self.category = kwargs['category']
+        if category is not None:
+            self.category = category
             print(f"Using provided category for POI {unique_id}: {self.category}")
         else:
             self.category = self._determine_category(poi_type)
         
+        # Store parish information
+        self.parish = parish
+        
         self.visitors = set()  # Set of agent IDs currently visiting
-        self.capacity = kwargs.get('capacity', 50)
-        self.open_hours = kwargs.get('open_hours', {'start': 8, 'end': 20})  # Default 8am-8pm
+        self.capacity = capacity
+        self.open_hours = open_hours  # Default 8am-8pm
         
         # POI-specific attributes
         #self.service_quality = kwargs.get('service_quality', 3)  # 1-5 scale
@@ -57,7 +67,21 @@ class POI(BaseAgent):
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"POI-{unique_id}")
-    
+        #attributes for communication:
+        self.contacts = set()
+        self.message_history = []
+        self.online_contacts = set()
+
+        # Reference to the features module for scenario-specific properties
+        self.features = kwargs.get('features', {})
+
+        # History tracking
+        self.interaction_history = []
+        # Initialize logger
+        self.logger = logging.getLogger(f"Agent-{unique_id}")
+
+
+
     def _has_waiting_time(self):
         """
         Determine if this POI type should have waiting times.
@@ -167,14 +191,19 @@ class POI(BaseAgent):
         print(f"  Result: {poi_type} → {category}")
         return category
     
+    def add_visitor(self, agent_id):
+        """Adds an agent to the visitor list."""
+        self.visitors.add(agent_id)
+
+    def remove_visitor(self, agent_id):
+        """Removes an agent from the visitor list."""
+        self.visitors.discard(agent_id)
+    
     def step(self):
         """
-        POIs are mostly static but can update visitor information and popularity.
+        POIs are mostly static but can update their internal state, like waiting time.
         """
-        # Update visitors
-        self._update_visitors()
-        
-        # Update waiting time
+        # Update waiting time based on the current number of visitors
         self._update_waiting_time()
         
         # Update popularity based on visitor count
@@ -186,21 +215,6 @@ class POI(BaseAgent):
         POIs are mostly static but can update visitor information and popularity.
         """
     
-    def _update_visitors(self):
-        """
-        Update the set of visitors at this POI.
-        """
-        # Clear previous visitors
-        self.visitors = set()
-        
-        # Get agents at this location's node
-        if hasattr(self.model, 'residents'):
-            for resident in self.model.residents:
-                if hasattr(resident, 'current_node') and resident.current_node == self.node_id:
-                    self.visitors.add(resident.unique_id)
-                # Also check for residents who have moved directly to this POI's location
-                elif hasattr(resident, 'geometry') and self.geometry.distance(resident.geometry) < 0.001:
-                    self.visitors.add(resident.unique_id)
     
     def _update_waiting_time(self):
         """

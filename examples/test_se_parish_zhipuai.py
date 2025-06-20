@@ -23,7 +23,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from simulation.llm_api import LLMWrapper
 from simulation.fifteenminutescity_model import FifteenMinuteCity
-from simulation.llm_interaction_layer import LLMInteractionLayer
+from simulation.llm_interaction_layer_fifteenminutescity import FifteenMinuteCityLLMLayer
 from simulation.data_management_logging import DataManagementLoggingToolkit
 from simulation.logging_config import DataManagementConfig, LoggingMode
 from agents.fifteenminutescity.resident import Resident

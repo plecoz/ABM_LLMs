@@ -20,7 +20,7 @@ from outputs import OutputController
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
-from simulation.llm_interaction_layer import LLMInteractionLayer
+from simulation.fifteenminutescity.llm_interaction_layer_fifteenminutescity import FifteenMinuteCityLLMLayer
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -88,6 +88,7 @@ class FifteenMinuteCity(Model):
                 - random_distribution: Whether to distribute residents randomly
                 - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
                 - movement_behavior: Agent movement behavior ('need-based' or 'random')
+                - threshold: Time threshold in minutes for accessibility (default: 15 for 15-minute city)
                 - seed: Random seed for reproducible results (default: 42)
         """
         # Get random seed from kwargs
@@ -107,12 +108,17 @@ class FifteenMinuteCity(Model):
         # Store city name
         self.city = kwargs.get('city', 'Macau, China')
         
+        # Store accessibility threshold (in minutes)
+        self.threshold = kwargs.get('threshold', 15)
+        self.logger.info(f"Using accessibility threshold: {self.threshold} minutes")
+        
         self.graph = graph
         self.pois = pois
         self.grid = NetworkGrid(graph)
         
-        # Add a step counter
+        # Add a step counter and interaction counter
         self.step_count = 0
+        self.interactions_this_step = 0
         
         # Add time simulation
         self.hour_of_day = kwargs.get('start_hour', 8)  # Start at 8 AM by default
@@ -186,7 +192,7 @@ class FifteenMinuteCity(Model):
         if self.llm_enabled:
             self.logger.info("Initializing LLM components for persona-driven behavior")
             self.persona_memory_manager = PersonaMemoryManager()
-            self.llm_interaction_layer = LLMInteractionLayer()
+            self.llm_interaction_layer = FifteenMinuteCityLLMLayer()
         else:
             self.persona_memory_manager = None
             self.llm_interaction_layer = None
@@ -207,7 +213,8 @@ class FifteenMinuteCity(Model):
             model_reporters={
                 "Total Agents": lambda m: m.get_agent_count(),
                 "Person Agents": lambda m: m.get_agent_count(agent_type=Resident),
-                "POI Agents": lambda m: m.get_agent_count(agent_type=POI)
+                "POI Agents": lambda m: m.get_agent_count(agent_type=POI),
+                "Interactions": lambda m: m.interactions_this_step
             },
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
@@ -318,10 +325,10 @@ class FifteenMinuteCity(Model):
         """
         return self.node_to_parish.get(node_id, None)
     
-    # Add a method to get agent by ID
     def get_agent_by_id(self, agent_id):
-        """Get an agent by its ID"""
-        for agent in self.all_agents:
+        """Get an agent by its unique_id from the model's agent list."""
+        # The CustomRandomActivation scheduler uses a simple list `agents`
+        for agent in self.schedule.agents:
             if agent.unique_id == agent_id:
                 return agent
         return None
@@ -373,6 +380,9 @@ class FifteenMinuteCity(Model):
 
     def step(self):
         """Advance the model by one step"""
+        # Reset per-step counters
+        self.interactions_this_step = 0
+        
         # Increment step counter
         self.step_count += 1
         
@@ -663,17 +673,17 @@ class FifteenMinuteCity(Model):
                     lat1=point_geometry.y, lon1=point_geometry.x,
                     lat2=home_node_geom['y'], lon2=home_node_geom['x']
                 )
-                print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
+                # print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 parish = self._get_parish_for_node(home_node)
                 agent_props = self._generate_agent_properties(parish)
 
-                # Determine step size and 15-minute radius based on agent's age
+                # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
                 step_size = 60.0 if is_elderly else 80.0
-                fifteen_minute_radius = 15 * step_size
+                accessibility_radius = self.threshold * step_size
 
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                    self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+                    self.graph, home_node, cutoff=accessibility_radius, weight='length'
                 ))
                 
                 
@@ -733,17 +743,17 @@ class FifteenMinuteCity(Model):
                 lat1=point_geometry.y, lon1=point_geometry.x,
                 lat2=home_node_geom['y'], lon2=home_node_geom['x']
             )
-            print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
+            # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
             agent_props = self._generate_agent_properties(parish)
 
-            # Determine step size and 15-minute radius based on agent's age
+            # Determine step size and accessibility radius based on agent's age
             is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
             step_size = 60.0 if is_elderly else 80.0
-            fifteen_minute_radius = 15 * step_size
+            accessibility_radius = self.threshold * step_size
 
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
-                self.graph, home_node, cutoff=fifteen_minute_radius, weight='length'
+                self.graph, home_node, cutoff=accessibility_radius, weight='length'
             ))
             parish = self._get_parish_for_node(home_node)
             

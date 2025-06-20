@@ -1,5 +1,5 @@
 from mesa.agent import Agent
-from ..base_agent import BaseAgent
+from agents.base_person_agent import BaseAgent
 import random
 import networkx as nx
 import logging
@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
+from simulation.llm_interaction_layer import EpisodicMemory
 
 class ActionType(Enum):
     """Types of actions residents can perform"""
@@ -195,7 +196,7 @@ class Resident(BaseAgent):
             # Time (in steps/minutes) to walk from building to nearest street node
             # We use ceil to ensure any non-zero distance results in at least a 1-minute penalty
             self.home_access_time = math.ceil(self.attributes['access_distance'] / self.step_size)
-            print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
+            # print(f"DEBUG: Resident {self.unique_id} has a home access time penalty of {self.home_access_time} minutes.")
         else:
             self.home_access_time = 0
         
@@ -250,6 +251,7 @@ class Resident(BaseAgent):
         """
         # For LLM-enabled agents, use path selection instead of simple shortest path
         if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+            print(f"DEBUG: Resident {self.unique_id} using LLM for travel time calculation")
             return self._calculate_travel_time_with_path_selection(from_node, to_node)
         
         # Standard shortest path calculation for non-LLM agents
@@ -329,6 +331,7 @@ class Resident(BaseAgent):
             else:
                 # Use LLM to score and select the best path
                 selected_path = self._select_path_with_llm(path_options, from_node, to_node)
+                print(f"DEBUG: Resident {self.unique_id} has selected a path between multiple ones : {selected_path}")
             
             # Store the selected path for actual travel
             self.selected_travel_path = selected_path
@@ -362,8 +365,8 @@ class Resident(BaseAgent):
         is_going_home = target_node == self.home_node
         
         if (is_starting_from_home or is_going_home) and self.current_node != target_node:
-            print(f"DEBUG: Resident {self.unique_id} trip to/from home. Base travel time: {travel_time} min. Adding access penalty: {self.home_access_time} min.")
             travel_time += self.home_access_time
+            # print(f"DEBUG: Resident {self.unique_id} trip to/from home. Base travel time: {travel_time} min. Adding access penalty: {self.home_access_time} min.")
         
         self.traveling = True
         self.travel_time_remaining = travel_time
@@ -619,43 +622,103 @@ class Resident(BaseAgent):
             return self._choose_need_based_target()
         
         try:
-            # Create agent state for LLM
-            agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+            # Create agent state for LLM using the helper method if available
+            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
+                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
+            else:
+                # Fallback: create a basic agent state dict
+                agent_state = {
+                    'age': getattr(self, 'age', 30),
+                    'current_needs': getattr(self, 'current_needs', {}),
+                    'agent_id': str(self.unique_id)
+                }
             
             # Create observation for LLM
             observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
+            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
             
             # Get episodic memories (recent POI visits)
             episodic_memories = self._get_episodic_memories()
+            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
             
-            # Get LLM decision
-            decision = self.model.llm_interaction_layer.get_agent_decision(
-                agent_state=agent_state,
-                observation=observation,
-                episodic_memories=episodic_memories,
-                agent_complexity="standard",
-                latency_requirement="normal"
-            )
+            # Get LLM decision using the new target decision method with CoT
+            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
+                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal",
+                    simulation_context={'simulation_type': 'fifteen_minute_city'}
+                )
+            else:
+                # Fallback to generic method
+                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal"
+                )
             
-            # Parse the LLM decision to extract POI type or action
-            target = self._parse_llm_decision(decision)
+            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
+            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
+            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
             
-            # Update emotional state based on decision confidence
-            if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
-                experience = {
-                    'type': 'decision_making',
-                    'outcome': 'positive' if decision.confidence > 0.7 else 'neutral',
-                    'satisfaction': decision.confidence,
-                    'details': f"Made decision: {decision.action}"
-                }
-                self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
+            # Parse the LLM's decision and act on it
+            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
+                action = llm_decision.action.lower().strip()
+                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
+                
+                # Map standardized decision actions to POI types or special actions
+                if action == 'go_home':
+                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
+                    return 'home'
+                elif action == 'stay_put':
+                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
+                    return None
+                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
+                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
+                    return action
+                else:
+                    # Try to map other actions to POI types
+                    action_to_poi = {
+                        'eat': 'restaurant',
+                        'food': 'restaurant',
+                        'shopping': 'shop',
+                        'buy': 'shop',
+                        'health': 'hospital',
+                        'medical': 'hospital',
+                        'exercise': 'gym',
+                        'fitness': 'gym',
+                        'relax': 'park',
+                        'nature': 'park',
+                        'study': 'library',
+                        'read': 'library',
+                        'movie': 'cinema',
+                        'entertainment': 'cinema',
+                        'medicine': 'pharmacy',
+                        'money': 'bank',
+                        'groceries': 'supermarket'
+                    }
+                    
+                    for keyword, poi_type in action_to_poi.items():
+                        if keyword in action:
+                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
+                            return poi_type
+                    
+                    # If no mapping found, log and return None
+                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
+                    return None
             
-            return target
-            
+            # Fallback if no valid action is returned
+            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
+            return self._make_need_based_movement_decision()
+
         except Exception as e:
-            self.logger.error(f"Error in LLM-based target selection: {e}")
-            # Fall back to need-based movement
-            return self._choose_need_based_target()
+            self.logger.error(f"Error in LLM movement decision: {e}")
+            return self._make_need_based_movement_decision()
     
     def _get_episodic_memories(self):
         """
@@ -664,8 +727,6 @@ class Resident(BaseAgent):
         Returns:
             List of EpisodicMemory objects
         """
-        from ...simulation.llm_interaction_layer import EpisodicMemory
-        
         memories = []
         
         # Convert recent POI visits to episodic memories
@@ -695,38 +756,48 @@ class Resident(BaseAgent):
         Returns:
             POI type to move to, 'home', or None
         """
-        action = decision.action.lower()
-        
-        # Check if the action is to go home
-        if 'home' in action or 'return' in action:
-            return 'home'
-        
-        # Check if the action is to wait/stay
-        if 'wait' in action or 'stay' in action or 'rest' in action:
+        try:
+            # Check if decision has the expected action attribute
+            if not hasattr(decision, 'action') or decision.action is None:
+                self.logger.warning(f"Decision object missing action attribute: {decision}")
+                return None
+            
+            action = str(decision.action).lower()
+            
+            # Check if the action is to go home
+            if 'home' in action or 'return' in action:
+                return 'home'
+            
+            # Check if the action is to wait/stay
+            if 'wait' in action or 'stay' in action or 'rest' in action:
+                return None
+            
+            # Try to extract POI type from the action
+            poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
+                        'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
+            
+            for poi_type in poi_types:
+                if poi_type in action:
+                    return poi_type
+            
+            # If no specific POI type found, try to infer from action keywords
+            if 'eat' in action or 'food' in action or 'hungry' in action:
+                return 'restaurant'
+            elif 'shop' in action or 'buy' in action:
+                return 'shop'
+            elif 'health' in action or 'medical' in action:
+                return 'hospital'
+            elif 'exercise' in action or 'fitness' in action:
+                return 'gym'
+            elif 'relax' in action or 'nature' in action:
+                return 'park'
+            
+            # Default: return None to stay put
             return None
-        
-        # Try to extract POI type from the action
-        poi_types = ['restaurant', 'cafe', 'shop', 'hospital', 'school', 'park', 
-                    'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']
-        
-        for poi_type in poi_types:
-            if poi_type in action:
-                return poi_type
-        
-        # If no specific POI type found, try to infer from action keywords
-        if 'eat' in action or 'food' in action or 'hungry' in action:
-            return 'restaurant'
-        elif 'shop' in action or 'buy' in action:
-            return 'shop'
-        elif 'health' in action or 'medical' in action:
-            return 'hospital'
-        elif 'exercise' in action or 'fitness' in action:
-            return 'gym'
-        elif 'relax' in action or 'nature' in action:
-            return 'park'
-        
-        # Default: return None to stay put
-        return None
+            
+        except Exception as e:
+            self.logger.error(f"Error parsing LLM decision: {e}, decision: {decision}")
+            return None
 
     def _satisfy_needs_at_poi(self, poi_type):
         """
@@ -777,50 +848,50 @@ class Resident(BaseAgent):
                     self.geometry = self.destination_geometry
                     self.visited_pois.append(self.destination_node)
                     
-                    # Add resident to POI's visitors if it's a POI agent
-                    visited_poi_type = None
+                    # Find the POI agent at the destination
                     visited_poi_agent = None
                     for poi in self.model.poi_agents:
-                        if poi.node_id == self.destination_node and hasattr(poi, 'visitors'):
-                            poi.visitors.add(self.unique_id)
-                            visited_poi_type = poi.poi_type
+                        if poi.node_id == self.destination_node:
                             visited_poi_agent = poi
-                            # --- MEMORY MODULE: Record visit ---
-                            self.memory['visited_pois'].append({
-                                'step': getattr(self.model, 'step_count', None),
-                                'poi_id': poi.unique_id,
-                                'poi_type': poi.poi_type,
-                                'category': getattr(poi, 'category', None),
-                                'income': self.attributes['income']
-                            })
-                            
-                            # Track POI visit in output controller
-                            if visited_poi_agent and hasattr(self.model, 'output_controller'):
-                                poi_category = getattr(visited_poi_agent, 'category', 'other')
-                                self.model.output_controller.track_poi_visit(poi_category)
-                            
                             break
                     
-                    # Start waiting at POI if it has waiting time
-                    if visited_poi_agent and hasattr(visited_poi_agent, 'get_waiting_time'):
-                        waiting_time = visited_poi_agent.get_waiting_time()
-                        if waiting_time > 0:
-                            # Determine action based on POI type and simulation settings
-                            action = self._select_action_at_poi(visited_poi_agent, waiting_time)
-                            self._start_action(action)
-                            
-                            # Track waiting time in output controller
-                            if hasattr(self.model, 'output_controller'):
-                                poi_category = getattr(visited_poi_agent, 'category', 'other')
-                                self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
-                    
-                    # Satisfy needs if we're using need-based movement and visited a POI
-                    if self.movement_behavior == 'need-based' and visited_poi_type:
-                        self._satisfy_needs_at_poi(visited_poi_type)
-                    
-                    # Update emotional state if LLM behavior is enabled
-                    if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
-                        self._update_emotional_state_from_poi_visit(visited_poi_type, visited_poi_agent)
+                    if visited_poi_agent:
+                        # Add self to the POI's visitor list
+                        visited_poi_agent.add_visitor(self.unique_id)
+                        
+                        # --- MEMORY MODULE: Record visit ---
+                        self.memory['visited_pois'].append({
+                            'step': getattr(self.model, 'step_count', None),
+                            'poi_id': visited_poi_agent.unique_id,
+                            'poi_type': visited_poi_agent.poi_type,
+                            'category': getattr(visited_poi_agent, 'category', None),
+                            'income': self.attributes['income']
+                        })
+                        
+                        # Track POI visit in output controller
+                        if hasattr(self.model, 'output_controller'):
+                            poi_category = getattr(visited_poi_agent, 'category', 'other')
+                            self.model.output_controller.track_poi_visit(poi_category)
+                        
+                        # Start waiting at POI if it has waiting time
+                        if hasattr(visited_poi_agent, 'get_waiting_time'):
+                            waiting_time = visited_poi_agent.get_waiting_time()
+                            if waiting_time > 0:
+                                # Determine action based on POI type and simulation settings
+                                action = self._select_action_at_poi(visited_poi_agent, waiting_time)
+                                self._start_action(action)
+                                
+                                # Track waiting time in output controller
+                                if hasattr(self.model, 'output_controller'):
+                                    self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
+                        
+                        # Satisfy needs if we're using need-based movement
+                        if self.movement_behavior == 'need-based':
+                            self._satisfy_needs_at_poi(visited_poi_agent.poi_type)
+                        
+                        # Update emotional state if LLM behavior is enabled
+                        if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
+                            self._update_emotional_state_from_poi_visit(visited_poi_agent.poi_type, visited_poi_agent)
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -832,6 +903,9 @@ class Resident(BaseAgent):
             # Handle ongoing actions at POIs
             if self.performing_action:
                 self.action_time_remaining -= 1
+                
+                # While performing an action, check for social interactions
+                self._check_for_social_interaction()
                 
                 # Check if action is finished
                 if self.action_time_remaining <= 0:
@@ -871,6 +945,257 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
+
+    def record_needs_snapshot(self):
+        """
+        Record a snapshot of the current needs for historical tracking and analysis.
+        This is called periodically (every 15 minutes) to track how needs evolve over time.
+        """
+        snapshot = {
+            'step': self.model.step_count,
+            'time_info': self.model.get_current_time(),
+            'needs': self.current_needs.copy(),
+            'location': {
+                'current_node': self.current_node,
+                'parish': self.parish,
+                'traveling': self.traveling,
+                'performing_action': self.performing_action
+            }
+        }
+        
+        # Add current action info if performing an action
+        if self.performing_action and self.current_action:
+            snapshot['current_action'] = {
+                'action_type': self.current_action.action_type.value,
+                'poi_type': self.current_action.poi_type,
+                'time_remaining': self.action_time_remaining
+            }
+        
+        # Store in memory for historical tracking
+        self.memory['historical_needs'].append(snapshot)
+        
+        # Optional: Log high-need situations for debugging
+        high_needs = {need: value for need, value in self.current_needs.items() if value >= 80}
+        if high_needs:
+            self.logger.debug(f"Agent {self.unique_id} has high needs: {high_needs}")
+
+    def _select_action_at_poi(self, poi_agent, waiting_time):
+        """
+        Select an appropriate action to perform at a POI based on the POI type and simulation granularity.
+        
+        Args:
+            poi_agent: The POI agent where the action will be performed
+            waiting_time: Duration in minutes for the action
+            
+        Returns:
+            Action object representing what the resident will do at the POI
+        """
+        poi_type = poi_agent.poi_type
+        
+        # Map POI types to appropriate actions based on granularity
+        if self.model.action_granularity == ActionGranularity.SIMPLE:
+            # Simple: just waiting
+            action_type = ActionType.WAITING
+            description = f"Waiting at {poi_type}"
+            
+        elif self.model.action_granularity == ActionGranularity.BASIC:
+            # Basic: map POI types to basic action types
+            poi_to_action = {
+                'restaurant': ActionType.EATING,
+                'cafe': ActionType.EATING,
+                'bar': ActionType.SOCIALIZING,
+                'pub': ActionType.SOCIALIZING,
+                'shop': ActionType.SHOPPING,
+                'supermarket': ActionType.SHOPPING,
+                'mall': ActionType.SHOPPING,
+                'hospital': ActionType.HEALTHCARE,
+                'clinic': ActionType.HEALTHCARE,
+                'pharmacy': ActionType.HEALTHCARE,
+                'library': ActionType.STUDYING,
+                'school': ActionType.STUDYING,
+                'university': ActionType.STUDYING,
+                'gym': ActionType.EXERCISING,
+                'sports_centre': ActionType.EXERCISING,
+                'park': ActionType.SOCIALIZING,
+                'cinema': ActionType.ENTERTAINMENT,
+                'theatre': ActionType.ENTERTAINMENT,
+                'bank': ActionType.BANKING,
+                'church': ActionType.WORSHIP,
+                'mosque': ActionType.WORSHIP,
+                'temple': ActionType.WORSHIP,
+                'community_centre': ActionType.SOCIALIZING
+            }
+            action_type = poi_to_action.get(poi_type, ActionType.WAITING)
+            description = f"{action_type.value.title()} at {poi_type}"
+            
+        else:  # DETAILED granularity
+            # Detailed: more specific actions based on POI type
+            poi_to_detailed_action = {
+                'restaurant': ActionType.EATING,
+                'cafe': ActionType.TALKING,
+                'bar': ActionType.SOCIALIZING,
+                'pub': ActionType.SOCIALIZING,
+                'shop': ActionType.BROWSING,
+                'supermarket': ActionType.SHOPPING,
+                'mall': ActionType.BROWSING,
+                'hospital': ActionType.CONSULTING,
+                'clinic': ActionType.CONSULTING,
+                'pharmacy': ActionType.DOING_BUSINESS,
+                'library': ActionType.READING,
+                'school': ActionType.STUDYING,
+                'university': ActionType.STUDYING,
+                'gym': ActionType.EXERCISING,
+                'sports_centre': ActionType.PLAYING,
+                'park': ActionType.SOCIALIZING,
+                'cinema': ActionType.WATCHING_MOVIE,
+                'theatre': ActionType.ENTERTAINMENT,
+                'bank': ActionType.DOING_BUSINESS,
+                'church': ActionType.PRAYING,
+                'mosque': ActionType.PRAYING,
+                'temple': ActionType.PRAYING,
+                'community_centre': ActionType.TALKING
+            }
+            action_type = poi_to_detailed_action.get(poi_type, ActionType.WAITING)
+            description = f"{action_type.value.title()} at {poi_type}"
+        
+        # Determine which needs this action might satisfy
+        needs_satisfied = {}
+        if action_type in [ActionType.EATING]:
+            needs_satisfied['food'] = random.randint(20, 40)
+        elif action_type in [ActionType.SOCIALIZING, ActionType.TALKING]:
+            needs_satisfied['social'] = random.randint(15, 30)
+        elif action_type in [ActionType.EXERCISING, ActionType.PLAYING]:
+            needs_satisfied['health'] = random.randint(10, 25)
+            needs_satisfied['recreation'] = random.randint(15, 30)
+        elif action_type in [ActionType.SHOPPING, ActionType.BROWSING]:
+            needs_satisfied['shopping'] = random.randint(20, 35)
+        elif action_type in [ActionType.HEALTHCARE, ActionType.CONSULTING]:
+            needs_satisfied['health'] = random.randint(25, 50)
+        elif action_type in [ActionType.ENTERTAINMENT, ActionType.WATCHING_MOVIE]:
+            needs_satisfied['recreation'] = random.randint(20, 40)
+        elif action_type in [ActionType.STUDYING, ActionType.READING]:
+            needs_satisfied['education'] = random.randint(15, 30)
+        elif action_type in [ActionType.WORSHIP, ActionType.PRAYING]:
+            needs_satisfied['spiritual'] = random.randint(20, 40)
+        elif action_type in [ActionType.BANKING, ActionType.DOING_BUSINESS]:
+            needs_satisfied['financial'] = random.randint(15, 25)
+        
+        # Create and return the action
+        return Action(
+            action_type=action_type,
+            duration=waiting_time,
+            poi_type=poi_type,
+            poi_id=poi_agent.unique_id,
+            description=description,
+            needs_satisfied=needs_satisfied,
+            social_interaction=(action_type in [ActionType.SOCIALIZING, ActionType.TALKING]),
+            context={'poi_category': getattr(poi_agent, 'category', poi_type)}
+        )
+
+    def _start_action(self, action: Action):
+        """Begin an action at a POI."""
+        self.performing_action = True
+        self.current_action = action
+        self.action_time_remaining = action.duration
+        self.action_history.append(action)
+
+    def _complete_current_action(self):
+        """Complete the current action and clean up."""
+        if self.current_action and self.current_action.poi_id:
+            # Find the POI agent to notify them of departure
+            poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
+            if poi_agent:
+                poi_agent.remove_visitor(self.unique_id)
+        
+        self.performing_action = False
+        self.current_action = None
+        self.action_time_remaining = 0
+
+    def _get_poi_socialness_factor(self, poi_type: str) -> float:
+        """Get a factor representing how 'social' a POI type is."""
+        social_pois = {
+            # High socialness
+            "cafe": 1.5, "bar": 1.5, "pub": 1.5, "community_centre": 1.5, "park": 1.4,
+            # Medium socialness
+            "restaurant": 1.2, "library": 1.1, "gym": 1.1, "sports_centre": 1.1,
+            # Low socialness
+            "shop": 0.8, "supermarket": 0.7, "mall": 0.8,
+            # Very low socialness
+            "hospital": 0.5, "clinic": 0.5, "pharmacy": 0.4, "bank": 0.6
+        }
+        return social_pois.get(poi_type, 1.0) # Default to 1.0
+
+    def _check_for_social_interaction(self):
+        """Check for and execute social interactions with co-located agents."""
+        if not self.performing_action or not self.current_action.poi_id:
+            return
+
+        # Get the POI agent where the action is happening
+        poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
+        if not poi_agent or len(poi_agent.visitors) < 2:
+            return
+
+        # Don't check at every single step. Chance to check is proportional to social_propensity.
+        if random.random() > (self.social_propensity * 0.1): # e.g., 5% chance per step for 0.5 propensity
+            return
+
+        # Check for interactions with other visitors
+        for other_agent_id in poi_agent.visitors:
+            if other_agent_id == self.unique_id:
+                continue
+
+            other_agent = self.model.get_agent_by_id(other_agent_id)
+            if not other_agent or not isinstance(other_agent, Resident):
+                continue
+
+            # --- Calculate Interaction Score ---
+            # 1. Base score from POI socialness
+            interaction_score = self._get_poi_socialness_factor(poi_agent.poi_type)
+
+            # 2. Boost score if already in contacts
+            if other_agent_id in self.contacts:
+                interaction_score *= 5.0
+            
+            # 3. Boost score based on homophily (age similarity)
+            age_difference = abs(self.age - other_agent.age)
+            age_factor = max(0, 1 - (age_difference / 20)) # 1.0 if same age, 0.0 if 20+ years apart
+            interaction_score *= (1 + age_factor)
+
+            # 4. Factor in this agent's social propensity
+            interaction_score *= self.social_propensity
+
+            # --- Decide if Interaction Happens ---
+            # Interaction happens if score > random threshold (e.g., 1.5)
+            if interaction_score > (random.random() * 5 + 1.0): # Threshold between 1.0 and 6.0
+                self._execute_social_interaction(other_agent)
+                # Only one interaction per check to keep it simple
+                break
+    
+    def _execute_social_interaction(self, other_agent):
+        """Execute the outcomes of a social interaction."""
+        self.logger.info(f"Agent {self.unique_id} is interacting with {other_agent.unique_id}")
+
+        # Increment the model's interaction counter
+        # Each agent involved increments it by 0.5 to make 1 full interaction.
+        self.model.interactions_this_step += 0.5
+
+        # 1. Record the interaction
+        timestamp = self.model.step_count
+        interaction = {'type': 'social', 'with': other_agent.unique_id, 'timestamp': timestamp}
+        self.interaction_history.append(interaction)
+        other_agent.interaction_history.append({'type': 'social', 'with': self.unique_id, 'timestamp': timestamp})
+
+        # 2. Update social needs (decrease them)
+        satisfaction = random.randint(10, 25)
+        self.satisfy_need_at_poi('social', satisfaction)
+        other_agent.satisfy_need_at_poi('social', satisfaction)
+
+        # 3. Form a new connection if they are strangers
+        if other_agent.unique_id not in self.contacts:
+            if random.random() < 0.25: # 25% chance to form a lasting connection
+                self.contacts.add(other_agent.unique_id)
+                other_agent.contacts.add(self.unique_id)
+                self.logger.info(f"New social connection formed between {self.unique_id} and {other_agent.unique_id}")
 
     def _make_random_movement_decision(self):
         """
@@ -960,27 +1285,468 @@ class Resident(BaseAgent):
         return None
 
     def _make_llm_movement_decision(self):
-        """
-        Make an LLM-based movement decision.
-        This is a placeholder for future sophisticated LLM decision making.
+        """Make an LLM-based movement decision."""
+        if not self.model.llm_enabled:
+            return self._make_need_based_movement_decision()
+
+        try:
+            # Check if LLM components are available
+            if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
+                self.logger.warning("LLM interaction layer not available, falling back to need-based movement")
+                return self._make_need_based_movement_decision()
+            
+            # Create agent state for LLM using the helper method if available
+            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
+                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
+                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
+            else:
+                # Fallback: create a basic agent state dict
+                agent_state = {
+                    'age': getattr(self, 'age', 30),
+                    'current_needs': getattr(self, 'current_needs', {}),
+                    'agent_id': str(self.unique_id)
+                }
+            
+            # Create observation for LLM
+            observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
+            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
+            
+            # Get episodic memories (recent POI visits)
+            episodic_memories = self._get_episodic_memories()
+            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
+            
+            # Get LLM decision using the new target decision method with CoT
+            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
+                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal",
+                    simulation_context={'simulation_type': 'fifteen_minute_city'}
+                )
+            else:
+                # Fallback to generic method
+                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
+                    agent_state=agent_state,
+                    observation=observation,
+                    episodic_memories=episodic_memories,
+                    agent_complexity="standard",
+                    latency_requirement="normal"
+                )
+            
+            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
+            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
+            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
+            
+            # Parse the LLM's decision and act on it
+            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
+                action = llm_decision.action.lower().strip()
+                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
+                
+                # Map standardized decision actions to POI types or special actions
+                if action == 'go_home':
+                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
+                    return 'home'
+                elif action == 'stay_put':
+                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
+                    return None
+                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
+                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
+                    return action
+                else:
+                    # Try to map other actions to POI types
+                    action_to_poi = {
+                        'eat': 'restaurant',
+                        'food': 'restaurant',
+                        'shopping': 'shop',
+                        'buy': 'shop',
+                        'health': 'hospital',
+                        'medical': 'hospital',
+                        'exercise': 'gym',
+                        'fitness': 'gym',
+                        'relax': 'park',
+                        'nature': 'park',
+                        'study': 'library',
+                        'read': 'library',
+                        'movie': 'cinema',
+                        'entertainment': 'cinema',
+                        'medicine': 'pharmacy',
+                        'money': 'bank',
+                        'groceries': 'supermarket'
+                    }
+                    
+                    for keyword, poi_type in action_to_poi.items():
+                        if keyword in action:
+                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
+                            return poi_type
+                    
+                    # If no mapping found, log and return None
+                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
+                    return None
+            
+            # Fallback if no valid action is returned
+            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
+            return self._make_need_based_movement_decision()
+
+        except Exception as e:
+            self.logger.error(f"Error in LLM movement decision: {e}")
+            return self._make_need_based_movement_decision()
         
-        In the future, this could:
-        - Evaluate specific POI options with their attractiveness
-        - Consider complex need hierarchies
-        - Factor in social context, weather, events, etc.
-        - Make more human-like decisions
+    def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
+        """
+        Generate 4 shortest path options between two nodes.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            max_paths: Maximum number of paths to generate (default: 4)
         
         Returns:
-            POI type to move to, 'home' to go home, or None to stay put
+            List of path dictionaries with OSM metadata for LLM scoring
         """
-        # For now, fall back to existing LLM logic
-        # This will be replaced with more sophisticated decision making later
         try:
-            return self._choose_llm_based_target()
+            # Generate k-shortest paths using NetworkX
+            paths = self._get_k_shortest_paths(from_node, to_node, max_paths)
+            
+            # Extract OSM metadata for each path
+            path_options = []
+            
+            for i, path_nodes in enumerate(paths):
+                if path_nodes:  # Ensure path exists
+                    path_data = self._extract_path_metadata(path_nodes, i + 1)
+                    if path_data:
+                        path_options.append(path_data)
+            print(f"DEBUG: Resident {self.unique_id} has generated {len(path_options)} path options")
+            return path_options
+            
         except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.warning(f"LLM decision making failed, falling back to need-based: {e}")
-            return self._make_need_based_movement_decision()
+            self.logger.error(f"Error generating path options: {e}")
+            return []
+
+    def _get_k_shortest_paths(self, from_node, to_node, k):
+        """
+        Get k shortest paths using simple approach.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            k: Number of paths to find
+            
+        Returns:
+            List of path node lists
+        """
+        try:
+            import itertools
+            
+            paths = []
+            graph = self.model.graph.copy()
+            
+            # Get the shortest path first
+            try:
+                shortest_path = nx.shortest_path(graph, from_node, to_node, weight='length')
+                paths.append(shortest_path)
+            except nx.NetworkXNoPath:
+                return []
+            
+            # Try to find alternative paths by temporarily removing edges
+            for attempt in range(k - 1):
+                if len(paths) >= k:
+                    break
+                
+                # Create a copy of the graph and remove some edges from previous paths
+                temp_graph = graph.copy()
+                
+                # Remove some edges from existing paths to force alternatives
+                for existing_path in paths:
+                    # Ensure existing_path is actually a list of nodes
+                    if not isinstance(existing_path, (list, tuple)) or len(existing_path) <= 2:
+                        continue
+                    
+                    # Remove middle edges to force different routes
+                    edges_to_remove = []
+                    try:
+                        for i in range(1, min(3, len(existing_path) - 1)):  # Remove 1-2 middle edges
+                            if i < len(existing_path) - 1:
+                                node1, node2 = existing_path[i], existing_path[i + 1]
+                                # Ensure nodes are valid
+                                if node1 is not None and node2 is not None:
+                                    edges_to_remove.append((node1, node2))
+                        
+                        for edge in edges_to_remove:
+                            if temp_graph.has_edge(edge[0], edge[1]):
+                                temp_graph.remove_edge(edge[0], edge[1])
+                    except (IndexError, TypeError) as e:
+                        self.logger.warning(f"Error processing path for edge removal: {e}")
+                        continue
+                
+                # Try to find a path in the modified graph
+                try:
+                    alt_path = nx.shortest_path(temp_graph, from_node, to_node, weight='length')
+                    # Check if this path is sufficiently different
+                    if not any(self._paths_are_same(alt_path, existing) for existing in paths):
+                        paths.append(alt_path)
+                except nx.NetworkXNoPath:
+                    continue
+            
+            return paths
+            
+        except Exception as e:
+            self.logger.error(f"Error in k-shortest paths: {e}")
+            return []
+
+    def _extract_path_metadata(self, path_nodes, path_number):
+        """
+        Extract OSM metadata from a path for LLM scoring.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            path_number: Path identifier number
+            
+        Returns:
+            Dictionary with path metadata
+        """
+        try:
+            graph = self.model.graph
+            
+            # Calculate basic metrics
+            path_length = 0
+            road_types = []
+            surface_types = []
+            max_speeds = []
+            
+            # Analyze each edge in the path
+            for i in range(len(path_nodes) - 1):
+                node1, node2 = path_nodes[i], path_nodes[i + 1]
+                
+                # Get edge data - handle both single edge and multi-edge cases
+                edge_data = graph.get_edge_data(node1, node2)
+                if edge_data is None:
+                    continue
+                
+                # Handle MultiGraph case where edge_data might be a dict of dicts
+                if isinstance(edge_data, dict) and not any(key in edge_data for key in ['length', 'highway']):
+                    # This is likely a MultiGraph with multiple edges, take the first one
+                    edge_data = list(edge_data.values())[0] if edge_data else {}
+                
+                # Extract length
+                edge_length = edge_data.get('length', 0)
+                path_length += edge_length
+                
+                # Extract road type (highway tag) - handle complex data types
+                highway_type = edge_data.get('highway', 'unclassified')
+                
+                if isinstance(highway_type, (list, tuple)):
+                    highway_type = highway_type[0] if highway_type else 'unclassified'
+                elif isinstance(highway_type, dict):
+                    highway_type = 'complex_type'  # Handle complex highway data
+                elif not isinstance(highway_type, str):
+                    highway_type = str(highway_type)
+                
+                road_types.append(str(highway_type))
+                
+                # Extract surface type if available - handle complex data types
+                surface = edge_data.get('surface', 'unknown')
+                
+                if isinstance(surface, (list, tuple)):
+                    surface = surface[0] if surface else 'unknown'
+                elif isinstance(surface, dict):
+                    surface = 'complex_surface'  # Handle complex surface data
+                elif not isinstance(surface, str):
+                    surface = str(surface)
+                
+                surface_types.append(str(surface))
+                
+                # Extract max speed if available - handle complex data types
+                max_speed = edge_data.get('maxspeed', 'unknown')
+                
+                if isinstance(max_speed, (list, tuple)):
+                    max_speed = max_speed[0] if max_speed else 'unknown'
+                elif isinstance(max_speed, dict):
+                    max_speed = 'complex_speed'  # Handle complex speed data
+                elif not isinstance(max_speed, str):
+                    max_speed = str(max_speed)
+                
+                max_speeds.append(str(max_speed))
+            
+            # Calculate travel time
+            travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
+            
+            # Determine dominant road types
+            road_type_counts = {}
+            for road_type in road_types:
+                if not isinstance(road_type, str):
+                    road_type = str(road_type)
+                road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
+            
+            dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
+            
+            # Create simplified metadata for LLM - safely handle sets with proper string conversion
+            try:
+                unique_road_types = list(set(road_types))
+            except TypeError:
+                # Fallback if any road_types are unhashable
+                unique_road_types = list(dict.fromkeys(road_types))  # Remove duplicates preserving order
+            
+            try:
+                unique_surface_types = list(set([s for s in surface_types if s != 'unknown']))
+            except TypeError:
+                # Fallback if any surface_types are unhashable
+                filtered_surfaces = [s for s in surface_types if s != 'unknown']
+                unique_surface_types = list(dict.fromkeys(filtered_surfaces))
+            
+            return {
+                'path_id': path_number,
+                'path_nodes': path_nodes,
+                'distance_meters': round(path_length, 0),
+                'travel_time_minutes': round(travel_time_minutes, 1),
+                'dominant_road_type': dominant_road_type,
+                'road_types': unique_road_types,
+                'surface_types': unique_surface_types,
+                'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
+                'total_segments': len(path_nodes) - 1
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting path metadata: {e}")
+            return None
+
+    def _select_path_with_llm(self, path_options, from_node, to_node):
+        """
+        Use LLM to score paths and select the best one.
+        Delegates to LLM interaction layer to avoid code duplication.
+        
+        Args:
+            path_options: List of path dictionaries with metadata
+            from_node: Starting node ID
+            to_node: Destination node ID
+            
+        Returns:
+            Selected path nodes or None if LLM fails
+        """
+        if not self.model.llm_enabled or not path_options:
+            # Fallback to shortest path when LLM disabled
+            return self._fallback_path_selection(path_options)
+        
+        try:
+            # Prepare context for LLM
+            context = {
+                'time_of_day': self.model.hour_of_day,
+                'from_node': from_node,
+                'to_node': to_node
+            }
+            
+            # Create agent state for LLM
+            agent_state = {
+                'age': getattr(self, 'age', 30),
+                'current_needs': getattr(self, 'current_needs', {}),
+                'agent_id': str(self.unique_id)
+            }
+            
+            # Delegate to LLM interaction layer
+            response = self.model.llm_interaction_layer.score_path_options(
+                agent_state, path_options, context
+            )
+            
+            # Extract selected path
+            if 0 <= response.selected_path_id < len(path_options):
+                selected_path = path_options[response.selected_path_id]
+                self.logger.info(f"LLM selected path {response.selected_path_id + 1}: {response.reasoning}")
+                return selected_path['path_nodes']
+            else:
+                return self._fallback_path_selection(path_options)
+                
+        except Exception as e:
+            self.logger.error(f"Error in LLM path selection: {e}")
+            return self._fallback_path_selection(path_options)
+
+    def _fallback_path_selection(self, path_options):
+        """
+        Fallback path selection - choose shortest time.
+        
+        Args:
+            path_options: Available path options
+            
+        Returns:
+            Path nodes of shortest time path or None
+        """
+        if not path_options:
+            return None
+        
+        # Select path with shortest travel time
+        shortest_path = min(path_options, key=lambda p: p['travel_time_minutes'])
+        return shortest_path['path_nodes']
+
+    def _paths_are_same(self, path1, path2):
+        """
+        Check if two paths are essentially the same.
+        
+        Args:
+            path1: First path (list of node IDs)
+            path2: Second path (list of node IDs)
+            
+        Returns:
+            Boolean indicating if paths are the same
+        """
+        if not path1 or not path2:
+            return False
+            
+        # Compare the actual node lists
+        return path1 == path2
+
+    def _calculate_time_for_path(self, path_data):
+        """
+        Calculate travel time for a specific path.
+        
+        Args:
+            path_data: Path dictionary with characteristics
+            
+        Returns:
+            Travel time in minutes
+        """
+        return self._calculate_time_for_path_nodes(path_data['path_nodes'])
+
+    def _calculate_time_for_path_nodes(self, path_nodes):
+        """
+        Calculate travel time for a list of path nodes.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            
+        Returns:
+            Travel time in minutes
+        """
+        total_distance = 0
+        
+        for i in range(len(path_nodes) - 1):
+            # Handle both simple graphs and MultiGraphs properly
+            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1])
+            
+            if edge_data is None:
+                # No edge found, use default distance
+                edge_length = 100  # Default 100m if no data
+            elif isinstance(edge_data, dict):
+                # Check if this is a MultiGraph (dict of dicts) or simple graph (single dict)
+                if any(key in edge_data for key in ['length', 'highway', 'osmid']):
+                    # Simple graph - edge_data is the actual edge attributes
+                    edge_length = edge_data.get('length', 100)
+                else:
+                    # MultiGraph - edge_data is a dict of edge keys, take the first one
+                    first_edge_key = list(edge_data.keys())[0] if edge_data else 0
+                    actual_edge_data = edge_data.get(first_edge_key, {})
+                    edge_length = actual_edge_data.get('length', 100)
+            else:
+                # Unexpected data type
+                edge_length = 100
+            
+            total_distance += edge_length
+        
+        # Use agent's step size to calculate time
+        is_elderly = self.age >= 65
+        step_size = 60.0 if is_elderly else 80.0
+        print(f"DEBUG: path time calculated!")
+        
+        return max(1, math.ceil(total_distance / step_size))
 
     def set_activity_preferences(self, preferences):
         """
@@ -991,27 +1757,7 @@ class Resident(BaseAgent):
         """
         self.attributes['activity_preferences'] = preferences
     
-    def add_to_social_network(self, agent_id):
-        """
-        Add an agent to this agent's social network.
-        
-        Args:
-            agent_id: ID of the agent to add
-        """
-        if agent_id != self.unique_id and agent_id not in self.social_network:
-            self.social_network.append(agent_id)
-            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
-    
-    def remove_from_social_network(self, agent_id):
-        """
-        Remove an agent from this agent's social network.
-        
-        Args:
-            agent_id: ID of the agent to remove
-        """
-        if agent_id in self.social_network:
-            self.social_network.remove(agent_id)
-            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
+
     
     def generate_needs(self, method=None):
         """
@@ -1235,7 +1981,6 @@ class Resident(BaseAgent):
                 elif dominant_emotion == EmotionalState.ANXIOUS:
                     adjustments["healthcare"] *= 1.4  # More healthcare when anxious
                     adjustments["social"] *= 1.2      # More social support when anxious
-                    adjustments["recreation"] *= 0.9  # Less recreation when anxious
                 elif dominant_emotion == EmotionalState.FRUSTRATED:
                     adjustments["recreation"] *= 1.2  # More recreation when frustrated
                     adjustments["shopping"] *= 1.1    # Slight increase in shopping (retail therapy)

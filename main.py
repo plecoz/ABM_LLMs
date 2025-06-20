@@ -8,8 +8,8 @@ import os
 from config.poi_config import get_active_poi_config
 
 from environment.fifteenminutescity.city_network import load_city_network, get_or_load_city_network
-from environment.fifteenminutescity.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois, get_or_fetch_environment_data
-from simulation.fifteenminutescity_model import FifteenMinuteCity
+from environment.fifteenminutescity.pois import fetch_pois, filter_pois, get_or_fetch_pois, get_or_fetch_environment_data
+from simulation.fifteenminutescity.fifteenminutescity_model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import sys
 import re
@@ -95,84 +95,6 @@ def load_parish_demographics(demographics_path=None):
     except Exception as e:
         print(f"Warning: Could not load parish demographics: {e}")
         return {}
-
-def create_example_parish_demographics(parishes_gdf, output_path='config/parish_demographics.json'):
-    """
-    Create an example parish demographics file with different income distributions per parish.
-    
-    Args:
-        parishes_gdf: GeoDataFrame with parishes
-        output_path: Path to save the example demographics file
-        
-    Returns:
-        Dictionary with the created demographics
-    """
-    if parishes_gdf is None:
-        print("No parishes data available. Cannot create example demographics.")
-        return {}
-        
-    parish_demographics = {}
-    
-    # Create varying demographics for each parish
-    for i, parish in parishes_gdf.iterrows():
-        parish_name = parish['name']
-        
-        # Create different income distributions based on parish index
-        # This is just an example - in a real scenario, you'd use actual data
-        if i % 3 == 0:  # Wealthy parishes
-            income_dist = {"low": 0.1, "medium": 0.3, "high": 0.6}
-            income_ranges = {
-                "low": (30000, 50000),
-                "medium": (50001, 150000),
-                "high": (150001, 1000000)
-            }
-        elif i % 3 == 1:  # Middle-class parishes
-            income_dist = {"low": 0.2, "medium": 0.6, "high": 0.2}
-            income_ranges = {
-                "low": (15000, 40000),
-                "medium": (40001, 120000),
-                "high": (120001, 500000)
-            }
-        else:  # Working-class parishes
-            income_dist = {"low": 0.6, "medium": 0.3, "high": 0.1}
-            income_ranges = {
-                "low": (8000, 25000),
-                "medium": (25001, 80000),
-                "high": (80001, 300000)
-            }
-            
-        # Also vary age distributions
-        if i % 2 == 0:  # Younger parishes
-            age_dist = {"0-18": 0.3, "19-35": 0.4, "36-65": 0.2, "65+": 0.1}
-        else:  # Older parishes
-            age_dist = {"0-18": 0.1, "19-35": 0.2, "36-65": 0.4, "65+": 0.3}
-            
-        parish_demographics[parish_name] = {
-            "income_distribution": income_dist,
-            "income_ranges": income_ranges,
-            "age_distribution": age_dist,
-            # Keep the same gender and education distributions as global
-            "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
-            "education_distribution": {
-                "no_education": 0.1,
-                "primary": 0.2,
-                "high_school": 0.4,
-                "bachelor": 0.2,
-                "master": 0.08,
-                "phd": 0.02
-            }
-        }
-    
-    # Save the example demographics to a file
-    try:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, 'w') as f:
-            json.dump(parish_demographics, f, indent=4)
-        print(f"Example parish demographics saved to {output_path}")
-    except Exception as e:
-        print(f"Warning: Could not save example demographics: {e}")
-    
-    return parish_demographics
 
 def clean_parish_name(name):
     """
@@ -397,7 +319,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15):
     """
     Run the 15-minute city simulation.
     
@@ -410,6 +332,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_environment: Path to load the environment data from (instead of OSM)
         save_json_report: Path to save the detailed JSON report (optional)
         city: Name of the city for the simulation (default: 'Macau, China')
+        threshold: Time threshold in minutes for accessibility (default: 15)
     """
     # Get parishes path based on city if not explicitly provided
     if parishes_path is None:
@@ -464,12 +387,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
                     all_parish_names, num_residents, random_distribution
                 )
     
-    # Load or create parish-specific demographics
-    parish_demographics = {}
-    if create_example_demographics and parishes_gdf is not None:
-        parish_demographics = create_example_parish_demographics(parishes_gdf)
-    else:
-        parish_demographics = load_parish_demographics(parish_demographics_path)
+    # Load parish-specific demographics
+    parish_demographics = load_parish_demographics(parish_demographics_path)
     
     # Get POI configuration from config file if not explicitly provided
     if selected_pois is None:
@@ -480,19 +399,14 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     else:
         print("Using all available POI types")
     
-    # Fetch POIs - either dummy, from file, or from OSM
-    if use_dummy_pois:
-        print("Using dummy POIs for testing...")
-        pois = create_dummy_pois(graph, num_per_category=5)
-    else:
-        # Use the new save/load functionality for POIs
-        pois = get_or_fetch_pois(
-            graph=graph,
-            place_name=city,
-            selected_pois=selected_pois,
-            save_path=save_pois,
-            load_path=load_pois
-        )
+    # Use the new save/load functionality for POIs
+    pois = get_or_fetch_pois(
+        graph=graph,
+        place_name=city,
+        selected_pois=selected_pois,
+        save_path=save_pois,
+        load_path=load_pois
+    )
     
     # Fetch or load environment data (buildings, water bodies, cliffs)
     environment_data = get_or_fetch_environment_data(
@@ -544,7 +458,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         movement_behavior=movement_behavior,
         city=city,
         residential_buildings=residential_buildings,
-        seed=seed
+        seed=seed,
+        threshold=threshold
     )
     
     print("Starting simulation...")
@@ -589,14 +504,11 @@ if __name__ == "__main__":
     # Add seed argument at the top for visibility
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
-    parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
-    parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
-    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=5000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--residents', type=int, default=1000, help='Number of resident agents')
+    parser.add_argument('--steps', type=int, default=500, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
-    parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
-    parser.add_argument('--use-dummy-pois', action='store_true', help='Use dummy POIs for testing')
     
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
@@ -626,19 +538,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     #Good simulations :
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
-        # Get POI configuration
-    if args.essential_only:
-        try:
-            from config.poi_config import ESSENTIAL_SERVICES_ONLY
-            selected_pois = ESSENTIAL_SERVICES_ONLY
-        except ImportError:
-            print("Essential services configuration not found. Using all POIs.")
-            selected_pois = None
-    elif args.all_pois:
-        selected_pois = None
-    else:
-        # Use configuration from config file
-        selected_pois = get_active_poi_config()
+    
+    # Use configuration from config file
+    selected_pois = get_active_poi_config()
     
     run_simulation(
         num_residents=args.residents, 
@@ -646,8 +548,6 @@ if __name__ == "__main__":
         selected_pois=selected_pois,
         parishes_path=args.parishes_path,
         parish_demographics_path=args.parish_demographics,
-        create_example_demographics=args.create_example_demographics,
-        use_dummy_pois=args.use_dummy_pois,
         selected_parishes=args.parishes,
         list_parishes=args.list_parishes,
         random_distribution=args.random_distribution,
@@ -661,5 +561,6 @@ if __name__ == "__main__":
         city=args.city,
         save_environment=args.save_environment,
         load_environment=args.load_environment,
-        seed=args.seed
+        seed=args.seed,
+        threshold=args.threshold
     )

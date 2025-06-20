@@ -226,9 +226,7 @@ def fetch_pois(graph, place_name="Macau, China", selected_pois=None):
         
     except Exception as e:
         print(f"Error fetching POIs: {e}")
-        # Create some dummy POIs if real data fetching fails
-        # This ensures the simulation can still run
-        pois = create_dummy_pois(graph)
+
     
     return pois
 
@@ -262,63 +260,7 @@ def filter_pois(pois, poi_types=None):
     print(f"Filtered POIs: {total_filtered} POIs (from {total_original} total)")
     return filtered_pois
 
-def create_dummy_pois(graph, num_per_category=5):
-    """
-    Create dummy POIs for testing, with examples for each category.
-    
-    Args:
-        graph: NetworkX graph of the area
-        num_per_category: Number of POIs to create per category
-        
-    Returns:
-        Dictionary of POIs by category
-    """
-    print("Creating dummy POIs for testing...")
-    
-    # Initialize POI dictionary with the requested categories
-    pois = {
-        "daily_living": [],   # Grocery stores, banks, restaurants, barber shops, post offices
-        "healthcare": [],     # Hospitals, clinics, pharmacies
-        "education": [],      # Kindergartens, primary schools, secondary schools
-        "entertainment": [],  # Parks, libraries, museums, etc.
-        "transportation": [], # Bus stops
-        "casino": [],         # Casinos
-    }
-    
-    # Sample POI types for each category
-    category_examples = {
-        "daily_living": ['supermarket', 'bank', 'restaurant', 'cafe', 'post_office'],
-        "healthcare": ['hospital', 'clinic', 'pharmacy', 'doctor', 'dentist'],
-        "education": ['school', 'kindergarten', 'primary_school', 'secondary_school', 'university'],
-        "entertainment": ['park', 'library', 'museum', 'theater', 'gym'],
-        "transportation": ['bus_stop', 'bus_station', 'station', 'platform', 'stop_position'],
-        "casino": ['casino'],
-    }
-    
-    # Get random nodes from the graph
-    all_nodes = list(graph.nodes())
-    num_nodes_needed = num_per_category * len(pois)
-    
-    if len(all_nodes) < num_nodes_needed:
-        # If not enough nodes, allow reuse
-        selected_nodes = [all_nodes[i % len(all_nodes)] for i in range(num_nodes_needed)]
-    else:
-        # If enough nodes, select without replacement
-        selected_nodes = np.random.choice(all_nodes, size=num_nodes_needed, replace=False)
-    
-    node_index = 0
-    
-    # Create POIs for each category
-    for category, example_types in category_examples.items():
-        for i in range(num_per_category):
-            poi_type = example_types[i % len(example_types)]
-            node_id = selected_nodes[node_index]
-            node_index += 1
-            
-            pois[category].append((node_id, poi_type))
-            print(f"Added dummy {poi_type} to {category}")
-    
-    return pois
+
 
 def get_or_fetch_residential_buildings(place_name="Macau, China", save_path=None, load_path=None):
     """

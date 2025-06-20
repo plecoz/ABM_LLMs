@@ -35,6 +35,7 @@ class BaseAgent(GeoAgent):
         self.planned_activities = []
         self.movement_path = []
         self.speed = kwargs.get('speed', 1.0)  # movement speed in arbitrary units
+        self.social_propensity = kwargs.get('social_propensity', 0.5)  # Likelihood to initiate social interaction
     
         # Communication and social network related attributes
         self.contacts = set()
@@ -64,16 +65,10 @@ class BaseAgent(GeoAgent):
         self.location_history.append((step_count, self.geometry))
         
         # Make decisions about next actions
-        self._decide_next_action()
+        self._decide_next_action() 
         
-        # Move along planned path if available
-        self._move()
-        
-        # Interact with other agents
-        self._interact()
-        
-        # Execute current activity
-        self._perform_activity()
+        # Interact with other agents in the current location
+        self._check_for_social_interaction()
         
 
     def _decide_next_action(self):
@@ -85,77 +80,23 @@ class BaseAgent(GeoAgent):
             action = self.decision_module.decide_next_action(self, self.model)
             if action:
                 self.planned_activities.append(action)
-        elif hasattr(self.model, 'random'):
-            # Default simple random behavior
-            if not self.planned_activities and self.model.random.random() < 0.2:  # 20% chance
-                # 20% chance to add a new random activity
-                poi = self._select_random_poi()
-                if poi:
-                    self.planned_activities.append({
-                        'type': 'visit',
-                        'location': poi,
-                        'duration': self.model.random.randint(1, 5)
-                    })
     
-    def _move(self):
+    def _check_for_social_interaction(self):
         """
-        Move the agent along its planned path.
+        Check for and execute social interactions with other agents at the same location.
+        This method is a placeholder to be implemented by subclasses, as the logic
+        depends on how the model tracks co-located agents (e.g., at a POI).
         """
-        # If we have a movement path, follow it
-        if self.movement_path:
-            next_point = self.movement_path.pop(0)
-            self.geometry = Point(next_point)
-        # If we need to go somewhere but don't have a path yet
-        elif self.planned_activities and 'location' in self.planned_activities[0]:
-            destination = self.planned_activities[0]['location']
-            self._plan_route(destination)
-    
-    def _plan_route(self, destination):
-        """
-        Plan a route to the destination using Google Maps API or simple path.
-        In this initial implementation, we'll use a simplified straight path.
-        """
-        if hasattr(self.model, 'route_planner') and self.model.route_planner:
-            # Use the model's route planner (could be Google Maps API wrapper)
-            self.movement_path = self.model.route_planner.get_route(
-                origin=self.geometry, 
-                destination=destination
-            )
-        else:
-            # Simple linear path as fallback
-            start_x, start_y = self.geometry.x, self.geometry.y
-            end_x, end_y = destination.x, destination.y
-            
-            # Create a simple path with 5 points
-            steps = 5
-            self.movement_path = [
-                Point(
-                    start_x + (end_x - start_x) * i / steps,
-                    start_y + (end_y - start_y) * i / steps
-                )
-                for i in range(1, steps + 1)
-            ]
+        pass
     
     def _interact(self):
         """
-        Interact with nearby agents.
+        DEPRECATED: This method is too generic.
+        Interaction logic is now handled by `_check_for_social_interaction`
+        which is triggered by specific contexts (e.g., waiting at a POI).
         """
-        # Check if the model has the get_nearby_agents method
-        if not hasattr(self.model, 'get_nearby_agents'):
-            return
+        pass
             
-        # Find nearby agents
-        nearby_agents = self.model.get_nearby_agents(self)
-        
-        for agent in nearby_agents:
-            # Add to contacts
-            self.contacts.add(agent.unique_id)
-            agent.contacts.add(self.unique_id)
-            
-            # Random chance to communicate (can be replaced with more complex logic)
-            if hasattr(self.model, 'random') and self.model.random.random() < 0.3:  # 30% chance
-                self._communicate_with(agent, online=False)
-    
     def _communicate_with(self, other_agent, online=False):
         """
         Communicate with another agent.
@@ -199,51 +140,7 @@ class BaseAgent(GeoAgent):
         self.interaction_history.append(interaction)
         other_agent.interaction_history.append(interaction)
     
-    def _perform_activity(self):
-        """
-        Perform the current activity if one exists.
-        """
-        if not self.planned_activities:
-            return
-            
-        current = self.planned_activities[0]
-        
-        # If we've reached the activity location, perform it
-        if 'location' in current:
-            target_location = current['location']
-            
-            # Check if we've reached the location (within a small distance)
-            if self.geometry.distance(target_location) < 0.001:
-                # We're at the location, reduce the duration
-                if 'duration' in current:
-                    current['duration'] -= 1
-                    
-                    # If the activity is complete, remove it
-                    if current['duration'] <= 0:
-                        self.planned_activities.pop(0)
-                        self.current_activity = None
-                    else:
-                        self.current_activity = current
-                else:
-                    # No duration specified, complete immediately
-                    self.planned_activities.pop(0)
-                    self.current_activity = None
-    
-    def _select_random_poi(self):
-        """
-        Select a random point of interest to visit.
-        """
-        if not hasattr(self.model, 'random'):
-            return None
-            
-        if hasattr(self.model, 'poi_selector') and self.model.poi_selector:
-            # Use the model's POI selector if available
-            return self.model.poi_selector.select_poi(self)
-        elif hasattr(self.model, 'points_of_interest') and self.model.points_of_interest:
-            # Fallback to simple random selection from model's POIs
-            return self.model.random.choice(self.model.points_of_interest)
-        
-        return None
+
     
     def get_history(self):
         """
@@ -254,3 +151,25 @@ class BaseAgent(GeoAgent):
             'interaction_history': self.interaction_history,
             'message_history': self.message_history
         }
+    
+    def add_to_social_network(self, agent_id):
+        """
+        Add an agent to this agent's social network.
+        
+        Args:
+            agent_id: ID of the agent to add
+        """
+        if agent_id != self.unique_id and agent_id not in self.social_network:
+            self.social_network.append(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
+    
+    def remove_from_social_network(self, agent_id):
+        """
+        Remove an agent from this agent's social network.
+        
+        Args:
+            agent_id: ID of the agent to remove
+        """
+        if agent_id in self.social_network:
+            self.social_network.remove(agent_id)
+            self.attributes['social_network'] = self.social_network  # Keep attributes dict in sync
