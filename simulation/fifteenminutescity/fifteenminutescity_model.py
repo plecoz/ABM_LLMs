@@ -300,6 +300,15 @@ class FifteenMinuteCity(Model):
         else:
             if self.city == "Macau, China":
                 self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
+
+        # --- Load income distribution data (occupation -> income probabilities) ---
+        income_path = kwargs.get('income_path', 'data/demographics_macau/income.json')
+        self.income_distribution = {}
+        if self.city == "Macau, China" and income_path and os.path.exists(income_path):
+            self._load_income_distribution(income_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
         
         # --- Load parish-specific demographics if provided ---
 
@@ -490,9 +499,54 @@ class FifteenMinuteCity(Model):
             self.logger.error(f"Error loading occupation distribution data: {e}")
             self.occupation_distribution = {}
 
+    def _load_income_distribution(self, income_path):
+        """
+        Load income distribution probabilities from a JSON file.
+        Expected format: {occupation: {income_level: probability, ...}, ...}
+        """
+        try:
+            with open(income_path, 'r') as f:
+                self.income_distribution = json.load(f)
+            self.logger.info("Loaded income distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading income distribution data: {e}")
+            self.income_distribution = {}
+
     def _normalise_string(self, s):  # NEW HELPER
         import re
         return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
+
+    def _convert_income_bracket_to_value(self, income_bracket):
+        """
+        Convert income bracket string to actual income value.
+        
+        Args:
+            income_bracket: String like "20 000 - 29 999", "≧60 000", "< 3 500", etc.
+            
+        Returns:
+            Random income value within the bracket range
+        """
+        if not income_bracket or income_bracket == "Unpaid family worker":
+            return 0
+        
+        # Handle different bracket formats
+        if "≧" in income_bracket:  # e.g., "≧60 000"
+            min_income = int(income_bracket.replace("≧", "").replace(" ", ""))
+            # For open-ended high brackets, use min + reasonable range
+            return self.random.randint(min_income, min_income + 40000)
+        elif "<" in income_bracket:  # e.g., "< 3 500"
+            max_income = int(income_bracket.replace("<", "").replace(" ", ""))
+            # For open-ended low brackets, use reasonable minimum
+            return self.random.randint(max(1000, max_income - 1000), max_income - 1)
+        elif "-" in income_bracket:  # e.g., "20 000 - 29 999"
+            parts = income_bracket.split("-")
+            if len(parts) == 2:
+                min_income = int(parts[0].strip().replace(" ", ""))
+                max_income = int(parts[1].strip().replace(" ", ""))
+                return self.random.randint(min_income, max_income)
+        
+        # Fallback for unrecognized formats
+        return None
 
     def _generate_agent_properties(self, parish=None):
         """
@@ -557,21 +611,26 @@ class FifteenMinuteCity(Model):
         income_dist = demographics.get('income_distribution', {})
         income_level = self._sample_from_distribution(income_dist)
 
+        # Convert income level to actual income - use parish-specific ranges if available
         income_ranges = demographics.get('income_ranges', {
             "low": (10000, 30000),
             "medium": (30001, 100000),
             "high": (100001, 500000)
         })
+        
         if income_level in income_ranges:
             min_val, max_val = income_ranges[income_level]
             props['income'] = self.random.randint(min_val, max_val)
         else:
+            # Fallback to default ranges
             if income_level == "low":
                 props['income'] = self.random.randint(10000, 30000)
             elif income_level == "medium":
                 props['income'] = self.random.randint(30001, 100000)
-            else:
+            else:  # high
                 props['income'] = self.random.randint(100001, 500000)
+
+        # Note: For Macau, income will be reassigned based on occupation after occupation is determined
 
         # --- EDUCATION LEVEL ---
         education_level = None
@@ -643,6 +702,22 @@ class FifteenMinuteCity(Model):
                 occupation_dist = self.occupation_distribution[age_group]
                 occupation_choice = self._sample_from_distribution(occupation_dist)
         props['occupation'] = occupation_choice
+
+        # --- INCOME (Reassign for Macau based on occupation) ---
+        if (self.city == "Macau, China" and occupation_choice 
+            and getattr(self, 'income_distribution', {})):
+            # Handle slight naming differences between occupation.json and income.json
+            income_key = occupation_choice
+            
+            if income_key in self.income_distribution:
+                income_bracket_dist = self.income_distribution[income_key]
+                income_bracket = self._sample_from_distribution(income_bracket_dist)
+                
+                # Convert income bracket to actual income value
+                if income_bracket:
+                    actual_income = self._convert_income_bracket_to_value(income_bracket)
+                    if actual_income is not None:
+                        props['income'] = actual_income
 
         # Default values for additional attributes
         props['employment_status'] = "employed"
