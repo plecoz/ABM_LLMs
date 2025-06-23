@@ -316,12 +316,6 @@ class FifteenMinuteCity(Model):
     def _get_parish_for_node(self, node_id):
         """
         Get the parish name for a given node ID.
-        
-        Args:
-            node_id: The ID of the node to look up
-            
-        Returns:
-            String parish name or None if not found
         """
         return self.node_to_parish.get(node_id, None)
     
@@ -467,60 +461,89 @@ class FifteenMinuteCity(Model):
             return {}
         
         props = {}
-        
-        # Generate age
+
+        # --- AGE & AGE CLASS ---
         age_dist = demographics.get('age_distribution', {})
         age_group = self._sample_from_distribution(age_dist)
-        
-        # Convert age group to actual age
-        if age_group == "0-18":
-            props['age'] = self.random.randint(0, 18)
-        elif age_group == "19-35":
-            props['age'] = self.random.randint(19, 35)
-        elif age_group == "36-65":
-            props['age'] = self.random.randint(36, 65)
-        else:  # 65+
-            props['age'] = self.random.randint(65, 90)
-        
-        # Generate gender
-        gender_dist = demographics.get('gender_distribution', {})
+        props['age_class'] = age_group  # Store the sampled age class for reference
+
+        # Convert age group to an actual age value
+        if age_group is not None:
+            if '-' in age_group:  # e.g. "25-29"
+                min_age, max_age = age_group.split('-')
+                try:
+                    min_age = int(min_age)
+                    max_age = int(max_age)
+                    props['age'] = self.random.randint(min_age, max_age)
+                except ValueError:
+                    # Fallback in case parsing fails
+                    props['age'] = self.random.randint(18, 90)
+            elif age_group.endswith('+'):  # e.g. "85+"
+                try:
+                    min_age = int(age_group.rstrip('+'))
+                    props['age'] = self.random.randint(min_age, min_age + 10)
+                except ValueError:
+                    props['age'] = self.random.randint(65, 90)
+            else:  # Unknown pattern – fallback
+                props['age'] = self.random.randint(18, 90)
+        else:
+            # If no age group could be sampled, fallback to a default range
+            props['age'] = self.random.randint(18, 90)
+
+        # --- GENDER ---
+        gender_dist = {}
+        # Prefer age-specific gender distribution if available
+        if demographics.get('gender_by_age') and age_group in demographics['gender_by_age']:
+            gender_dist = demographics['gender_by_age'][age_group]
+        else:
+            gender_dist = demographics.get('gender_distribution', {})
         props['gender'] = self._sample_from_distribution(gender_dist)
-        
-        # Generate income
+
+        # --- INCOME ---
         income_dist = demographics.get('income_distribution', {})
         income_level = self._sample_from_distribution(income_dist)
-        
-        # Convert income level to actual income - use parish-specific ranges if available
+
         income_ranges = demographics.get('income_ranges', {
             "low": (10000, 30000),
             "medium": (30001, 100000),
             "high": (100001, 500000)
         })
-        
         if income_level in income_ranges:
             min_val, max_val = income_ranges[income_level]
             props['income'] = self.random.randint(min_val, max_val)
         else:
-            # Fallback to default ranges
             if income_level == "low":
                 props['income'] = self.random.randint(10000, 30000)
             elif income_level == "medium":
                 props['income'] = self.random.randint(30001, 100000)
-            else:  # high
+            else:
                 props['income'] = self.random.randint(100001, 500000)
-        
-        # Generate education
-        education_dist = demographics.get('education_distribution', {})
-        props['education'] = self._sample_from_distribution(education_dist)
 
-        # Default values for employment status and household type
-        # These will be initialized later with sociodemographic data
+        # --- EDUCATION LEVEL ---
+        education_level = None
+        if (demographics.get('education_distribution_by_age_and_gender') and
+            age_group in demographics['education_distribution_by_age_and_gender'] and
+            props['gender'] in demographics['education_distribution_by_age_and_gender'][age_group]):
+            edu_dist_raw = demographics['education_distribution_by_age_and_gender'][age_group][props['gender']]
+            # Flatten nested structures (e.g. Primary education -> complete/incomplete)
+            flattened_edu_dist = {}
+            for k, v in edu_dist_raw.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        flattened_edu_dist[f"{k} {sub_k}"] = sub_v
+                else:
+                    flattened_edu_dist[k] = v
+            education_level = self._sample_from_distribution(flattened_edu_dist)
+        else:
+            # Fallback to generic education distribution if provided
+            education_dist = demographics.get('education_distribution', {})
+            education_level = self._sample_from_distribution(education_dist)
+        props['education'] = education_level
+
+        # Default values for additional attributes
         props['employment_status'] = "employed"
         props['household_type'] = "single"
-        
-        # We no longer add parish to props since it's passed separately
-        # This avoids the "got multiple values for keyword argument 'parish'" error
-        
+
         return props
     
 
