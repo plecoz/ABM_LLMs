@@ -41,7 +41,7 @@
     "≧60 000": 0.04,
     "Unpaid family worker": 0.0
   },
-  "Betting-related Clerk (dealer, cage cashier, etc.)": {
+  "Betting-related Clerks (dealer, cage cashier, etc.)": {
     "< 3 500": 0.0,
     "3 500 - 3 999": 0.0,
     "4 000 - 5 999": 0.0,
@@ -55,7 +55,7 @@
     "≧60 000": 0.0,
     "Unpaid family worker": 0.0
   },
-  "Others Clerk": {
+  "Others Clerks": {
     "< 3 500": 0.03,
     "3 500 - 3 999": 0.0,
     "4 000 - 5 999": 0.03,
