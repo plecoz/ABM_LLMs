@@ -547,6 +547,183 @@ class FifteenMinuteCity(Model):
         
         # Fallback for unrecognized formats
         return None
+
+    def _generate_agent_properties(self, parish=None):
+        """
+        Generate agent properties based on demographic distributions.
+        If a parish is specified and parish-specific demographics exist,
+        use those instead of the global demographics.
+        
+        Args:
+            parish: The parish name to use for demographics (optional)
+            
+        Returns:
+            Dictionary of agent properties
+        """
+        # Use parish-specific demographics if available
+        demographics = self.demographics
+        if parish and parish in self.parish_demographics:
+            demographics = self.parish_demographics[parish]
+        
+        if not demographics:
+            return {}
+        
+        props = {}
+
+        # --- AGE & AGE CLASS ---
+        age_dist = demographics.get('age_distribution', {})
+        age_group = self._sample_from_distribution(age_dist)
+        props['age_class'] = age_group  # Store the sampled age class for reference
+
+        # Convert age group to an actual age value
+        if age_group is not None:
+            if '-' in age_group:  # e.g. "25-29"
+                min_age, max_age = age_group.split('-')
+                try:
+                    min_age = int(min_age)
+                    max_age = int(max_age)
+                    props['age'] = self.random.randint(min_age, max_age)
+                except ValueError:
+                    # Fallback in case parsing fails
+                    props['age'] = self.random.randint(18, 90)
+            elif age_group.endswith('+'):  # e.g. "85+"
+                try:
+                    min_age = int(age_group.rstrip('+'))
+                    props['age'] = self.random.randint(min_age, min_age + 10)
+                except ValueError:
+                    props['age'] = self.random.randint(65, 90)
+            else:  # Unknown pattern – fallback
+                props['age'] = self.random.randint(18, 90)
+        else:
+            # If no age group could be sampled, fallback to a default range
+            props['age'] = self.random.randint(18, 90)
+
+        # --- GENDER ---
+        gender_dist = {}
+        # Prefer age-specific gender distribution if available
+        if demographics.get('gender_by_age') and age_group in demographics['gender_by_age']:
+            gender_dist = demographics['gender_by_age'][age_group]
+        else:
+            gender_dist = demographics.get('gender_distribution', {})
+        props['gender'] = self._sample_from_distribution(gender_dist)
+
+        # --- INCOME ---
+        income_dist = demographics.get('income_distribution', {})
+        income_level = self._sample_from_distribution(income_dist)
+
+        # Convert income level to actual income - use parish-specific ranges if available
+        income_ranges = demographics.get('income_ranges', {
+            "low": (10000, 30000),
+            "medium": (30001, 100000),
+            "high": (100001, 500000)
+        })
+        
+        if income_level in income_ranges:
+            min_val, max_val = income_ranges[income_level]
+            props['income'] = self.random.randint(min_val, max_val)
+        else:
+            # Fallback to default ranges
+            if income_level == "low":
+                props['income'] = self.random.randint(10000, 30000)
+            elif income_level == "medium":
+                props['income'] = self.random.randint(30001, 100000)
+            else:  # high
+                props['income'] = self.random.randint(100001, 500000)
+
+        # Note: For Macau, income will be reassigned based on occupation after occupation is determined
+
+        # --- EDUCATION LEVEL ---
+        education_level = None
+        if (demographics.get('education_distribution_by_age_and_gender') and
+            age_group in demographics['education_distribution_by_age_and_gender'] and
+            props['gender'] in demographics['education_distribution_by_age_and_gender'][age_group]):
+            edu_dist_raw = demographics['education_distribution_by_age_and_gender'][age_group][props['gender']]
+            # Flatten nested structures (e.g. Primary education -> complete/incomplete)
+            flattened_edu_dist = {}
+            for k, v in edu_dist_raw.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        flattened_edu_dist[f"{k} {sub_k}"] = sub_v
+                else:
+                    flattened_edu_dist[k] = v
+            education_level = self._sample_from_distribution(flattened_edu_dist)
+        else:
+            # Fallback to generic education distribution if provided
+            education_dist = demographics.get('education_distribution', {})
+            education_level = self._sample_from_distribution(education_dist)
+        props['education'] = education_level
+
+        # --- INDUSTRY ---  NEW SECTION
+        industry_choice = None
+        if (self.city == "Macau, China" and education_level 
+            and getattr(self, 'industry_distribution', {})):
+            norm_edu = self._normalise_string(education_level)
+            # direct match or attempt to map common synonyms
+            industry_dist = self.industry_distribution.get(norm_edu)
+            if not industry_dist:
+                # Try some heuristic replacements (e.g., replace 'primaryeducationcomplete' with 'primaryeducationcomplete') already same
+                for key, dist in self.industry_distribution.items():
+                    if key in norm_edu or norm_edu in key:
+                        industry_dist = dist
+                        break
+            if industry_dist:
+                industry_choice = self._sample_from_distribution(industry_dist)
+        props['industry'] = industry_choice
+
+        # --- OCCUPATION ---
+        occupation_choice = None
+        if (self.city == "Macau, China" and props.get('age') is not None 
+            and getattr(self, 'occupation_distribution', {})):
+            age = props['age']
+            # Map age to age group used in occupation.json
+            age_group = None
+            if 16 <= age <= 24:
+                age_group = "16-24"
+            elif 25 <= age <= 29:
+                age_group = "25-29"
+            elif 30 <= age <= 34:
+                age_group = "30-34"
+            elif 35 <= age <= 39:
+                age_group = "35-39"
+            elif 40 <= age <= 44:
+                age_group = "40-44"
+            elif 45 <= age <= 49:
+                age_group = "45-49"
+            elif 50 <= age <= 54:
+                age_group = "50-54"
+            elif 55 <= age <= 59:
+                age_group = "55-59"
+            elif 60 <= age <= 64:
+                age_group = "60-64"
+            elif age >= 65:
+                age_group = "≧65"
+            
+            if age_group and age_group in self.occupation_distribution:
+                occupation_dist = self.occupation_distribution[age_group]
+                occupation_choice = self._sample_from_distribution(occupation_dist)
+        props['occupation'] = occupation_choice
+
+        # --- INCOME (Reassign for Macau based on occupation) ---
+        if (self.city == "Macau, China" and occupation_choice 
+            and getattr(self, 'income_distribution', {})):
+            # Handle slight naming differences between occupation.json and income.json
+            income_key = occupation_choice
+            
+            if income_key in self.income_distribution:
+                income_bracket_dist = self.income_distribution[income_key]
+                income_bracket = self._sample_from_distribution(income_bracket_dist)
+                
+                # Convert income bracket to actual income value
+                if income_bracket:
+                    actual_income = self._convert_income_bracket_to_value(income_bracket)
+                    if actual_income is not None:
+                        props['income'] = actual_income
+
+        # Default values for additional attributes
+        props['employment_status'] = "employed"
+        props['household_type'] = "single"
+
+        return props
     
 
     def _sample_from_distribution(self, distribution):
@@ -715,16 +892,7 @@ class FifteenMinuteCity(Model):
                 )
                 # print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 parish = self._get_parish_for_node(home_node)
-                agent_props = Resident.generate_agent_properties(
-                    demographics=self.demographics,
-                    parish_demographics=self.parish_demographics,
-                    parish=parish,
-                    city=self.city,
-                    industry_distribution=getattr(self, 'industry_distribution', {}),
-                    occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                    income_distribution=getattr(self, 'income_distribution', {}),
-                    random_generator=self.random
-                )
+                agent_props = self._generate_agent_properties(parish)
 
                 # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
@@ -815,17 +983,7 @@ class FifteenMinuteCity(Model):
             )
             # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
-            parish = self._get_parish_for_node(home_node)
-            agent_props = Resident.generate_agent_properties(
-                demographics=self.demographics,
-                parish_demographics=self.parish_demographics,
-                parish=parish,
-                city=self.city,
-                industry_distribution=getattr(self, 'industry_distribution', {}),
-                occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                income_distribution=getattr(self, 'income_distribution', {}),
-                random_generator=self.random
-            )
+            agent_props = self._generate_agent_properties(parish)
 
             # Determine step size and accessibility radius based on agent's age
             is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
@@ -835,6 +993,7 @@ class FifteenMinuteCity(Model):
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 self.graph, home_node, cutoff=accessibility_radius, weight='length'
             ))
+            parish = self._get_parish_for_node(home_node)
             
             resident = Resident(
                 model=self, unique_id=i, geometry=point_geometry,
