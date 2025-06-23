@@ -17,6 +17,7 @@ from mesa_geo import GeoSpace
 from mesa.datacollection import DataCollector
 import geopandas as gpd
 from outputs import OutputController
+import os  # NEW
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
@@ -282,6 +283,15 @@ class FifteenMinuteCity(Model):
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
 
+        # --- Load industry distribution data (education -> industry probabilities) ---  NEW BLOCK
+        industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
+        self.industry_distribution = {}
+        if self.city == "Macau, China" and industry_path and os.path.exists(industry_path):
+            self._load_industry_distribution(industry_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
+
     def _map_nodes_to_parishes(self):
         """
         Create a mapping from graph nodes to parishes.
@@ -439,6 +449,26 @@ class FifteenMinuteCity(Model):
                 }
             }
     
+    def _load_industry_distribution(self, industry_path):  # NEW METHOD
+        """
+        Load industry distribution probabilities from a JSON file.
+        Expected format: {education_level: {industry_name: probability, ...}, ...}
+        """
+        try:
+            with open(industry_path, 'r') as f:
+                self.industry_distribution = json.load(f)
+            # Normalise keys to facilitate matching (lowercase, stripped)
+            self.industry_distribution = {
+                self._normalise_string(k): v for k, v in self.industry_distribution.items()
+            }
+            self.logger.info("Loaded industry distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading industry distribution data: {e}")
+            self.industry_distribution = {}
+
+    def _normalise_string(self, s):  # NEW HELPER
+        import re
+        return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
 
     def _generate_agent_properties(self, parish=None):
         """
@@ -539,6 +569,23 @@ class FifteenMinuteCity(Model):
             education_dist = demographics.get('education_distribution', {})
             education_level = self._sample_from_distribution(education_dist)
         props['education'] = education_level
+
+        # --- INDUSTRY ---  NEW SECTION
+        industry_choice = None
+        if (self.city == "Macau, China" and education_level 
+            and getattr(self, 'industry_distribution', {})):
+            norm_edu = self._normalise_string(education_level)
+            # direct match or attempt to map common synonyms
+            industry_dist = self.industry_distribution.get(norm_edu)
+            if not industry_dist:
+                # Try some heuristic replacements (e.g., replace 'primaryeducationcomplete' with 'primaryeducationcomplete') already same
+                for key, dist in self.industry_distribution.items():
+                    if key in norm_edu or norm_edu in key:
+                        industry_dist = dist
+                        break
+            if industry_dist:
+                industry_choice = self._sample_from_distribution(industry_dist)
+        props['industry'] = industry_choice
 
         # Default values for additional attributes
         props['employment_status'] = "employed"
