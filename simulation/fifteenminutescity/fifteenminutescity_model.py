@@ -292,6 +292,17 @@ class FifteenMinuteCity(Model):
             if self.city == "Macau, China":
                 self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
 
+        # --- Load occupation distribution data (age -> occupation probabilities) ---
+        occupation_path = kwargs.get('occupation_path', 'data/demographics_macau/occupation.json')
+        self.occupation_distribution = {}
+        if self.city == "Macau, China" and occupation_path and os.path.exists(occupation_path):
+            self._load_occupation_distribution(occupation_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
+        
+        # --- Load parish-specific demographics if provided ---
+
     def _map_nodes_to_parishes(self):
         """
         Create a mapping from graph nodes to parishes.
@@ -466,6 +477,19 @@ class FifteenMinuteCity(Model):
             self.logger.error(f"Error loading industry distribution data: {e}")
             self.industry_distribution = {}
 
+    def _load_occupation_distribution(self, occupation_path):
+        """
+        Load occupation distribution probabilities from a JSON file.
+        Expected format: {age_group: {occupation_name: probability, ...}, ...}
+        """
+        try:
+            with open(occupation_path, 'r') as f:
+                self.occupation_distribution = json.load(f)
+            self.logger.info("Loaded occupation distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading occupation distribution data: {e}")
+            self.occupation_distribution = {}
+
     def _normalise_string(self, s):  # NEW HELPER
         import re
         return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
@@ -586,6 +610,39 @@ class FifteenMinuteCity(Model):
             if industry_dist:
                 industry_choice = self._sample_from_distribution(industry_dist)
         props['industry'] = industry_choice
+
+        # --- OCCUPATION ---
+        occupation_choice = None
+        if (self.city == "Macau, China" and props.get('age') is not None 
+            and getattr(self, 'occupation_distribution', {})):
+            age = props['age']
+            # Map age to age group used in occupation.json
+            age_group = None
+            if 16 <= age <= 24:
+                age_group = "16-24"
+            elif 25 <= age <= 29:
+                age_group = "25-29"
+            elif 30 <= age <= 34:
+                age_group = "30-34"
+            elif 35 <= age <= 39:
+                age_group = "35-39"
+            elif 40 <= age <= 44:
+                age_group = "40-44"
+            elif 45 <= age <= 49:
+                age_group = "45-49"
+            elif 50 <= age <= 54:
+                age_group = "50-54"
+            elif 55 <= age <= 59:
+                age_group = "55-59"
+            elif 60 <= age <= 64:
+                age_group = "60-64"
+            elif age >= 65:
+                age_group = "≧65"
+            
+            if age_group and age_group in self.occupation_distribution:
+                occupation_dist = self.occupation_distribution[age_group]
+                occupation_choice = self._sample_from_distribution(occupation_dist)
+        props['occupation'] = occupation_choice
 
         # Default values for additional attributes
         props['employment_status'] = "employed"
