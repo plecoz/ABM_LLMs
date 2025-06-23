@@ -1,0 +1,122 @@
+{
+  "16-24": {
+    "M": {
+      "Employed": 0.2791,
+      "Unemployed": 0.0481,
+      "Inactive": 0.6727
+    },
+    "F": {
+      "Employed": 0.2800,
+      "Unemployed": 0.0295,
+      "Inactive": 0.6905
+    }
+  },
+  "25-29": {
+    "M": {
+      "Employed": 0.8121,
+      "Unemployed": 0.0540,
+      "Inactive": 0.1339
+    },
+    "F": {
+      "Employed": 0.7771,
+      "Unemployed": 0.0374,
+      "Inactive": 0.1855
+    }
+  },
+  "30-34": {
+    "M": {
+      "Employed": 0.8848,
+      "Unemployed": 0.0326,
+      "Inactive": 0.0826
+    },
+    "F": {
+      "Employed": 0.7913,
+      "Unemployed": 0.0347,
+      "Inactive": 0.1740
+    }
+  },
+  "35-39": {
+    "M": {
+      "Employed": 0.9016,
+      "Unemployed": 0.0263,
+      "Inactive": 0.0721
+    },
+    "F": {
+      "Employed": 0.8327,
+      "Unemployed": 0.0230,
+      "Inactive": 0.1443
+    }
+  },
+  "40-44": {
+    "M": {
+      "Employed": 0.9036,
+      "Unemployed": 0.0218,
+      "Inactive": 0.0746
+    },
+    "F": {
+      "Employed": 0.8396,
+      "Unemployed": 0.0233,
+      "Inactive": 0.1372
+    }
+  },
+  "45-49": {
+    "M": {
+      "Employed": 0.8869,
+      "Unemployed": 0.0137,
+      "Inactive": 0.0994
+    },
+    "F": {
+      "Employed": 0.8124,
+      "Unemployed": 0.0152,
+      "Inactive": 0.1727
+    }
+  },
+  "50-54": {
+    "M": {
+      "Employed": 0.8157,
+      "Unemployed": 0.0215,
+      "Inactive": 0.1628
+    },
+    "F": {
+      "Employed": 0.7666,
+      "Unemployed": 0.0195,
+      "Inactive": 0.2139
+    }
+  },
+  "55-59": {
+    "M": {
+      "Employed": 0.7085,
+      "Unemployed": 0.0213,
+      "Inactive": 0.2703
+    },
+    "F": {
+      "Employed": 0.6285,
+      "Unemployed": 0.0120,
+      "Inactive": 0.3594
+    }
+  },
+  "60-64": {
+    "M": {
+      "Employed": 0.5514,
+      "Unemployed": 0.0153,
+      "Inactive": 0.4333
+    },
+    "F": {
+      "Employed": 0.3903,
+      "Unemployed": 0.0069,
+      "Inactive": 0.6028
+    }
+  },
+  ">=65": {
+    "M": {
+      "Employed": 0.2048,
+      "Unemployed": 0.0013,
+      "Inactive": 0.7939
+    },
+    "F": {
+      "Employed": 0.1087,
+      "Unemployed": 0.0002,
+      "Inactive": 0.8911
+    }
+  }
+}
