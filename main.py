@@ -319,7 +319,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False):
     """
     Run the 15-minute city simulation.
     
@@ -333,6 +333,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         save_json_report: Path to save the detailed JSON report (optional)
         city: Name of the city for the simulation (default: 'Macau, China')
         threshold: Time threshold in minutes for accessibility (default: 15)
+        no_visualization: If True, run simulation without visualization for faster execution
     """
     # Get parishes path based on city if not explicitly provided
     if parishes_path is None:
@@ -463,38 +464,62 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     )
     
     print("Starting simulation...")
-    # Set up interactive mode
-    plt.ion()  # Turn on interactive mode
-    fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Initialize animator with parishes data and environment components
-    animator = SimulationAnimator(
-        model, 
-        graph, 
-        ax=ax, 
-        parishes_gdf=parishes_gdf,
-        residential_buildings=residential_buildings,
-        water_bodies=water_bodies,
-        cliffs=cliffs,
-        forests=forests
-    )
+    if no_visualization:
+        # Run simulation without visualization (headless mode) - much faster
+        print("Running in headless mode (no visualization)...")
+        print(f"Simulating {steps} time steps...")
+        
+        # Run the simulation steps directly
+        for step in range(steps):
+            model.step()
+            
+            # Print progress every 60 steps (1 hour in simulation time)
+            if step % 60 == 0 or step == steps - 1:
+                time_info = model.get_current_time()
+                print(f"Step {step + 1}/{steps} - {time_info['time_string']}")
+        
+        print("Simulation completed!")
+        
+        # Print final statistics
+        if hasattr(model, 'output_controller'):
+            model.output_controller.print_travel_summary()
+    else:
+        # Run simulation with visualization
+        print("Running with visualization...")
+        
+        # Set up interactive mode
+        plt.ion()  # Turn on interactive mode
+        fig, ax = plt.subplots(figsize=(12, 10))
+        
+        # Initialize animator with parishes data and environment components
+        animator = SimulationAnimator(
+            model, 
+            graph, 
+            ax=ax, 
+            parishes_gdf=parishes_gdf,
+            residential_buildings=residential_buildings,
+            water_bodies=water_bodies,
+            cliffs=cliffs,
+            forests=forests
+        )
+        
+        # Configure animator to use specific styling for selected POIs
+        if selected_pois:
+            animator.use_specific_poi_styling = True
+        
+        animator.initialize()  # Draw initial state
+        
+        # Start the animation loop
+        animator.start_animation(steps, interval=50)  # 50ms between frames
+        
+        plt.ioff()  # Turn off interactive mode
+        plt.show()  # Keep window open at end
     
-    # Configure animator to use specific styling for selected POIs
-    if selected_pois:
-        animator.use_specific_poi_styling = True
-    
-    animator.initialize()  # Draw initial state
-    
-    # Start the animation loop
-    animator.start_animation(steps, interval=50)  # 50ms between frames
-    
-    # Save JSON report if requested
+    # Save JSON report if requested (works for both modes)
     if save_json_report:
         print(f"\nSaving detailed JSON report to: {save_json_report}")
         model.output_controller.save_detailed_report(save_json_report)
-    
-    plt.ioff()  # Turn off interactive mode
-    plt.show()  # Keep window open at end
 
 if __name__ == "__main__":
     # Parse command line arguments
@@ -535,6 +560,9 @@ if __name__ == "__main__":
     # City argument
     parser.add_argument('--city', type=str, default='Macau, China', help='City name for the simulation (default: Macau, China)')
     
+    # No visualization argument
+    parser.add_argument('--no-visualization', action='store_true', help='Run simulation without visualization for faster execution')
+    
     args = parser.parse_args()
     #Good simulations :
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
@@ -562,5 +590,6 @@ if __name__ == "__main__":
         save_environment=args.save_environment,
         load_environment=args.load_environment,
         seed=args.seed,
-        threshold=args.threshold
+        threshold=args.threshold,
+        no_visualization=args.no_visualization
     )
