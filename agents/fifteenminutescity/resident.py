@@ -125,6 +125,9 @@ class Resident(BaseAgent):
         self.needs_selection = self.attributes['needs_selection']
         self.movement_behavior = self.attributes['movement_behavior']
         self.social_network = self.attributes['social_network']
+        
+        # TEMPORARY: Add is_tourist as a direct attribute for easy access
+        self.is_tourist = kwargs.get('is_tourist', False)
 
         # Employment probabilities - only for Macau
         if hasattr(self.model, 'city') and self.model.city == 'Macau, China':
@@ -871,7 +874,7 @@ class Resident(BaseAgent):
                         # Track POI visit in output controller
                         if hasattr(self.model, 'output_controller'):
                             poi_category = getattr(visited_poi_agent, 'category', 'other')
-                            self.model.output_controller.track_poi_visit(poi_category)
+                            self.model.output_controller.track_poi_visit(poi_category, self.unique_id)
                         
                         # Start waiting at POI if it has waiting time
                         if hasattr(visited_poi_agent, 'get_waiting_time'):

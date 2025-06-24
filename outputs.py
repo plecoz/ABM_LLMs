@@ -40,8 +40,12 @@ class OutputController:
             "healthcare": 0,
             "education": 0,
             "entertainment": 0,
-            "transportation": 0
+            "transportation": 0,
+            "casino": 0
         }
+        
+        # TEMPORARY: Track tourist healthcare visits
+        self.tourist_healthcare_visits = set()  # Set of tourist IDs who visited healthcare POIs
         
         # Other potential metrics (for future expansion)
         self.poi_visits = {}  # Track POI visit counts
@@ -98,20 +102,26 @@ class OutputController:
         
         self.logger.debug(f"Agent {agent_id} started waiting: {waiting_time} minutes at {poi_category} POI")
     
-    def track_poi_visit(self, poi_category: str):
+    def track_poi_visit(self, poi_category: str, agent_id: int = None):
         """
-        Track a POI visit by category.
+        Track when an agent visits a POI.
         
         Args:
-            poi_category: Category of the POI being visited
+            poi_category: Category of the POI visited
+            agent_id: ID of the agent visiting (optional, for tourist tracking)
         """
         if poi_category in self.poi_visits_by_category:
             self.poi_visits_by_category[poi_category] += 1
         else:
-            # Handle unknown categories
-            if "other" not in self.poi_visits_by_category:
-                self.poi_visits_by_category["other"] = 0
-            self.poi_visits_by_category["other"] += 1
+            # Handle new categories that might not be in our initial list
+            self.poi_visits_by_category[poi_category] = 1
+        
+        # TEMPORARY: Track tourist healthcare visits
+        if poi_category == "healthcare" and agent_id is not None:
+            # Check if the agent is a tourist
+            agent = self.model.get_agent_by_id(agent_id)
+            if agent and hasattr(agent, 'is_tourist') and agent.is_tourist:
+                self.tourist_healthcare_visits.add(agent_id)
         
         self.logger.debug(f"POI visit tracked: {poi_category}")
     
@@ -155,12 +165,48 @@ class OutputController:
     
     def get_poi_visits_by_category(self) -> Dict[str, int]:
         """
-        Get POI visits by category.
+        Get the number of POI visits by category.
         
         Returns:
             Dictionary mapping POI categories to visit counts
         """
         return self.poi_visits_by_category.copy()
+    
+    def get_tourist_healthcare_percentage(self) -> Dict[str, float]:
+        """
+        TEMPORARY: Calculate percentage of tourists who accessed/didn't access healthcare POIs.
+        
+        Returns:
+            Dictionary with tourist healthcare access statistics
+        """
+        # Count total tourists in the simulation
+        total_tourists = 0
+        for agent in self.model.residents:
+            if hasattr(agent, 'is_tourist') and agent.is_tourist:
+                total_tourists += 1
+        
+        if total_tourists == 0:
+            return {
+                "total_tourists": 0,
+                "tourists_accessed_healthcare": 0,
+                "tourists_no_healthcare": 0,
+                "percentage_accessed": 0.0,
+                "percentage_no_access": 0.0
+            }
+        
+        tourists_accessed = len(self.tourist_healthcare_visits)
+        tourists_no_access = total_tourists - tourists_accessed
+        
+        percentage_accessed = (tourists_accessed / total_tourists) * 100
+        percentage_no_access = (tourists_no_access / total_tourists) * 100
+        
+        return {
+            "total_tourists": total_tourists,
+            "tourists_accessed_healthcare": tourists_accessed,
+            "tourists_no_healthcare": tourists_no_access,
+            "percentage_accessed": percentage_accessed,
+            "percentage_no_access": percentage_no_access
+        }
     
     def print_travel_summary(self):
         """
@@ -207,13 +253,22 @@ class OutputController:
         
         # POI visit statistics
         print(f"\nPOI visits by category:")
-        total_visits = sum(self.poi_visits_by_category.values())
-        print(f"Total POI visits: {total_visits}")
+        total_poi_visits = sum(self.poi_visits_by_category.values())
+        print(f"Total POI visits: {total_poi_visits}")
         
         for category, count in self.poi_visits_by_category.items():
             if count > 0:
-                percentage = (count / total_visits * 100) if total_visits > 0 else 0
-                print(f"  - {category.replace('_', ' ').title()}: {count} visits ({percentage:.1f}%)")
+                print(f"  - {category.replace('_', ' ').title()}: {count}")
+        
+        # TEMPORARY: Print tourist healthcare statistics
+        tourist_stats = self.get_tourist_healthcare_percentage()
+        if tourist_stats["total_tourists"] > 0:
+            print(f"\n--- TOURIST HEALTHCARE ACCESS ---")
+            print(f"Total tourists: {tourist_stats['total_tourists']}")
+            print(f"Tourists who accessed healthcare: {tourist_stats['tourists_accessed_healthcare']}")
+            print(f"Tourists who didn't access healthcare: {tourist_stats['tourists_no_healthcare']}")
+            print(f"Percentage who accessed healthcare: {tourist_stats['percentage_accessed']:.1f}%")
+            print(f"Percentage who didn't access healthcare: {tourist_stats['percentage_no_access']:.1f}%")
         
         print("="*60)
     
@@ -279,11 +334,13 @@ class OutputController:
             "healthcare": 0,
             "education": 0,
             "entertainment": 0,
-            "transportation": 0
+            "transportation": 0,
+            "casino": 0
         }
         self.poi_visits = {}
         self.energy_stats = {}
         self.parish_mobility = {}
+        self.tourist_healthcare_visits = set()
         
         self.logger.info("Output controller reset")
 

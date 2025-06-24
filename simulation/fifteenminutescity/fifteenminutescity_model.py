@@ -891,7 +891,7 @@ class FifteenMinuteCity(Model):
                     home_locations.append({'geometry': point_geometry, 'node': home_node})
 
             # --- Residents Creation ---
-            for location in home_locations:
+            for i, location in enumerate(home_locations):
                 home_node = location['node']
                 point_geometry = location['geometry']
                 
@@ -901,9 +901,21 @@ class FifteenMinuteCity(Model):
                     lat1=point_geometry.y, lon1=point_geometry.x,
                     lat2=home_node_geom['y'], lon2=home_node_geom['x']
                 )
-                # print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 parish = self._get_parish_for_node(home_node)
                 agent_props = self._generate_agent_properties(parish)
+                
+                # TEMPORARY FEATURE: For Taipa parish, spawn 30% of residents at casinos
+                if parish_name == "Taipa" and self.pois.get('casino') and i < len(home_locations) * 0.3:
+                    # Find a random casino location
+                    casino_pois = self.pois['casino']
+                    if casino_pois:
+                        casino_node, _ = self.random.choice(casino_pois)
+                        casino_coords = self.graph.nodes[casino_node]
+                        point_geometry = Point(casino_coords['x'], casino_coords['y'])
+                        home_node = casino_node
+                        # TEMPORARY: Mark as tourist for special visualization
+                        agent_props['is_tourist'] = True
+                        self.logger.info(f"Spawning Taipa resident {agent_id} at casino location as tourist")
 
                 # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
@@ -913,7 +925,6 @@ class FifteenMinuteCity(Model):
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                     self.graph, home_node, cutoff=accessibility_radius, weight='length'
                 ))
-                
                 
                 resident = Resident(
                     model=self, unique_id=agent_id, geometry=point_geometry,
