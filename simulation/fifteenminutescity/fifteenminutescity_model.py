@@ -807,6 +807,17 @@ class FifteenMinuteCity(Model):
         Args:
             num_residents: Total number of residents to create
         """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+        
+        # Handle case where parish_distribution is None (fallback to random distribution)
+        if self.parish_distribution is None:
+            self.logger.info("No parish distribution provided. Using random distribution.")
+            self._create_residents_randomly(num_residents)
+            return
+            
         agent_id = 0
         
         # Check if we should use buildings for placement
@@ -932,6 +943,11 @@ class FifteenMinuteCity(Model):
         Args:
             num_residents: Total number of residents to create
         """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+            
         home_locations = []
         use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
 
