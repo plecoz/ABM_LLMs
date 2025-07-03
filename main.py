@@ -8,7 +8,7 @@ import os
 from config.poi_config import get_active_poi_config
 
 from environment.fifteenminutescity.city_network import load_city_network, get_or_load_city_network
-from environment.fifteenminutescity.pois import fetch_pois, filter_pois, get_or_fetch_pois, get_or_fetch_environment_data
+from environment.fifteenminutescity.pois import fetch_pois, filter_pois, get_or_fetch_pois, get_or_fetch_environment_data, get_or_fetch_3d_buildings
 from simulation.fifteenminutescity.fifteenminutescity_model import FifteenMinuteCity
 from visualization import SimulationAnimator
 import sys
@@ -319,7 +319,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False, interactive=False, save_buildings=None, load_buildings=None):
     """
     Run the 15-minute city simulation.
     
@@ -334,6 +334,9 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         city: Name of the city for the simulation (default: 'Macau, China')
         threshold: Time threshold in minutes for accessibility (default: 15)
         no_visualization: If True, run simulation without visualization for faster execution
+        interactive: If True, enable enhanced visualization with 3D buildings and interactive features
+        save_buildings: Path to save the 3D buildings after fetching from OSM
+        load_buildings: Path to load the 3D buildings from (instead of OSM)
     """
     # Get parishes path based on city if not explicitly provided
     if parishes_path is None:
@@ -422,6 +425,24 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     cliffs = environment_data.get('cliffs', gpd.GeoDataFrame())
     forests = environment_data.get('forests', gpd.GeoDataFrame())
     
+    # Load 3D buildings only if explicitly requested (not automatically in interactive mode)
+    buildings_3d = None
+    if (save_buildings or load_buildings) and not no_visualization:
+        print("Loading 3D buildings for enhanced visualization...")
+        buildings_3d = get_or_fetch_3d_buildings(
+            place_name=city,
+            save_path=save_buildings,
+            load_path=load_buildings
+        )
+        if buildings_3d is not None:
+            print(f"✅ Loaded {len(buildings_3d)} 3D buildings")
+        else:
+            print("⚠️  No 3D buildings found - will continue without building heights")
+    elif interactive and not no_visualization:
+        print("💡 Interactive mode enabled without 3D buildings")
+        print("   To add 3D buildings, use --save-buildings or --load-buildings")
+        print("   Features available: zoom, pan, layer controls")
+    
     if not residential_buildings.empty:
         print(f"Found {len(residential_buildings)} residential buildings.")
     else:
@@ -486,13 +507,20 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
             model.output_controller.print_travel_summary()
     else:
         # Run simulation with visualization
-        print("Running with visualization...")
+        if interactive:
+            print("🎮 Running with INTERACTIVE visualization...")
+            if buildings_3d is not None:
+                print("   Features: 3D buildings, zoom, pan, layer controls")
+            else:
+                print("   Features: zoom, pan, layer controls")
+        else:
+            print("📊 Running with standard visualization...")
         
         # Set up interactive mode
         plt.ion()  # Turn on interactive mode
         fig, ax = plt.subplots(figsize=(12, 10))
         
-        # Initialize animator with parishes data and environment components
+        # Initialize animator with parishes data, environment components, and interactive features
         animator = SimulationAnimator(
             model, 
             graph, 
@@ -501,7 +529,9 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
             residential_buildings=residential_buildings,
             water_bodies=water_bodies,
             cliffs=cliffs,
-            forests=forests
+            forests=forests,
+            buildings_3d=buildings_3d,
+            interactive=interactive
         )
         
         # Configure animator to use specific styling for selected POIs
@@ -529,8 +559,8 @@ if __name__ == "__main__":
     # Add seed argument at the top for visibility
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
-    parser.add_argument('--residents', type=int, default=10, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=5, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
+    parser.add_argument('--steps', type=int, default=5000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--threshold', type=int, default=100, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
@@ -563,6 +593,14 @@ if __name__ == "__main__":
     # No visualization argument
     parser.add_argument('--no-visualization', action='store_true', help='Run simulation without visualization for faster execution')
     
+    # Interactive visualization argument
+    parser.add_argument('--interactive', action='store_true', help='Enable enhanced visualization with zoom, pan, and layer controls (3D buildings optional - use --save-buildings or --load-buildings to include them)')
+    parser.add_argument('--save-buildings', type=str, help='Path to save the 3D buildings after fetching from OSM (e.g., data/macau_buildings.gpkg)')
+    parser.add_argument('--load-buildings', type=str, help='Path to load the 3D buildings from file instead of OSM (e.g., data/macau_buildings.gpkg)')
+    
+
+    #python main.py --city "Macau, China" --load-environment data/macau_shapefiles/macau_environment.pkl --parishes "Taipa" "Coloane" --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl --interactive 
+
     args = parser.parse_args()
     #Good simulations :
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
@@ -591,5 +629,8 @@ if __name__ == "__main__":
         load_environment=args.load_environment,
         seed=args.seed,
         threshold=args.threshold,
-        no_visualization=args.no_visualization
+        no_visualization=args.no_visualization,
+        interactive=args.interactive,
+        save_buildings=args.save_buildings,
+        load_buildings=args.load_buildings
     )
