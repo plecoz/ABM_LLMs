@@ -262,34 +262,49 @@ class Enhanced3DBuildings:
         cmap = plt.cm.viridis
         
         # Plot buildings
-        patches = []
+        patches_list = []
         colors = []
         
         for idx, building in buildings_gdf.iterrows():
             geom = building.geometry
             height = building['processed_height']
             
-            # Convert geometry to patches
-            if geom.geom_type == 'Polygon':
-                # Get exterior coordinates
-                x, y = geom.exterior.coords.xy
-                
-                # Create polygon patch
-                polygon = patches.Polygon(list(zip(x, y)), closed=True)
-                patches.append(polygon)
-                colors.append(height)
-                
-            elif geom.geom_type == 'MultiPolygon':
-                # Handle multipolygon
-                for poly in geom.geoms:
-                    x, y = poly.exterior.coords.xy
-                    polygon = patches.Polygon(list(zip(x, y)), closed=True)
-                    patches.append(polygon)
-                    colors.append(height)
+            try:
+                # Convert geometry to patches
+                if geom.geom_type == 'Polygon':
+                    # Get exterior coordinates
+                    x, y = geom.exterior.coords.xy
+                    
+                    # Check if we have enough coordinates
+                    if len(x) >= 3 and len(y) >= 3:
+                        # Create polygon patch
+                        coords = list(zip(x, y))
+                        if len(coords) >= 3:  # Need at least 3 points for a polygon
+                            polygon = patches.Polygon(coords, closed=True)
+                            patches_list.append(polygon)
+                            colors.append(height)
+                    
+                elif geom.geom_type == 'MultiPolygon':
+                    # Handle multipolygon
+                    for poly in geom.geoms:
+                        x, y = poly.exterior.coords.xy
+                        
+                        # Check if we have enough coordinates
+                        if len(x) >= 3 and len(y) >= 3:
+                            coords = list(zip(x, y))
+                            if len(coords) >= 3:  # Need at least 3 points for a polygon
+                                polygon = patches.Polygon(coords, closed=True)
+                                patches_list.append(polygon)
+                                colors.append(height)
+                                
+            except Exception as e:
+                # Skip problematic geometries
+                print(f"Warning: Skipping building {idx} due to geometry error: {e}")
+                continue
         
         # Create patch collection
-        if patches:
-            collection = PatchCollection(patches, cmap=cmap, norm=norm, alpha=0.7)
+        if patches_list:
+            collection = PatchCollection(patches_list, cmap=cmap, norm=norm, alpha=0.7)
             collection.set_array(np.array(colors))
             
             # Add to plot
@@ -306,7 +321,9 @@ class Enhanced3DBuildings:
             
             self.building_patches.append(building_artist)
             
-            print(f"Plotted {len(patches)} building polygons")
+            print(f"Plotted {len(patches_list)} building polygons")
+        else:
+            print("No valid building polygons found to plot")
             
     def add_building_info_on_click(self, buildings_gdf):
         """Add click functionality to show building information."""
