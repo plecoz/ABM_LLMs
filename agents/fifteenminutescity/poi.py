@@ -37,7 +37,7 @@ class POI(GeoAgent):
         # If category is explicitly provided, use it, otherwise determine it from poi_type
         if category is not None:
             self.category = category
-            print(f"Using provided category for POI {unique_id}: {self.category}")
+            # print(f"Using provided category for POI {unique_id}: {self.category}")
         else:
             self.category = self._determine_category(poi_type)
         
@@ -157,7 +157,7 @@ class POI(GeoAgent):
         ]
         
         # Print debugging info
-        print(f"Determining category for POI type: {poi_type}")
+        # print(f"Determining category for POI type: {poi_type}")
         
         # Exact match check first
         if poi_type.lower() in daily_living_types:
@@ -188,7 +188,7 @@ class POI(GeoAgent):
         else:
             category = 'other'
             
-        print(f"  Result: {poi_type} → {category}")
+        # print(f"  Result: {poi_type} → {category}")
         return category
     
     def add_visitor(self, agent_id):

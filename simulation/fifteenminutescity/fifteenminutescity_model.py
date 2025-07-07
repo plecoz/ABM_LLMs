@@ -242,8 +242,11 @@ class FifteenMinuteCity(Model):
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
         print("\nCreating POI agents from POI dictionary:")
+        poi_counts_by_category = {}  # Track counts by category
+        
         for category, poi_list in pois.items():
             print(f"Category: {category} - {len(poi_list)} POIs")
+            category_count = 0
             for poi_data in poi_list:
                 if isinstance(poi_data, tuple):
                     node_id, poi_type = poi_data  # Unpack node and type
@@ -271,14 +274,25 @@ class FifteenMinuteCity(Model):
                     parish=parish
                 )
                 
-                # Debug: Print the POI agent's category
-                print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
+                # Comment out detailed debug message
+                # print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
                 
                 self.grid.place_agent(poi_agent, node_id)
                 self.schedule.add(poi_agent)
                 self.poi_agents.append(poi_agent)
                 self.all_agents.append(poi_agent)
                 poi_id += 1
+                category_count += 1
+            
+            # Track count for this category
+            poi_counts_by_category[category] = category_count
+        
+        # Print summary of POIs created by category
+        print(f"\nPOI Creation Summary:")
+        for category, count in poi_counts_by_category.items():
+            print(f"  {category}: {count} POIs created")
+        print(f"Total POIs created: {sum(poi_counts_by_category.values())}")
+        print()
 
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
@@ -309,6 +323,15 @@ class FifteenMinuteCity(Model):
         else:
             if self.city == "Macau, China":
                 self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
+        
+        # --- Load economic status distribution data (age -> gender -> status probabilities) ---
+        economic_status_path = kwargs.get('economic_status_path', 'data/demographics_macau/economic_status.json')
+        self.economic_status_distribution = {}
+        if self.city == "Macau, China" and economic_status_path and os.path.exists(economic_status_path):
+            self._load_economic_status_distribution(economic_status_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Economic status distribution file not found at {economic_status_path}. 'economic_status' attribute will default to None.")
         
         # --- Load parish-specific demographics if provided ---
 
@@ -486,6 +509,19 @@ class FifteenMinuteCity(Model):
             self.logger.error(f"Error loading income distribution data: {e}")
             self.income_distribution = {}
 
+    def _load_economic_status_distribution(self, economic_status_path):
+        """
+        Load economic status distribution probabilities from a JSON file.
+        Expected format: {age_group: {gender: {status: probability, ...}, ...}, ...}
+        """
+        try:
+            with open(economic_status_path, 'r') as f:
+                self.economic_status_distribution = json.load(f)
+            self.logger.info("Loaded economic status distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading economic status distribution data: {e}")
+            self.economic_status_distribution = {}
+
     def _normalise_string(self, s):  # NEW HELPER
         import re
         return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
@@ -521,9 +557,6 @@ class FifteenMinuteCity(Model):
         
         # Fallback for unrecognized formats
         return None
-
-    
-    
 
     def _initialize_social_networks(self, density=0.1):
         """
@@ -684,7 +717,8 @@ class FifteenMinuteCity(Model):
                     city=getattr(self, 'city', None),
                     industry_distribution=getattr(self, 'industry_distribution', {}),
                     occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                    income_distribution=getattr(self, 'income_distribution', {})
+                    income_distribution=getattr(self, 'income_distribution', {}),
+                    economic_status_distribution=getattr(self, 'economic_status_distribution', {})
                 )
                 
                 # TEMPORARY FEATURE: For Taipa parish, spawn 30% of residents at casinos
@@ -800,7 +834,8 @@ class FifteenMinuteCity(Model):
                 city=getattr(self, 'city', None),
                 industry_distribution=getattr(self, 'industry_distribution', {}),
                 occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                income_distribution=getattr(self, 'income_distribution', {})
+                income_distribution=getattr(self, 'income_distribution', {}),
+                economic_status_distribution=getattr(self, 'economic_status_distribution', {})
             )
 
             # Determine step size and accessibility radius based on agent's age

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from simulation.llm_interaction_layer import EpisodicMemory
+import re
 
 class ActionType(Enum):
     """Types of actions residents can perform"""
@@ -296,11 +297,15 @@ class Resident(BaseAgent):
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
                                  city=None, industry_distribution=None, occupation_distribution=None, 
-                                 income_distribution=None):
+                                 income_distribution=None, economic_status_distribution=None):
         """
         Generate agent properties based on demographic distributions.
-        If a parish is specified and parish-specific demographics exist,
-        use those instead of the global demographics.
+        For Macau, follows strict logic sequence:
+        1. Use parish_demographic.json for age, gender, education_level
+        2. Use economic_status.json based on age group to assign economic_status
+        3. If economic_status is "Employed", use occupation.json based on age group
+        4. Use industry.json based on education to assign industry
+        5. If occupation assigned, use income.json; otherwise random low income
         
         Args:
             parish: The parish name to use for demographics (optional)
@@ -310,23 +315,37 @@ class Resident(BaseAgent):
             industry_distribution: Industry distribution data
             occupation_distribution: Occupation distribution data
             income_distribution: Income distribution data
+            economic_status_distribution: Economic status distribution data
             
         Returns:
             Dictionary of agent properties
         """
+        print(f"DEBUG: _generate_agent_properties called with:")
+        print(f"  - parish: {parish}")
+        print(f"  - city: {city}")
+        print(f"  - industry_distribution available: {industry_distribution is not None}")
+        print(f"  - occupation_distribution available: {occupation_distribution is not None}")
+        print(f"  - income_distribution available: {income_distribution is not None}")
+        print(f"  - economic_status_distribution available: {economic_status_distribution is not None}")
+        
         # Use parish-specific demographics if available
         if parish and parish_demographics and parish in parish_demographics:
             demographics = parish_demographics[parish]
+            print(f"DEBUG: Using parish-specific demographics for {parish}")
         
         if not demographics:
+            print("DEBUG: No demographics available, returning empty dict")
             return {}
         
         props = {}
 
+        # === STEP 1: Use parish_demographic.json for age, gender, education ===
+        
         # --- AGE & AGE CLASS ---
         age_dist = demographics.get('age_distribution', {})
         age_group = Resident._sample_from_distribution(age_dist)
         props['age_class'] = age_group  # Store the sampled age class for reference
+        print(f"DEBUG: Step 1 - Sampled age_class: {age_group}")
 
         # Convert age group to an actual age value
         if age_group is not None:
@@ -337,7 +356,6 @@ class Resident(BaseAgent):
                     max_age = int(max_age)
                     props['age'] = random.randint(min_age, max_age)
                 except ValueError:
-                    # Fallback in case parsing fails
                     props['age'] = random.randint(18, 90)
             elif age_group.endswith('+'):  # e.g. "85+"
                 try:
@@ -348,42 +366,18 @@ class Resident(BaseAgent):
             else:  # Unknown pattern – fallback
                 props['age'] = random.randint(18, 90)
         else:
-            # If no age group could be sampled, fallback to a default range
             props['age'] = random.randint(18, 90)
+        
+        print(f"DEBUG: Step 1 - Generated age: {props['age']}")
 
         # --- GENDER ---
         gender_dist = {}
-        # Prefer age-specific gender distribution if available
         if demographics.get('gender_by_age') and age_group in demographics['gender_by_age']:
             gender_dist = demographics['gender_by_age'][age_group]
         else:
             gender_dist = demographics.get('gender_distribution', {})
         props['gender'] = Resident._sample_from_distribution(gender_dist)
-
-        # --- INCOME ---
-        income_dist = demographics.get('income_distribution', {})
-        income_level = Resident._sample_from_distribution(income_dist)
-
-        # Convert income level to actual income - use parish-specific ranges if available
-        income_ranges = demographics.get('income_ranges', {
-            "low": (10000, 30000),
-            "medium": (30001, 100000),
-            "high": (100001, 500000)
-        })
-        
-        if income_level in income_ranges:
-            min_val, max_val = income_ranges[income_level]
-            props['income'] = random.randint(min_val, max_val)
-        else:
-            # Fallback to default ranges
-            if income_level == "low":
-                props['income'] = random.randint(10000, 30000)
-            elif income_level == "medium":
-                props['income'] = random.randint(30001, 100000)
-            else:  # high
-                props['income'] = random.randint(100001, 500000)
-
-        # Note: For Macau, income will be reassigned based on occupation after occupation is determined
+        print(f"DEBUG: Step 1 - Generated gender: {props['gender']}")
 
         # --- EDUCATION LEVEL ---
         education_level = None
@@ -401,77 +395,201 @@ class Resident(BaseAgent):
                     flattened_edu_dist[k] = v
             education_level = Resident._sample_from_distribution(flattened_edu_dist)
         else:
-            # Fallback to generic education distribution if provided
             education_dist = demographics.get('education_distribution', {})
             education_level = Resident._sample_from_distribution(education_dist)
         props['education'] = education_level
+        print(f"DEBUG: Step 1 - Generated education: '{education_level}'")
 
-        # --- INDUSTRY ---  NEW SECTION
-        industry_choice = None
-        if (city == "Macau, China" and education_level and industry_distribution):
-            norm_edu = Resident._normalise_string(education_level)
-            # direct match or attempt to map common synonyms
-            industry_dist = industry_distribution.get(norm_edu)
-            if not industry_dist:
-                # Try some heuristic replacements
-                for key, dist in industry_distribution.items():
-                    if key in norm_edu or norm_edu in key:
-                        industry_dist = dist
-                        break
-            if industry_dist:
-                industry_choice = Resident._sample_from_distribution(industry_dist)
-        props['industry'] = industry_choice
+        # For non-Macau cities, use simplified logic
+        if city != "Macau, China":
+            # Default values for non-Macau cities
+            props['employment_status'] = "employed"
+            props['household_type'] = "single"
+            props['industry'] = None
+            props['occupation'] = None
+            props['income'] = random.randint(30000, 100000)  # Default medium income
+            print(f"DEBUG: Non-Macau city, using simplified logic")
+            print(f"DEBUG: Final generated properties: {props}")
+            print("---")
+            return props
 
-        # --- OCCUPATION ---
-        occupation_choice = None
-        if (city == "Macau, China" and props.get('age') is not None and occupation_distribution):
+        # === MACAU-SPECIFIC LOGIC ===
+        print(f"DEBUG: Starting Macau-specific logic")
+
+        # === STEP 2: Use economic_status.json based on age group ===
+        economic_status = None
+        # Load economic_status distribution from parameter
+        if economic_status_distribution:
+            # Map age to age group used in economic_status.json
+            economic_age_group = None
             age = props['age']
-            # Map age to age group used in occupation.json
-            age_group = None
             if 16 <= age <= 24:
-                age_group = "16-24"
+                economic_age_group = "16-24"
             elif 25 <= age <= 29:
-                age_group = "25-29"
+                economic_age_group = "25-29"
             elif 30 <= age <= 34:
-                age_group = "30-34"
+                economic_age_group = "30-34"
             elif 35 <= age <= 39:
-                age_group = "35-39"
+                economic_age_group = "35-39"
             elif 40 <= age <= 44:
-                age_group = "40-44"
+                economic_age_group = "40-44"
             elif 45 <= age <= 49:
-                age_group = "45-49"
+                economic_age_group = "45-49"
             elif 50 <= age <= 54:
-                age_group = "50-54"
+                economic_age_group = "50-54"
             elif 55 <= age <= 59:
-                age_group = "55-59"
+                economic_age_group = "55-59"
             elif 60 <= age <= 64:
-                age_group = "60-64"
+                economic_age_group = "60-64"
             elif age >= 65:
-                age_group = "≧65"
+                economic_age_group = ">=65"
             
-            if age_group and age_group in occupation_distribution:
-                occupation_dist = occupation_distribution[age_group]
+            # Map gender to economic_status.json format (M/F)
+            gender_key = "M" if props['gender'].lower() == 'male' else "F"
+            
+            print(f"DEBUG: Step 2 - Age: {age}, mapped to economic_age_group: '{economic_age_group}'")
+            print(f"DEBUG: Step 2 - Gender: {props['gender']}, mapped to gender_key: '{gender_key}'")
+            
+            # Get economic status distribution for this age group and gender
+            if (economic_age_group and economic_age_group in economic_status_distribution and 
+                gender_key in economic_status_distribution[economic_age_group]):
+                
+                econ_dist = economic_status_distribution[economic_age_group][gender_key]
+                economic_status = Resident._sample_from_distribution(econ_dist)
+                print(f"DEBUG: Step 2 - Selected economic_status: '{economic_status}'")
+            else:
+                print(f"DEBUG: Step 2 - No economic status distribution found for age_group: '{economic_age_group}', gender: '{gender_key}'")
+                economic_status = "Employed"  # Default fallback
+        else:
+            print(f"DEBUG: Step 2 - No economic_status_distribution available, using education-based fallback")
+            # Fallback: determine employment status based on education level
+            if education_level:
+                edu_lower = education_level.lower()
+                if 'tertiary' in edu_lower:
+                    economic_status = "Employed" if random.random() < 0.8 else "Unemployed"
+                elif 'secondary' in edu_lower and 'senior' in edu_lower:
+                    economic_status = "Employed" if random.random() < 0.6 else "Unemployed"
+                elif 'diploma' in edu_lower:
+                    economic_status = "Employed" if random.random() < 0.75 else "Unemployed"
+                else:
+                    economic_status = "Employed" if random.random() < 0.4 else "Unemployed"
+            else:
+                economic_status = "Employed" if random.random() < 0.5 else "Unemployed"
+        
+        props['employment_status'] = economic_status.lower() if economic_status else "unemployed"
+        print(f"DEBUG: Step 2 - Generated economic_status: '{economic_status}'")
+
+        # === STEP 3: If economic_status is "Employed", assign occupation based on age group ===
+        occupation_choice = None
+        if economic_status == "Employed" and occupation_distribution:
+            age = props['age']
+            print(f"DEBUG: Step 3 - Attempting to assign occupation for employed person, age: {age}")
+            
+            # Map age to age group used in occupation.json
+            occupation_age_group = None
+            if 16 <= age <= 24:
+                occupation_age_group = "16-24"
+            elif 25 <= age <= 29:
+                occupation_age_group = "25-29"
+            elif 30 <= age <= 34:
+                occupation_age_group = "30-34"
+            elif 35 <= age <= 39:
+                occupation_age_group = "35-39"
+            elif 40 <= age <= 44:
+                occupation_age_group = "40-44"
+            elif 45 <= age <= 49:
+                occupation_age_group = "45-49"
+            elif 50 <= age <= 54:
+                occupation_age_group = "50-54"
+            elif 55 <= age <= 59:
+                occupation_age_group = "55-59"
+            elif 60 <= age <= 64:
+                occupation_age_group = "60-64"
+            elif age >= 65:
+                occupation_age_group = "≧65"
+            
+            print(f"DEBUG: Step 3 - Mapped age {age} to occupation_age_group: '{occupation_age_group}'")
+            print(f"DEBUG: Step 3 - Available occupation age groups: {list(occupation_distribution.keys())}")
+            
+            if occupation_age_group and occupation_age_group in occupation_distribution:
+                occupation_dist = occupation_distribution[occupation_age_group]
                 occupation_choice = Resident._sample_from_distribution(occupation_dist)
+                print(f"DEBUG: Step 3 - Selected occupation: '{occupation_choice}'")
+            else:
+                print(f"DEBUG: Step 3 - No occupation distribution found for age_group: '{occupation_age_group}'")
+        else:
+            print(f"DEBUG: Step 3 - Skipping occupation assignment (economic_status: '{economic_status}')")
+        
         props['occupation'] = occupation_choice
 
-        # --- INCOME (Reassign for Macau based on occupation) ---
-        if (city == "Macau, China" and occupation_choice and income_distribution):
-            # Handle slight naming differences between occupation.json and income.json
-            income_key = occupation_choice
+        # === STEP 4: Assign industry based on education ===
+        industry_choice = None
+        if education_level and industry_distribution:
+            print(f"DEBUG: Step 4 - Attempting to assign industry for education: '{education_level}'")
+            norm_edu = Resident._normalise_string(education_level)
+            print(f"DEBUG: Step 4 - Normalized education: '{norm_edu}'")
+            print(f"DEBUG: Step 4 - Available industry keys: {list(industry_distribution.keys())}")
             
-            if income_key in income_distribution:
-                income_bracket_dist = income_distribution[income_key]
+            # Direct match first
+            industry_dist = industry_distribution.get(norm_edu)
+            if not industry_dist:
+                print(f"DEBUG: Step 4 - No direct match found, trying partial matching...")
+                # Try partial matching
+                for key, dist in industry_distribution.items():
+                    normalized_key = Resident._normalise_string(key)
+                    print(f"DEBUG: Step 4 - Comparing '{norm_edu}' with '{normalized_key}'")
+                    if normalized_key == norm_edu:
+                        industry_dist = dist
+                        print(f"DEBUG: Step 4 - Found partial match with key: '{key}'")
+                        break
+            else:
+                print(f"DEBUG: Step 4 - Found direct match for normalized education")
+                
+            if industry_dist:
+                industry_choice = Resident._sample_from_distribution(industry_dist)
+                print(f"DEBUG: Step 4 - Selected industry: '{industry_choice}'")
+            else:
+                print(f"DEBUG: Step 4 - No industry distribution found for education: '{education_level}'")
+        else:
+            print(f"DEBUG: Step 4 - Skipping industry assignment (education: '{education_level}', industry_distribution available: {industry_distribution is not None})")
+        
+        props['industry'] = industry_choice
+
+        # === STEP 5: Assign income based on occupation or random low if no occupation ===
+        if occupation_choice and income_distribution:
+            print(f"DEBUG: Step 5 - Attempting to assign income based on occupation: '{occupation_choice}'")
+            print(f"DEBUG: Step 5 - Available income keys: {list(income_distribution.keys())}")
+            
+            if occupation_choice in income_distribution:
+                income_bracket_dist = income_distribution[occupation_choice]
                 income_bracket = Resident._sample_from_distribution(income_bracket_dist)
+                print(f"DEBUG: Step 5 - Selected income bracket: '{income_bracket}'")
                 
                 # Convert income bracket to actual income value
                 if income_bracket:
                     actual_income = Resident._convert_income_bracket_to_value(income_bracket)
+                    print(f"DEBUG: Step 5 - Converted income bracket '{income_bracket}' to actual income: {actual_income}")
                     if actual_income is not None:
                         props['income'] = actual_income
+                        print(f"DEBUG: Step 5 - Final income assigned: {props['income']}")
+                    else:
+                        print(f"DEBUG: Step 5 - Failed to convert income bracket, using random low income")
+                        props['income'] = random.randint(10000, 30000)  # Low income fallback
+                else:
+                    print(f"DEBUG: Step 5 - No income bracket selected, using random low income")
+                    props['income'] = random.randint(10000, 30000)  # Low income fallback
+            else:
+                print(f"DEBUG: Step 5 - Occupation '{occupation_choice}' not found in income distribution, using random low income")
+                props['income'] = random.randint(10000, 30000)  # Low income fallback
+        else:
+            print(f"DEBUG: Step 5 - No occupation assigned, using random low income")
+            props['income'] = random.randint(10000, 30000)  # Low income for unemployed/no occupation
 
         # Default values for additional attributes
-        props['employment_status'] = "employed"
         props['household_type'] = "single"
+        
+        print(f"DEBUG: Final generated properties: {props}")
+        print("---")
 
         return props
 
@@ -561,7 +679,7 @@ class Resident(BaseAgent):
         """
         try:
             # Get multiple path options
-            path_options = self._get_multiple_path_options(from_node, to_node)
+            path_options = self._get_multiple_path_options(from_node, to_node, max_paths=4)
             
             if not path_options:
                 self.logger.warning(f"No path options found from {from_node} to {to_node}")
@@ -2375,10 +2493,12 @@ class Resident(BaseAgent):
 
     @staticmethod
     def _normalise_string(s):
-        """Normalize a string by removing spaces and converting to lowercase."""
+        """Normalize a string by removing spaces, dashes, and converting to lowercase."""
         if not s:
             return ""
-        return s.replace(" ", "").lower()
+        # Remove spaces, dashes, and other common punctuation
+        normalized = re.sub(r'[\s\-_.,;:()]+', '', s.lower())
+        return normalized
 
     @staticmethod
     def _convert_income_bracket_to_value(income_bracket):
@@ -2386,26 +2506,53 @@ class Resident(BaseAgent):
         if not income_bracket:
             return None
         
-        # Handle common income bracket formats
-        if "10,000" in income_bracket and "19,999" in income_bracket:
-            return random.randint(10000, 19999)
-        elif "20,000" in income_bracket and "29,999" in income_bracket:
-            return random.randint(20000, 29999)
-        elif "30,000" in income_bracket and "39,999" in income_bracket:
-            return random.randint(30000, 39999)
-        elif "40,000" in income_bracket and "49,999" in income_bracket:
-            return random.randint(40000, 49999)
-        elif "50,000" in income_bracket and "59,999" in income_bracket:
-            return random.randint(50000, 59999)
-        elif "60,000" in income_bracket and "69,999" in income_bracket:
-            return random.randint(60000, 69999)
-        elif "70,000" in income_bracket and "79,999" in income_bracket:
-            return random.randint(70000, 79999)
-        elif "80,000" in income_bracket and "89,999" in income_bracket:
-            return random.randint(80000, 89999)
-        elif "90,000" in income_bracket and "99,999" in income_bracket:
-            return random.randint(90000, 99999)
-        elif "100,000" in income_bracket:
-            return random.randint(100000, 200000)
-        else:
-            return 50000  # Default fallback
+        # Handle Macau income bracket formats (uses spaces as thousands separators)
+        bracket = income_bracket.strip()
+        
+        # Handle "< X XXX" format
+        if bracket.startswith("< "):
+            max_val = int(bracket[2:].replace(" ", ""))
+            return random.randint(1000, max_val)
+        
+        # Handle "≧X XXX" format (greater than or equal to)
+        elif bracket.startswith("≧"):
+            min_val = int(bracket[1:].replace(" ", ""))
+            return random.randint(min_val, min_val + 50000)  # Add reasonable upper bound
+        
+        # Handle "X XXX - Y YYY" format
+        elif " - " in bracket:
+            parts = bracket.split(" - ")
+            if len(parts) == 2:
+                min_val = int(parts[0].replace(" ", ""))
+                max_val = int(parts[1].replace(" ", ""))
+                return random.randint(min_val, max_val)
+        
+        # Handle "Unpaid family worker" or other special cases
+        elif "unpaid" in bracket.lower():
+            return 0
+        
+        # Legacy handling for comma-separated formats (keep for backward compatibility)
+        elif "," in bracket:
+            if "10,000" in bracket and "19,999" in bracket:
+                return random.randint(10000, 19999)
+            elif "20,000" in bracket and "29,999" in bracket:
+                return random.randint(20000, 29999)
+            elif "30,000" in bracket and "39,999" in bracket:
+                return random.randint(30000, 39999)
+            elif "40,000" in bracket and "49,999" in bracket:
+                return random.randint(40000, 49999)
+            elif "50,000" in bracket and "59,999" in bracket:
+                return random.randint(50000, 59999)
+            elif "60,000" in bracket and "69,999" in bracket:
+                return random.randint(60000, 69999)
+            elif "70,000" in bracket and "79,999" in bracket:
+                return random.randint(70000, 79999)
+            elif "80,000" in bracket and "89,999" in bracket:
+                return random.randint(80000, 89999)
+            elif "90,000" in bracket and "99,999" in bracket:
+                return random.randint(90000, 99999)
+            elif "100,000" in bracket:
+                return random.randint(100000, 200000)
+        
+        # Default fallback
+        return 50000
