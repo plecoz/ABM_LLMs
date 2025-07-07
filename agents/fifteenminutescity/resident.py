@@ -240,6 +240,26 @@ class Resident(BaseAgent):
             'completed_actions': [],  # List of completed actions with outcomes
         }
         
+        # Calculate daily income from monthly income (moved here to ensure it uses final income value)
+        self.daily_income = self.attributes['income'] / 30
+        
+        # DEBUG: Print comprehensive resident characteristics
+        print(f"DEBUG: Resident {unique_id} characteristics:")
+        print(f"  - Age: {self.attributes['age']} (class: {self.attributes.get('age_class', 'N/A')})")
+        print(f"  - Gender: {self.attributes.get('gender', 'N/A')}")
+        print(f"  - Education: {self.attributes.get('education', 'N/A')}")
+        print(f"  - Occupation: {self.attributes.get('occupation', 'N/A')}")
+        print(f"  - Industry: {self.attributes.get('industry', 'N/A')}")
+        print(f"  - Parish: {self.attributes.get('parish', 'N/A')}")
+        print(f"  - Employment Status: {self.employment_status}")
+        print(f"  - Household Type: {self.household_type}")
+        print(f"  - Monthly Income: {self.attributes['income']}")
+        print(f"  - Daily Income: {self.daily_income:.2f}")
+        print(f"  - Movement Behavior: {self.movement_behavior}")
+        print(f"  - Is Tourist: {self.is_tourist}")
+        print(f"  - Home Node: {self.home_node}")
+        print("---")
+        
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
