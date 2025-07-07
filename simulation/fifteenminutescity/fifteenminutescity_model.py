@@ -235,8 +235,15 @@ class FifteenMinuteCity(Model):
         # Initialize output controller for tracking metrics
         self.output_controller = OutputController(self)
         
-        # Create resident agents with proportional distribution
-        self._create_residents_with_distribution(num_residents)
+        # -----------------------------------------------------
+        # Create resident agents
+        # -----------------------------------------------------
+        if self.random_distribution or self.parish_distribution is None:
+            # Fallback to random placement when no parish distribution is given
+            self._create_residents_randomly(num_residents)
+        else:
+            # Use proportional distribution across specified parishes
+            self._create_residents_with_distribution(num_residents)
 
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
@@ -739,10 +746,12 @@ class FifteenMinuteCity(Model):
             
             # Calculate access distance
             home_node_geom = self.graph.nodes[home_node]
-            access_distance_meters = ox.distance.great_circle_vec(
+            access_distance_meters = ox.distance.great_circle(
                 lat1=point_geometry.y, lon1=point_geometry.x,
                 lat2=home_node_geom['y'], lon2=home_node_geom['x']
             )
+            # Determine parish before generating properties
+            parish = self._get_parish_for_node(home_node)
             # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
             agent_props = self._generate_agent_properties(parish)
@@ -755,7 +764,6 @@ class FifteenMinuteCity(Model):
             accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                 self.graph, home_node, cutoff=accessibility_radius, weight='length'
             ))
-            parish = self._get_parish_for_node(home_node)
             
             resident = Resident(
                 model=self, unique_id=i, geometry=point_geometry,
@@ -828,6 +836,10 @@ class FifteenMinuteCity(Model):
         resident.persona_type = persona_type
         resident.persona_template = persona_template
         resident.emotional_state = emotional_state
+        
+        # Sync persona with Concordia brain
+        if getattr(resident, "brain", None) is not None:
+            resident.brain.set_persona(persona_template)
         
         self.logger.debug(f"Assigned persona {persona_type.value} to resident {resident.unique_id}")
     

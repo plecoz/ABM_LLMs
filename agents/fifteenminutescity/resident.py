@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
 from simulation.llm_interaction_layer import EpisodicMemory
+from brains.concordia_brain import ConcordiaBrain
 
 class ActionType(Enum):
     """Types of actions residents can perform"""
@@ -234,6 +235,14 @@ class Resident(BaseAgent):
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
+
+        # ---------------------------------------------------
+        # Concordia Brain (LLM) integration
+        # ---------------------------------------------------
+        try:
+            self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
+        except Exception as _e:
+            self.brain = None  # Fallback if Concordia cannot be initialised
 
     def calculate_travel_time(self, from_node, to_node):
         """
@@ -610,115 +619,13 @@ class Resident(BaseAgent):
         return None
 
     def _choose_llm_based_target(self):
-        """
-        Choose movement target using LLM-based decision making.
-        
-        Returns:
-            POI type to move to, 'home' to go home, or None to stay put
-        """
-        # Check if LLM components are available
-        if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
-            self.logger.warning("LLM interaction layer not available, falling back to need-based movement")
-            return self._choose_need_based_target()
-        
-        try:
-            # Create agent state for LLM using the helper method if available
-            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
-                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
-                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
-            else:
-                # Fallback: create a basic agent state dict
-                agent_state = {
-                    'age': getattr(self, 'age', 30),
-                    'current_needs': getattr(self, 'current_needs', {}),
-                    'agent_id': str(self.unique_id)
-                }
-            
-            # Create observation for LLM
-            observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
-            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
-            
-            # Get episodic memories (recent POI visits)
-            episodic_memories = self._get_episodic_memories()
-            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
-            
-            # Get LLM decision using the new target decision method with CoT
-            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
-                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
-                    agent_state=agent_state,
-                    observation=observation,
-                    episodic_memories=episodic_memories,
-                    agent_complexity="standard",
-                    latency_requirement="normal",
-                    simulation_context={'simulation_type': 'fifteen_minute_city'}
-                )
-            else:
-                # Fallback to generic method
-                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
-                    agent_state=agent_state,
-                    observation=observation,
-                    episodic_memories=episodic_memories,
-                    agent_complexity="standard",
-                    latency_requirement="normal"
-                )
-            
-            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
-            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
-            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
-            
-            # Parse the LLM's decision and act on it
-            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
-                action = llm_decision.action.lower().strip()
-                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
-                
-                # Map standardized decision actions to POI types or special actions
-                if action == 'go_home':
-                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
-                    return 'home'
-                elif action == 'stay_put':
-                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
-                    return None
-                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
-                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
-                    return action
-                else:
-                    # Try to map other actions to POI types
-                    action_to_poi = {
-                        'eat': 'restaurant',
-                        'food': 'restaurant',
-                        'shopping': 'shop',
-                        'buy': 'shop',
-                        'health': 'hospital',
-                        'medical': 'hospital',
-                        'exercise': 'gym',
-                        'fitness': 'gym',
-                        'relax': 'park',
-                        'nature': 'park',
-                        'study': 'library',
-                        'read': 'library',
-                        'movie': 'cinema',
-                        'entertainment': 'cinema',
-                        'medicine': 'pharmacy',
-                        'money': 'bank',
-                        'groceries': 'supermarket'
-                    }
-                    
-                    for keyword, poi_type in action_to_poi.items():
-                        if keyword in action:
-                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
-                            return poi_type
-                    
-                    # If no mapping found, log and return None
-                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
-                    return None
-            
-            # Fallback if no valid action is returned
-            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
-            return self._make_need_based_movement_decision()
+        """Choose movement target using Concordia LLM brain (if available)."""
+        # Prefer Concordia brain if present
+        if getattr(self, 'brain', None) is not None:
+            return self._choose_concordia_based_target()
 
-        except Exception as e:
-            self.logger.error(f"Error in LLM movement decision: {e}")
-            return self._make_need_based_movement_decision()
+        # Concordia unavailable – fall back to need-based behaviour
+            return self._choose_need_based_target()
     
     def _get_episodic_memories(self):
         """
@@ -1285,112 +1192,9 @@ class Resident(BaseAgent):
         return None
 
     def _make_llm_movement_decision(self):
-        """Make an LLM-based movement decision."""
-        if not self.model.llm_enabled:
-            return self._make_need_based_movement_decision()
-
-        try:
-            # Check if LLM components are available
-            if not hasattr(self.model, 'llm_interaction_layer') or not self.model.llm_interaction_layer:
-                self.logger.warning("LLM interaction layer not available, falling back to need-based movement")
-                return self._make_need_based_movement_decision()
-            
-            # Create agent state for LLM using the helper method if available
-            if hasattr(self.model.llm_interaction_layer, 'create_agent_state_from_resident'):
-                agent_state = self.model.llm_interaction_layer.create_agent_state_from_resident(self)
-                print(f"DEBUG: Resident {self.unique_id} has created an agent state from resident")
-            else:
-                # Fallback: create a basic agent state dict
-                agent_state = {
-                    'age': getattr(self, 'age', 30),
-                    'current_needs': getattr(self, 'current_needs', {}),
-                    'agent_id': str(self.unique_id)
-                }
-            
-            # Create observation for LLM
-            observation = self.model.llm_interaction_layer.create_observation_from_context(self, self.model)
-            print(f"DEBUG: Resident {self.unique_id} has created an observation from context")
-            
-            # Get episodic memories (recent POI visits)
-            episodic_memories = self._get_episodic_memories()
-            print(f"DEBUG: Resident {self.unique_id} has created an episodic memories")
-            
-            # Get LLM decision using the new target decision method with CoT
-            if hasattr(self.model.llm_interaction_layer, 'get_agent_target_decision'):
-                llm_decision = self.model.llm_interaction_layer.get_agent_target_decision(
-                    agent_state=agent_state,
-                    observation=observation,
-                    episodic_memories=episodic_memories,
-                    agent_complexity="standard",
-                    latency_requirement="normal",
-                    simulation_context={'simulation_type': 'fifteen_minute_city'}
-                )
-            else:
-                # Fallback to generic method
-                llm_decision = self.model.llm_interaction_layer.get_agent_decision(
-                    agent_state=agent_state,
-                    observation=observation,
-                    episodic_memories=episodic_memories,
-                    agent_complexity="standard",
-                    latency_requirement="normal"
-                )
-            
-            print(f"DEBUG: Resident {self.unique_id} has got an LLM decision")
-            print(f"DEBUG: LLM decision action: '{llm_decision.action if llm_decision else 'None'}'")
-            print(f"DEBUG: LLM decision rationale: '{llm_decision.rationale if llm_decision else 'None'}'")
-            
-            # Parse the LLM's decision and act on it
-            if llm_decision and hasattr(llm_decision, 'action') and llm_decision.action:
-                action = llm_decision.action.lower().strip()
-                print(f"DEBUG: Resident {self.unique_id} has parsed the LLM decision")
-                
-                # Map standardized decision actions to POI types or special actions
-                if action == 'go_home':
-                    self.logger.info(f"LLM decided to go home. Reason: {llm_decision.rationale}")
-                    return 'home'
-                elif action == 'stay_put':
-                    self.logger.info(f"LLM decided to stay put. Reason: {llm_decision.rationale}")
-                    return None
-                elif action in ['restaurant', 'shop', 'hospital', 'park', 'library', 'cinema', 'gym', 'pharmacy', 'bank', 'supermarket']:
-                    self.logger.info(f"LLM decided to move to {action}. Reason: {llm_decision.rationale}")
-                    return action
-                else:
-                    # Try to map other actions to POI types
-                    action_to_poi = {
-                        'eat': 'restaurant',
-                        'food': 'restaurant',
-                        'shopping': 'shop',
-                        'buy': 'shop',
-                        'health': 'hospital',
-                        'medical': 'hospital',
-                        'exercise': 'gym',
-                        'fitness': 'gym',
-                        'relax': 'park',
-                        'nature': 'park',
-                        'study': 'library',
-                        'read': 'library',
-                        'movie': 'cinema',
-                        'entertainment': 'cinema',
-                        'medicine': 'pharmacy',
-                        'money': 'bank',
-                        'groceries': 'supermarket'
-                    }
-                    
-                    for keyword, poi_type in action_to_poi.items():
-                        if keyword in action:
-                            self.logger.info(f"LLM decided to move to {poi_type} (mapped from '{action}'). Reason: {llm_decision.rationale}")
-                            return poi_type
-                    
-                    # If no mapping found, log and return None
-                    self.logger.warning(f"Could not map LLM action '{action}' to a POI type. Staying put.")
-                    return None
-            
-            # Fallback if no valid action is returned
-            self.logger.warning("No valid LLM decision received, falling back to need-based movement")
-            return self._make_need_based_movement_decision()
-
-        except Exception as e:
-            self.logger.error(f"Error in LLM movement decision: {e}")
+        """Return a movement decision using Concordia brain; fallback to need-based."""
+        if getattr(self, 'brain', None) is not None:
+            return self._choose_concordia_based_target()
             return self._make_need_based_movement_decision()
         
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
@@ -2103,3 +1907,55 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error updating emotional state from POI visit: {e}")
+
+    def _choose_concordia_based_target(self):
+        """Use the embedded Concordia brain to select a movement target."""
+        if self.brain is None:
+            return self._choose_need_based_target()
+
+        # Compose a succinct observation describing current state
+        needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
+        poi_types = [getattr(poi, 'poi_type', 'unknown') for poi in getattr(self.model, 'poi_agents', [])]
+        poi_list = ", ".join(sorted(set(poi_types)))
+        observation = (
+            f"Current needs => {needs_summary}. "
+            f"Accessible POI types => {poi_list}."
+        )
+        try:
+            self.brain.observe(observation)
+            reply = self.brain.decide(
+                "Where should you go next? Respond with a single keyword such as 'restaurant', 'shop', 'home' or 'stay'."
+            ).lower()
+        except Exception as _e:
+            # Fall back if Concordia errors out
+            self.logger.error(f"Concordia brain error: {_e}")
+            return self._choose_need_based_target()
+
+        # Basic interpretation of LLM reply
+        if not reply:
+            return None
+        if 'home' in reply:
+            return 'home'
+        if 'stay' in reply or 'wait' in reply:
+            return None
+
+        # Map common synonyms to POI types
+        mapping = {
+            'shop': 'shop', 'store': 'shop', 'shopping': 'shop',
+            'restaurant': 'restaurant', 'eat': 'restaurant', 'food': 'restaurant',
+            'hospital': 'hospital', 'health': 'hospital', 'clinic': 'hospital',
+            'park': 'park', 'garden': 'park',
+            'gym': 'gym', 'fitness': 'gym',
+            'school': 'school', 'education': 'school',
+            'library': 'library', 'read': 'library',
+            'cinema': 'cinema', 'movie': 'cinema',
+            'bank': 'bank', 'money': 'bank',
+            'pharmacy': 'pharmacy', 'medicine': 'pharmacy',
+            'supermarket': 'supermarket', 'grocer': 'supermarket',
+        }
+        for key, poi in mapping.items():
+            if key in reply:
+                return poi
+
+        # Default: assume reply is a valid POI type
+        return reply.strip() or None
