@@ -95,7 +95,7 @@ class Resident(BaseAgent):
         # Household and occupation (keep separate as requested)
         self.household_members = kwargs.get('household_members', [])
         self.household_type = kwargs.get('household_type', "single")
-        self.employment_status = kwargs.get('employment_status', "employed")
+        self.economic_status = kwargs.get('economic_status', "employed")
         
         # Consolidated attributes dictionary
         self.attributes = {
@@ -134,48 +134,7 @@ class Resident(BaseAgent):
         # TEMPORARY: Add is_tourist as a direct attribute for easy access
         self.is_tourist = kwargs.get('is_tourist', False)
 
-        # Employment probabilities - only for Macau
-        if hasattr(self.model, 'city') and self.model.city == 'Macau, China':
-            self.employment = {
-                "No schooling / Pre-primary education": {
-                    "employed": 0.204859253,
-                    "unemployed or inactive": 0.795140747
-                },
-                "Primary education": {
-                    "incomplete": {
-                        "employed": 0.347652163,
-                        "unemployed or inactive": 0.652347837
-                    },
-                    "complete": {
-                        "employed": 0.487596097,
-                        "unemployed or inactive": 0.512403903
-                    }
-                },
-                "Secondary education": {
-                    "Junior": {
-                        "employed": 0.586663197,
-                        "unemployed or inactive": 0.413336803
-                    },
-                    "Senior": {
-                        "employed": 0.607928076,
-                        "unemployed or inactive": 0.392071924
-                    }
-                },
-                "Diploma programme": {
-                    "employed": 0.747351695,
-                    "unemployed or inactive": 0.252648305
-                },
-                "Tertiary education": {
-                    "employed": 0.801285549,
-                    "unemployed or inactive": 0.198714451
-                },
-                "Others": {
-                    "employed": 0.196492271,
-                    "unemployed or inactive": 0.803507729
-                }
-            }
-        else:
-            self.employment = None
+        
         
         # Dynamic needs (placeholder - to be implemented later)
         self.dynamic_needs = {
@@ -269,33 +228,7 @@ class Resident(BaseAgent):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
 
 
-        def _load_demographics(self, demographics_path):
-            """
-            Load demographic data from a JSON file.
-            
-            Args:
-                demographics_path: Path to the JSON file with demographic data
-            """
-            try:
-                with open(demographics_path, 'r') as f:
-                    self.demographics = json.load(f)
-                self.logger.info("Loaded demographics data")
-            except Exception as e:
-                self.logger.error(f"Error loading demographics: {e}")
-                # Set default demographics
-                self.demographics = {
-                    "age_distribution": {"0-18": 0.2, "19-35": 0.3, "36-65": 0.4, "65+": 0.1},
-                    "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
-                    "income_distribution": {"low": 0.3, "medium": 0.5, "high": 0.2},
-                    "education_distribution": {
-                        "no_education": 0.1,
-                        "primary": 0.2,
-                        "high_school": 0.4,
-                        "bachelor": 0.2,
-                        "master": 0.08,
-                        "phd": 0.02
-                    }
-                }
+        
 
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
@@ -343,7 +276,7 @@ class Resident(BaseAgent):
         props = {}
 
         # === STEP 1: Use parish_demographic.json for age, gender, education ===
-        
+
         # --- AGE & AGE CLASS ---
         age_dist = demographics.get('age_distribution', {})
         age_group = Resident._sample_from_distribution(age_dist)
@@ -479,7 +412,10 @@ class Resident(BaseAgent):
             else:
                 economic_status = "Employed" if random.random() < 0.5 else "Unemployed"
         
+        props['economic_status'] = economic_status  # Add this so it gets passed to constructor
+
         props['employment_status'] = economic_status.lower() if economic_status else "unemployed"
+        
         # print(f"DEBUG: Step 2 - Generated economic_status: '{economic_status}'")
 
         # === STEP 3: If economic_status is "Employed", assign occupation based on age group ===
@@ -760,16 +696,12 @@ class Resident(BaseAgent):
         
         return True
 
-    def move_to_poi(self, poi_type):
+    def move_to_poi(self, poi_id):
         """
-        Move to a POI of the specified type.
-        
-        This updated version first tries to find POI agents of the specified type,
-        and if found, moves to one of them. If no POI agents are found, falls back
-        to the original behavior of using POI nodes.
+        Move to a specific POI by its unique ID.
         
         Args:
-            poi_type: The type of POI to move to
+            poi_id: The unique ID of the POI agent to move to
             
         Returns:
             Boolean indicating if the move was successful
@@ -778,54 +710,26 @@ class Resident(BaseAgent):
         if self.traveling:
             return False
             
-        # First try to find POI agents of the specified type
-        poi_agents = [agent for agent in self.model.poi_agents if agent.poi_type == poi_type]
+        # Find the POI agent with the specified ID
+        target_poi = None
+        for poi_agent in self.model.poi_agents:
+            if poi_agent.unique_id == poi_id:
+                target_poi = poi_agent
+                break
         
-        if poi_agents:
-            # Filter POIs to only those at accessible nodes
-            accessible_pois = [poi for poi in poi_agents if poi.node_id in self.accessible_nodes]
-            
-            if accessible_pois:
-                # Choose a random accessible POI
-                target_poi = random.choice(accessible_pois)
-                
-                # Start traveling to the POI
-                return self.start_travel(target_poi.node_id, target_poi.geometry)
-        
-        # Fall back to original behavior if no POI agents are found
-        if not self.model.pois.get(poi_type):
-            return False
-        
-        valid_pois = []
-        for poi_entry in self.model.pois[poi_type]:
-            if isinstance(poi_entry, tuple):
-                node_id, _ = poi_entry  # Unpack node and type
-            else:
-                node_id = poi_entry  # If it's just a node ID
-                
-            if node_id in self.accessible_nodes:
-                valid_pois.append(node_id)
-        
-        if not valid_pois:
-            return False
-            
-        try:
-            target = random.choice(valid_pois)
-            
-            # Get target node coordinates for geometry
-            node_coords = self.model.graph.nodes[target]
-            target_geometry = None
-            if 'x' in node_coords and 'y' in node_coords:
-                from shapely.geometry import Point
-                target_geometry = Point(node_coords['x'], node_coords['y'])
-            
-            # Start traveling to the POI
-            return self.start_travel(target, target_geometry)
-                
-        except (nx.NetworkXNoPath, KeyError, IndexError) as e:
+        if target_poi is None:
             if hasattr(self, 'logger'):
-                self.logger.error(f"Error moving to POI: {e}")
-        return False
+                self.logger.warning(f"POI with ID {poi_id} not found")
+            return False
+        
+        # Check if the POI is accessible
+        if target_poi.node_id not in self.accessible_nodes:
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"POI {poi_id} at node {target_poi.node_id} is not accessible")
+            return False
+        
+        # Start traveling to the POI
+        return self.start_travel(target_poi.node_id, target_poi.geometry)
 
     def get_need_to_poi_mapping(self):
         """
@@ -902,7 +806,7 @@ class Resident(BaseAgent):
         the agent will be forced to go home.
         
         Returns:
-            POI type to move to, 'home' to go home, or None if no movement should occur
+            POI ID to move to, 'home' to go home, or None if no movement should occur
         """
         if self.movement_behavior == 'need-based':
             return self._choose_need_based_target()
@@ -922,36 +826,20 @@ class Resident(BaseAgent):
         Returns:
             POI type to move to, or None if no suitable POI found
         """
-        # Update current needs
-        self.current_needs = self.generate_needs()
-        
-        # Find the highest need
-        highest_need_type, highest_need_value = self.find_highest_need()
-        
-        # Only move if the need is above a threshold (e.g., 50)
-        if highest_need_value < 50:
-            return None
-        
-        # Find POI types that can satisfy this need
-        available_poi_types = self.find_poi_for_need(highest_need_type)
-        
-        if available_poi_types:
-            # Choose a random POI type from available options
-            return random.choice(available_poi_types)
         
         return None
 
     def _choose_random_target(self):
         """
-        Choose a random POI type for movement.
+        Choose a random POI ID for movement.
         For random movement, prevents visiting the same POI twice in a row.
         If no other POIs are available, returns None to trigger going home.
         
         Returns:
-            Random POI type, or None if no suitable POIs available
+            Random POI ID, or None if no suitable POIs available
         """
-        # Get all available POI types and their nodes
-        available_poi_options = []
+        # Get all available POI agents
+        available_poi_ids = []
         
         if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
             # Get POI agents and their node locations
@@ -960,27 +848,10 @@ class Resident(BaseAgent):
                     # Skip if this is the last visited node (prevent consecutive visits)
                     if self.last_visited_node is not None and poi.node_id == self.last_visited_node:
                         continue
-                    available_poi_options.append(poi.poi_type)
-        elif hasattr(self.model, 'pois') and self.model.pois:
-            # Fall back to POI dictionary
-            for poi_type, poi_list in self.model.pois.items():
-                for poi_entry in poi_list:
-                    if isinstance(poi_entry, tuple):
-                        node_id, _ = poi_entry
-                    else:
-                        node_id = poi_entry
-                    
-                    if node_id in self.accessible_nodes:
-                        # Skip if this is the last visited node (prevent consecutive visits)
-                        if self.last_visited_node is not None and node_id == self.last_visited_node:
-                            continue
-                        available_poi_options.append(poi_type)
+                    available_poi_ids.append(poi.unique_id)
         
-        # Remove duplicates while preserving order
-        available_poi_types = list(dict.fromkeys(available_poi_options))
-        
-        if available_poi_types:
-            return random.choice(available_poi_types)
+        if available_poi_ids:
+            return random.choice(available_poi_ids)
         
         # No suitable POIs available - return None to trigger going home
         return None
@@ -1195,25 +1066,25 @@ class Resident(BaseAgent):
             # === MOVEMENT DECISION MAKING ===
             # This is where all movement decisions are made based on the movement behavior
             if not self.traveling:
-                target_poi_type = None
+                target_poi = None
                 
                 if self.movement_behavior == 'random':
                     # Random movement - use existing simple logic
-                    target_poi_type = self._make_random_movement_decision()
+                    target_poi = self._make_random_movement_decision()
                     
                 elif self.movement_behavior == 'need-based':
                     # Need-based movement - use existing logic but centralized here
-                    target_poi_type = self._make_need_based_movement_decision()
+                    target_poi = self._make_need_based_movement_decision()
                     
                 elif self.movement_behavior == 'llms':
                     # LLM-based movement - placeholder for future sophisticated decision making
-                    target_poi_type = self._make_llm_movement_decision()
+                    target_poi = self._make_llm_movement_decision()
                 
                 # Execute the movement decision
-                if target_poi_type == 'home':
+                if target_poi == 'home':
                     self.go_home()
-                elif target_poi_type:
-                    self.move_to_poi(target_poi_type)
+                elif target_poi:
+                    self.move_to_poi(target_poi)
                 # If target_poi_type is None, resident stays put this step
             
             # Record needs snapshot periodically (every 15 minutes)
@@ -1481,7 +1352,7 @@ class Resident(BaseAgent):
         Uses the existing random movement logic but with step-level decision making.
         
         Returns:
-            POI type to move to, 'home' to go home, or None to stay put
+            POI ID to move to, 'home' to go home, or None to stay put
         """
         # Simple probability check for random movement
         if random.random() > 0.7:  # 70% chance to stay put for random movement
@@ -1500,65 +1371,10 @@ class Resident(BaseAgent):
         This is where we can later add sophisticated need hierarchy and POI attractiveness.
         
         Returns:
-            POI type to move to, 'home' to go home, or None to stay put
+            POI ID to move to, 'home' to go home, or None to stay put
         """
         # Update current needs
-        self.current_needs = self.generate_needs()
         
-        # Find the highest need
-        highest_need_type, highest_need_value = self.find_highest_need()
-        
-        # Basic decision factors (can be expanded later)
-        base_move_probability = 0.1  # Base 10% chance to move
-        
-        # Adjust based on time of day
-        hour = self.model.hour_of_day
-        time_factor = 1.0
-        if 6 <= hour <= 22:  # Daytime hours
-            time_factor = 1.5
-        elif 22 < hour or hour < 6:  # Night hours
-            time_factor = 0.2
-        
-        # Adjust based on age
-        age_factor = 1.0
-        if self.age >= 65:
-            age_factor = 0.7
-        elif self.age < 25:
-            age_factor = 1.3
-        
-        # Adjust based on current location
-        location_factor = 1.0
-        if self.current_node == self.home_node:
-            location_factor = 0.8  # Less likely to leave home
-        else:
-            location_factor = 1.2  # More likely to move when already out
-        
-        # Adjust based on need urgency (this is where hierarchy comes in)
-        need_factor = 1.0
-        if highest_need_value > 80:
-            need_factor = 3.0  # Very urgent needs
-        elif highest_need_value > 60:
-            need_factor = 2.0  # Moderate needs
-        elif highest_need_value > 40:
-            need_factor = 1.2  # Mild needs
-        elif highest_need_value < 30:
-            need_factor = 0.3  # Low needs
-        
-        # Calculate final probability
-        move_probability = base_move_probability * time_factor * age_factor * location_factor * need_factor
-        move_probability = min(1.0, move_probability)  # Cap at 100%
-        
-        # Make the decision
-        if random.random() > move_probability:
-            return None  # Stay put
-        
-        # If we decide to move, find POI types that can satisfy the highest need
-        available_poi_types = self.find_poi_for_need(highest_need_type)
-        
-        if available_poi_types:
-            # TODO: This is where POI attractiveness/popularity could be considered
-            # For now, choose randomly from available options
-            return random.choice(available_poi_types)
         
         return None
 

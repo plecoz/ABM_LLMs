@@ -2,7 +2,7 @@ import mesa
 from mesa import Model
 from mesa.space import NetworkGrid
 import random
-from agents.fifteenminutescity.resident import Resident 
+from agents.fifteenminutescity.resident import Resident
 from agents.fifteenminutescity.poi import POI
 import networkx as nx
 import osmnx as ox
@@ -224,7 +224,7 @@ class FifteenMinuteCity(Model):
                 "Age": lambda a: getattr(a, 'age', None),
                 "Age_Class": lambda a: getattr(a, 'age_class', None),
                 "Income": lambda a: getattr(a, 'income', None),
-                "Employment": lambda a: getattr(a, 'employment_status', None),
+                "Occupation": lambda a: getattr(a, 'occupation', None),
                 "Household": lambda a: getattr(a, 'household_type', None),
                 #"Energy": lambda a: getattr(a, 'energy', None),
                 "Speed": lambda a: getattr(a, 'speed', None),
@@ -610,7 +610,7 @@ class FifteenMinuteCity(Model):
         print("-" * 40)
         employment_counts = {}
         for resident in self.residents:
-            status = resident.employment_status
+            status = resident.economic_status
             employment_counts[status] = employment_counts.get(status, 0) + 1
         
         for status, count in sorted(employment_counts.items(), key=lambda x: x[1], reverse=True):
@@ -620,14 +620,16 @@ class FifteenMinuteCity(Model):
         # Income statistics
         print(f"\nINCOME STATISTICS:")
         print("-" * 40)
-        incomes = [resident.attributes.get('income', 0) for resident in self.residents]
-        if incomes:
-            avg_income = sum(incomes) / len(incomes)
-            min_income = min(incomes)
-            max_income = max(incomes)
-            print(f"  Average Monthly Income: ${avg_income:,.2f}")
-            print(f"  Minimum Monthly Income: ${min_income:,.2f}")
-            print(f"  Maximum Monthly Income: ${max_income:,.2f}")
+        daily_incomes = [resident.daily_income for resident in self.residents if hasattr(resident, 'daily_income')]
+        if daily_incomes:
+            avg_daily_income = sum(daily_incomes) / len(daily_incomes)
+            min_daily_income = min(daily_incomes)
+            max_daily_income = max(daily_incomes)
+            print(f"  Average Daily Income: ${avg_daily_income:,.2f}")
+            print(f"  Minimum Daily Income: ${min_daily_income:,.2f}")
+            print(f"  Maximum Daily Income: ${max_daily_income:,.2f}")
+        else:
+            print("  No daily income data available")
         
         print("="*60)
         print("END DEMOGRAPHIC STATISTICS")
@@ -1014,14 +1016,16 @@ class FifteenMinuteCity(Model):
         """
         # Determine persona based on age and other characteristics
         age = getattr(resident, 'age', 30)
-        employment_status = getattr(resident, 'employment_status', 'employed')
+        economic_status = getattr(resident, 'economic_status', 'employed')
         
         # Age-based persona assignment with some randomness
         if age >= 65:
             return PersonaType.ELDERLY_RESIDENT
         elif age < 25:
-            if employment_status == 'student':
+            if economic_status == 'Inactive' and random.random() < 0.9:
                 return PersonaType.STUDENT
+            if economic_status == 'Inactive' and random.random() >= 0.9:
+                return PersonaType.UNEMPLOYED
             else:
                 return PersonaType.YOUNG_PROFESSIONAL
         elif 25 <= age < 45:
