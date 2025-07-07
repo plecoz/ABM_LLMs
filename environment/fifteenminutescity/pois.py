@@ -4,6 +4,7 @@ from shapely.geometry import Point, Polygon
 import geopandas as gpd
 import pickle
 import os
+import pandas as pd
 
 def get_pois_for_category(graph, place_name, tags, poi_type):
     """
@@ -536,3 +537,224 @@ def load_environment_data(filepath):
     except Exception as e:
         print(f"Error loading environment data from file: {e}")
         return None
+
+def fetch_3d_buildings(place_name="Macau, China"):
+    """
+    Fetch building footprints with height information from OpenStreetMap.
+    
+    Args:
+        place_name: Name of the place to fetch buildings from
+        
+    Returns:
+        GeoDataFrame with building geometries and height information
+    """
+    print(f"Fetching 3D buildings for {place_name}...")
+    
+    # OSM tags for buildings with various height information
+    building_tags = [
+        {'building': True, 'height': True},  # Buildings with explicit height
+        {'building': True, 'building:levels': True},  # Buildings with floor levels
+        {'building': True, 'building:height': True},  # Alternative height tag
+        {'building': True, 'roof:height': True},  # Buildings with roof height
+    ]
+    
+    all_buildings = []
+    
+    for i, tags in enumerate(building_tags):
+        try:
+            print(f"  Fetching buildings with tags: {tags}")
+            buildings_gdf = ox.features_from_place(place_name, tags)
+            
+            if len(buildings_gdf) > 0:
+                print(f"  Found {len(buildings_gdf)} buildings")
+                all_buildings.append(buildings_gdf)
+            else:
+                print(f"  No buildings found with these tags")
+                
+        except Exception as e:
+            print(f"  Error fetching buildings with tags {tags}: {e}")
+            continue
+    
+    if not all_buildings:
+        print("No buildings with height information found")
+        return None
+    
+    # Combine all building datasets
+    combined_buildings = gpd.GeoDataFrame(pd.concat(all_buildings, ignore_index=True))
+    
+    # Remove duplicates based on geometry
+    combined_buildings = combined_buildings.drop_duplicates(subset=['geometry'])
+    
+    # Process height information
+    combined_buildings = _process_building_heights(combined_buildings)
+    
+    print(f"Total buildings with height data: {len(combined_buildings)}")
+    
+    return combined_buildings
+
+def _process_building_heights(buildings_gdf):
+    """
+    Process and standardize building height information.
+    
+    Args:
+        buildings_gdf: GeoDataFrame with building data
+        
+    Returns:
+        GeoDataFrame with standardized height column
+    """
+    print("Processing building heights...")
+    
+    # Initialize height column
+    buildings_gdf['processed_height'] = 0.0
+    
+    for idx, building in buildings_gdf.iterrows():
+        height = 0.0
+        
+        # Try different height fields in order of preference
+        height_fields = ['height', 'building:height', 'roof:height']
+        
+        for field in height_fields:
+            if field in building and pd.notna(building[field]):
+                height = _parse_height_value(building[field])
+                if height > 0:
+                    break
+        
+        # If no explicit height, try to estimate from levels
+        if height == 0 and 'building:levels' in building and pd.notna(building['building:levels']):
+            try:
+                levels = float(building['building:levels'])
+                height = levels * 3.0  # Assume 3 meters per floor
+            except (ValueError, TypeError):
+                pass
+        
+        # Set minimum height for buildings without data
+        if height == 0:
+            height = 6.0  # Default 2-story building height
+        
+        buildings_gdf.at[idx, 'processed_height'] = height
+    
+    # Add height categories for visualization
+    buildings_gdf['height_category'] = pd.cut(
+        buildings_gdf['processed_height'],
+        bins=[0, 10, 20, 50, 100, float('inf')],
+        labels=['Low (0-10m)', 'Medium (10-20m)', 'High (20-50m)', 'Very High (50-100m)', 'Skyscraper (100m+)']
+    )
+    
+    print(f"Height distribution:")
+    print(buildings_gdf['height_category'].value_counts())
+    
+    return buildings_gdf
+
+def _parse_height_value(height_str):
+    """
+    Parse height string and convert to meters.
+    
+    Args:
+        height_str: Height string (e.g., "25 m", "80 ft", "25.5")
+        
+    Returns:
+        Height in meters as float
+    """
+    if pd.isna(height_str):
+        return 0.0
+    
+    # Convert to string if it's not already
+    height_str = str(height_str).strip().lower()
+    
+    try:
+        # Handle numeric values
+        if height_str.replace('.', '').isdigit():
+            return float(height_str)
+        
+        # Extract numeric part
+        import re
+        numbers = re.findall(r'\d+\.?\d*', height_str)
+        if not numbers:
+            return 0.0
+        
+        height_value = float(numbers[0])
+        
+        # Convert feet to meters
+        if 'ft' in height_str or 'feet' in height_str or "'" in height_str:
+            height_value = height_value * 0.3048
+        
+        return height_value
+        
+    except (ValueError, TypeError):
+        return 0.0
+
+def save_3d_buildings(buildings_gdf, filepath):
+    """
+    Save 3D buildings GeoDataFrame to a file.
+    
+    Args:
+        buildings_gdf: GeoDataFrame with building data
+        filepath: Path where to save the buildings file
+    """
+    try:
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
+        # Save as GeoPackage (better than pickle for GeoDataFrames)
+        buildings_gdf.to_file(filepath, driver='GPKG')
+        
+        print(f"3D buildings saved to {filepath}")
+        print(f"Saved {len(buildings_gdf)} buildings")
+        
+    except Exception as e:
+        print(f"Error saving 3D buildings: {e}")
+
+def load_3d_buildings(filepath):
+    """
+    Load 3D buildings GeoDataFrame from a saved file.
+    
+    Args:
+        filepath: Path to the saved buildings file
+        
+    Returns:
+        GeoDataFrame with building data or None if loading fails
+    """
+    try:
+        if not os.path.exists(filepath):
+            print(f"Buildings file not found: {filepath}")
+            return None
+        
+        buildings_gdf = gpd.read_file(filepath)
+        
+        print(f"3D buildings loaded from {filepath}")
+        print(f"Loaded {len(buildings_gdf)} buildings")
+        
+        return buildings_gdf
+        
+    except Exception as e:
+        print(f"Error loading 3D buildings from file: {e}")
+        return None
+
+def get_or_fetch_3d_buildings(place_name="Macau, China", save_path=None, load_path=None):
+    """
+    Load 3D buildings from file if available, otherwise fetch from OSM and optionally save.
+    
+    Args:
+        place_name: Name of the place to fetch buildings from
+        save_path: Path to save the buildings after fetching (optional)
+        load_path: Path to load the buildings from (optional)
+        
+    Returns:
+        GeoDataFrame with building data
+    """
+    # Try to load from file first if path is provided
+    if load_path:
+        buildings = load_3d_buildings(load_path)
+        if buildings is not None:
+            return buildings
+        else:
+            print("Failed to load 3D buildings from file, fetching from OpenStreetMap...")
+    
+    # Fetch from OpenStreetMap
+    buildings = fetch_3d_buildings(place_name)
+    
+    # Save to file if path is provided and buildings were found
+    if save_path and buildings is not None:
+        save_3d_buildings(buildings, save_path)
+    
+    return buildings

@@ -1,0 +1,122 @@
+{
+  "16-24": {
+    "Administrators and managers": 1.11,
+    "Professionals": 3.39,
+    "Technicians and associate professionals": 21.06,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 1.42,
+    "Others Clerks": 31.17,
+    "Service and sales workers": 27.65,
+    "Skilled agricultural and fishery workers": 0.19,
+    "Craftsmen and similar workers": 1.87,
+    "Plant and machine operators, drivers and assemblers": 1.37,
+    "Unskilled workers": 10.77
+  },
+  "25-29": {
+    "Administrators and managers": 3.9,
+    "Professionals": 5.48,
+    "Technicians and associate professionals": 20.28,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 2.96,
+    "Others Clerks": 24.32,
+    "Service and sales workers": 26.19,
+    "Skilled agricultural and fishery workers": 0.05,
+    "Craftsmen and similar workers": 3.77,
+    "Plant and machine operators, drivers and assemblers": 1.71,
+    "Unskilled workers": 11.33
+  },
+  "30-34": {
+    "Administrators and managers": 8.48,
+    "Professionals": 5.61,
+    "Technicians and associate professionals": 17.28,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 8.2,
+    "Others Clerks": 17.71,
+    "Service and sales workers": 24.04,
+    "Skilled agricultural and fishery workers": 0.26,
+    "Craftsmen and similar workers": 3.19,
+    "Plant and machine operators, drivers and assemblers": 2.86,
+    "Unskilled workers": 12.36
+  },
+  "35-39": {
+    "Administrators and managers": 11.82,
+    "Professionals": 6.67,
+    "Technicians and associate professionals": 15.6,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 13.41,
+    "Others Clerks": 11.39,
+    "Service and sales workers": 18.14,
+    "Skilled agricultural and fishery workers": 0.33,
+    "Craftsmen and similar workers": 3.48,
+    "Plant and machine operators, drivers and assemblers": 2.8,
+    "Unskilled workers": 16.35
+  },
+  "40-44": {
+    "Administrators and managers": 11.64,
+    "Professionals": 7.19,
+    "Technicians and associate professionals": 14.44,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 14.36,
+    "Others Clerks": 9.62,
+    "Service and sales workers": 14.65,
+    "Skilled agricultural and fishery workers": 0.24,
+    "Craftsmen and similar workers": 5.39,
+    "Plant and machine operators, drivers and assemblers": 3.53,
+    "Unskilled workers": 18.94
+  },
+  "45-49": {
+    "Administrators and managers": 11.57,
+    "Professionals": 7.23,
+    "Technicians and associate professionals": 11.82,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 15.83,
+    "Others Clerks": 8.85,
+    "Service and sales workers": 13.5,
+    "Skilled agricultural and fishery workers": 0.29,
+    "Craftsmen and similar workers": 7.15,
+    "Plant and machine operators, drivers and assemblers": 3.34,
+    "Unskilled workers": 20.41
+  },
+  "50-54": {
+    "Administrators and managers": 10.45,
+    "Professionals": 4.73,
+    "Technicians and associate professionals": 9.96,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 18.21,
+    "Others Clerks": 9.0,
+    "Service and sales workers": 14.17,
+    "Skilled agricultural and fishery workers": 0.79,
+    "Craftsmen and similar workers": 9.23,
+    "Plant and machine operators, drivers and assemblers": 4.15,
+    "Unskilled workers": 19.3
+  },
+  "55-59": {
+    "Administrators and managers": 10.15,
+    "Professionals": 3.93,
+    "Technicians and associate professionals": 8.19,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 13.94,
+    "Others Clerks": 9.42,
+    "Service and sales workers": 17.46,
+    "Skilled agricultural and fishery workers": 0.53,
+    "Craftsmen and similar workers": 10.55,
+    "Plant and machine operators, drivers and assemblers": 7.35,
+    "Unskilled workers": 18.5
+  },
+  "60-64": {
+    "Administrators and managers": 9.74,
+    "Professionals": 2.95,
+    "Technicians and associate professionals": 7.6,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 4.51,
+    "Others Clerks": 8.63,
+    "Service and sales workers": 19.29,
+    "Skilled agricultural and fishery workers": 1.03,
+    "Craftsmen and similar workers": 12.16,
+    "Plant and machine operators, drivers and assemblers": 11.56,
+    "Unskilled workers": 22.51
+  },
+  "≧65": {
+    "Administrators and managers": 10.56,
+    "Professionals": 3.89,
+    "Technicians and associate professionals": 6.61,
+    "Betting-related Clerks (dealer, cage cashier, etc.)": 0.35,
+    "Others Clerks": 7.96,
+    "Service and sales workers": 22.2,
+    "Skilled agricultural and fishery workers": 1.14,
+    "Craftsmen and similar workers": 8.53,
+    "Plant and machine operators, drivers and assemblers": 9.08,
+    "Unskilled workers": 29.7
+  }
+}

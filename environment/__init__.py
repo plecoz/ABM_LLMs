@@ -1,2 +1,2 @@
 from .fifteenminutescity.city_network import load_city_network, get_or_load_city_network, save_city_network, load_city_network_from_file
-from .fifteenminutescity.pois import fetch_pois, get_or_fetch_pois, save_pois, load_pois_from_file
+from .fifteenminutescity.pois import fetch_pois, get_or_fetch_pois, save_pois, load_pois_from_file, fetch_3d_buildings, get_or_fetch_3d_buildings, save_3d_buildings, load_3d_buildings

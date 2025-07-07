@@ -40,44 +40,69 @@ class OutputController:
             "healthcare": 0,
             "education": 0,
             "entertainment": 0,
-            "transportation": 0
+            "transportation": 0,
+            "casino": 0
         }
+        
+        # TEMPORARY: Track tourist healthcare visits
+        self.tourist_healthcare_visits = set()  # Set of tourist IDs who visited healthcare POIs
         
         # Other potential metrics (for future expansion)
         self.poi_visits = {}  # Track POI visit counts
         self.energy_stats = {}  # Track energy consumption
         self.parish_mobility = {}  # Track inter-parish movement
         
-    def track_travel_start(self, agent_id: int, from_node: int, to_node: int, travel_time: int):
+    def track_travel_step(self, agent_id: int):
         """
-        Track when an agent starts traveling.
+        Track one step of actual travel time for an agent.
         
         Args:
             agent_id: ID of the traveling agent
-            from_node: Starting node
-            to_node: Destination node
-            travel_time: Expected travel time in minutes
         """
         # Initialize agent travel time if not exists
         if agent_id not in self.agent_travel_times:
             self.agent_travel_times[agent_id] = 0
         
-        # Add to total travel time
-        self.total_travel_time += travel_time
-        self.agent_travel_times[agent_id] += travel_time
+        # Add 1 minute of actual travel time
+        self.total_travel_time += 1
+        self.agent_travel_times[agent_id] += 1
         
-        # Record travel event for detailed analysis
+        # Update the most recent travel event for this agent with actual travel time
+        for event in reversed(self.travel_events):
+            if event['agent_id'] == agent_id:
+                event['travel_time'] += 1
+                break
+        
+        self.logger.debug(f"Agent {agent_id} traveled for 1 minute (total: {self.agent_travel_times[agent_id]})")
+    
+    def track_travel_start(self, agent_id: int, from_node: int, to_node: int, travel_time: int):
+        """
+        Track when an agent starts traveling (for event logging only, not time accumulation).
+        
+        Args:
+            agent_id: ID of the traveling agent
+            from_node: Starting node ID
+            to_node: Destination node ID
+            travel_time: Planned travel time in minutes (logged but not added to statistics)
+        """
+        # Store travel event for detailed analysis (but don't add planned time to statistics)
+        # The actual travel time will be tracked by track_travel_step() calls
         travel_event = {
             'agent_id': agent_id,
             'step': self.model.step_count,
             'from_node': from_node,
             'to_node': to_node,
-            'travel_time': travel_time,
+            'travel_time': 0,  # Actual travel time starts at 0, will be updated by track_travel_step
             'timestamp': self.model.get_current_time()
         }
         self.travel_events.append(travel_event)
         
-        self.logger.debug(f"Agent {agent_id} started travel: {travel_time} minutes from {from_node} to {to_node}")
+        # self.logger.info(f"Agent {agent_id} started traveling from node {from_node} to node {to_node} "
+        #                 f"(planned time: {travel_time} minutes)")
+        
+        # Initialize agent travel time tracking if not exists (for when they actually start traveling)
+        if agent_id not in self.agent_travel_times:
+            self.agent_travel_times[agent_id] = 0
     
     def track_waiting_start(self, agent_id: int, poi_category: str, waiting_time: int):
         """
@@ -98,20 +123,26 @@ class OutputController:
         
         self.logger.debug(f"Agent {agent_id} started waiting: {waiting_time} minutes at {poi_category} POI")
     
-    def track_poi_visit(self, poi_category: str):
+    def track_poi_visit(self, poi_category: str, agent_id: int = None):
         """
-        Track a POI visit by category.
+        Track when an agent visits a POI.
         
         Args:
-            poi_category: Category of the POI being visited
+            poi_category: Category of the POI visited
+            agent_id: ID of the agent visiting (optional, for tourist tracking)
         """
         if poi_category in self.poi_visits_by_category:
             self.poi_visits_by_category[poi_category] += 1
         else:
-            # Handle unknown categories
-            if "other" not in self.poi_visits_by_category:
-                self.poi_visits_by_category["other"] = 0
-            self.poi_visits_by_category["other"] += 1
+            # Handle new categories that might not be in our initial list
+            self.poi_visits_by_category[poi_category] = 1
+        
+        # TEMPORARY: Track tourist healthcare visits
+        if poi_category == "healthcare" and agent_id is not None:
+            # Check if the agent is a tourist
+            agent = self.model.get_agent_by_id(agent_id)
+            if agent and hasattr(agent, 'is_tourist') and agent.is_tourist:
+                self.tourist_healthcare_visits.add(agent_id)
         
         self.logger.debug(f"POI visit tracked: {poi_category}")
     
@@ -155,12 +186,48 @@ class OutputController:
     
     def get_poi_visits_by_category(self) -> Dict[str, int]:
         """
-        Get POI visits by category.
+        Get the number of POI visits by category.
         
         Returns:
             Dictionary mapping POI categories to visit counts
         """
         return self.poi_visits_by_category.copy()
+    
+    def get_tourist_healthcare_percentage(self) -> Dict[str, float]:
+        """
+        TEMPORARY: Calculate percentage of tourists who accessed/didn't access healthcare POIs.
+        
+        Returns:
+            Dictionary with tourist healthcare access statistics
+        """
+        # Count total tourists in the simulation
+        total_tourists = 0
+        for agent in self.model.residents:
+            if hasattr(agent, 'is_tourist') and agent.is_tourist:
+                total_tourists += 1
+        
+        if total_tourists == 0:
+            return {
+                "total_tourists": 0,
+                "tourists_accessed_healthcare": 0,
+                "tourists_no_healthcare": 0,
+                "percentage_accessed": 0.0,
+                "percentage_no_access": 0.0
+            }
+        
+        tourists_accessed = len(self.tourist_healthcare_visits)
+        tourists_no_access = total_tourists - tourists_accessed
+        
+        percentage_accessed = (tourists_accessed / total_tourists) * 100
+        percentage_no_access = (tourists_no_access / total_tourists) * 100
+        
+        return {
+            "total_tourists": total_tourists,
+            "tourists_accessed_healthcare": tourists_accessed,
+            "tourists_no_healthcare": tourists_no_access,
+            "percentage_accessed": percentage_accessed,
+            "percentage_no_access": percentage_no_access
+        }
     
     def print_travel_summary(self):
         """
@@ -207,13 +274,22 @@ class OutputController:
         
         # POI visit statistics
         print(f"\nPOI visits by category:")
-        total_visits = sum(self.poi_visits_by_category.values())
-        print(f"Total POI visits: {total_visits}")
+        total_poi_visits = sum(self.poi_visits_by_category.values())
+        print(f"Total POI visits: {total_poi_visits}")
         
         for category, count in self.poi_visits_by_category.items():
             if count > 0:
-                percentage = (count / total_visits * 100) if total_visits > 0 else 0
-                print(f"  - {category.replace('_', ' ').title()}: {count} visits ({percentage:.1f}%)")
+                print(f"  - {category.replace('_', ' ').title()}: {count}")
+        
+        # TEMPORARY: Print tourist healthcare statistics
+        tourist_stats = self.get_tourist_healthcare_percentage()
+        if tourist_stats["total_tourists"] > 0:
+            print(f"\n--- TOURIST HEALTHCARE ACCESS ---")
+            print(f"Total tourists: {tourist_stats['total_tourists']}")
+            print(f"Tourists who accessed healthcare: {tourist_stats['tourists_accessed_healthcare']}")
+            print(f"Tourists who didn't access healthcare: {tourist_stats['tourists_no_healthcare']}")
+            print(f"Percentage who accessed healthcare: {tourist_stats['percentage_accessed']:.1f}%")
+            print(f"Percentage who didn't access healthcare: {tourist_stats['percentage_no_access']:.1f}%")
         
         print("="*60)
     
@@ -279,11 +355,13 @@ class OutputController:
             "healthcare": 0,
             "education": 0,
             "entertainment": 0,
-            "transportation": 0
+            "transportation": 0,
+            "casino": 0
         }
         self.poi_visits = {}
         self.energy_stats = {}
         self.parish_mobility = {}
+        self.tourist_healthcare_visits = set()
         
         self.logger.info("Output controller reset")
 

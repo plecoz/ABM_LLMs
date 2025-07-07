@@ -6,6 +6,7 @@ from matplotlib import patheffects
 import osmnx as ox
 from .base_plot import BaseMap  # Relative import from same package
 from .agent_plot import AgentPlotter
+from .interactive_matplotlib import InteractiveEnhancer, Enhanced3DBuildings
 import numpy as np
 import geopandas as gpd
 import os
@@ -14,7 +15,7 @@ from matplotlib_scalebar.scalebar import ScaleBar
 
 
 class SimulationAnimator:
-    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None, water_bodies=None, cliffs=None, forests=None):
+    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None, water_bodies=None, cliffs=None, forests=None, buildings_3d=None, interactive=False):
         self.model = model
         self.graph = graph
         self.fig = ax.figure if ax else plt.figure(figsize=(12, 10))
@@ -24,6 +25,12 @@ class SimulationAnimator:
         self.water_bodies = water_bodies  # GeoDataFrame containing water bodies
         self.cliffs = cliffs  # GeoDataFrame containing cliffs and barriers
         self.forests = forests  # GeoDataFrame containing forests and green areas
+        self.buildings_3d = buildings_3d  # GeoDataFrame containing 3D buildings
+        
+        # Interactive features
+        self.interactive = interactive
+        self.interactive_enhancer = None
+        self.building_plotter = None
         
         # Set font to support Chinese characters if available
         try:
@@ -67,6 +74,10 @@ class SimulationAnimator:
         
         # Flag to determine whether to use specific POI styling
         self.use_specific_poi_styling = True
+        
+        # Setup interactive features if requested
+        if self.interactive:
+            self._setup_interactive_features()
     
     def _create_base_plot(self):
         """Draw the static map background with parishes if available"""
@@ -113,32 +124,92 @@ class SimulationAnimator:
             edge_linewidth=0.7
         )
     
+    def _setup_interactive_features(self):
+        """Setup interactive features for the plot."""
+        print("Setting up interactive features...")
+        
+        # Create interactive enhancer
+        self.interactive_enhancer = InteractiveEnhancer(self.ax, self.fig)
+        
+        # Create building plotter if 3D buildings are available
+        if self.buildings_3d is not None:
+            self.building_plotter = Enhanced3DBuildings(self.ax)
+            
+        # Add layer controls
+        self.interactive_enhancer.add_layer_controls()
+        
+        # Update figure layout for controls
+        self.fig.subplots_adjust(bottom=0.1)
+        
+        # Add instructions
+        instructions = "🖱️ Scroll: Zoom | Drag: Pan | R: Reset | H: Help | Left Panel: Toggle Layers"
+        self.fig.text(0.5, 0.02, instructions, ha='center', fontsize=10, 
+                     style='italic', bbox=dict(boxstyle="round,pad=0.3", 
+                     facecolor="lightblue", alpha=0.7))
+        
+        print("✅ Interactive features ready!")
+    
     def initialize(self):
         """Initialize the plot with the static elements."""
         self.ax.clear()
         
         # Plot water bodies first (lowest layer)
         if self.water_bodies is not None and not self.water_bodies.empty:
-            self.water_bodies.plot(ax=self.ax, facecolor='#4FC3F7', edgecolor='#0277BD', linewidth=0.5, alpha=0.7, zorder=0)
+            collections_before = len(self.ax.collections)
+            water_artist = self.water_bodies.plot(ax=self.ax, facecolor='#4FC3F7', edgecolor='#0277BD', linewidth=0.5, alpha=0.7, zorder=0)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
         
         # Plot forests and green areas
         if self.forests is not None and not self.forests.empty:
-            self.forests.plot(ax=self.ax, facecolor='#66BB6A', edgecolor='#2E7D32', linewidth=0.5, alpha=0.6, zorder=1)
+            collections_before = len(self.ax.collections)
+            forest_artist = self.forests.plot(ax=self.ax, facecolor='#66BB6A', edgecolor='#2E7D32', linewidth=0.5, alpha=0.6, zorder=1)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
         
         # Plot cliffs and barriers
         if self.cliffs is not None and not self.cliffs.empty:
-            self.cliffs.plot(ax=self.ax, facecolor='#8D6E63', edgecolor='#5D4037', linewidth=0.8, alpha=0.8, zorder=2)
+            collections_before = len(self.ax.collections)
+            cliff_artist = self.cliffs.plot(ax=self.ax, facecolor='#8D6E63', edgecolor='#5D4037', linewidth=0.8, alpha=0.8, zorder=2)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
         
         # Plot residential buildings
         if self.residential_buildings is not None and not self.residential_buildings.empty:
-            self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=3)
+            collections_before = len(self.ax.collections)
+            residential_artist = self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=3)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'buildings')
+        
+        # Plot 3D buildings with enhanced visualization
+        if self.buildings_3d is not None and not self.buildings_3d.empty and self.building_plotter:
+            self.building_plotter.plot_3d_buildings(self.buildings_3d, self.interactive_enhancer)
+            self.building_plotter.add_building_info_on_click(self.buildings_3d)
         
         # Plot the street network
-        ox.plot_graph(self.graph, ax=self.ax, node_size=0, edge_color='gray', edge_linewidth=0.5, show=False, close=False)
+        lines_before = len(self.ax.lines)
+        street_plot = ox.plot_graph(self.graph, ax=self.ax, node_size=0, edge_color='gray', edge_linewidth=0.5, show=False, close=False)
+        if self.interactive_enhancer:
+            # Register the new lines that were added
+            for line in self.ax.lines[lines_before:]:
+                self.interactive_enhancer.register_layer_artist(line, 'streets')
         
         # Plot parishes if available (on top of everything else)
         if self.parishes_gdf is not None:
-            self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=5)
+            collections_before = len(self.ax.collections)
+            parish_artist = self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=5)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
 
         # Plot POIs
         self._plot_poi_agents()
@@ -152,12 +223,20 @@ class SimulationAnimator:
         
         # Set title with environment information
         title_parts = ["Macau 15-Minute City"]
+        if self.interactive:
+            title_parts.append("(Interactive)")
         if self.parishes_gdf is not None:
             title_parts.append("with Parishes")
         if (self.water_bodies is not None and not self.water_bodies.empty) or (self.cliffs is not None and not self.cliffs.empty) or (self.forests is not None and not self.forests.empty):
             title_parts.append("and Environment")
+        if self.buildings_3d is not None:
+            title_parts.append("+ 3D Buildings")
         
         self.ax.set_title(" ".join(title_parts), fontsize=16)
+        
+        # Re-setup interactive features after clearing
+        if self.interactive and self.interactive_enhancer:
+            self.interactive_enhancer._setup_interaction()
             
         plt.draw()
     
@@ -340,27 +419,41 @@ class SimulationAnimator:
         """
         for resident in self.model.residents:
             try:
+                # TEMPORARY FEATURE: Check if resident is a tourist (casino-spawned)
+                is_tourist = getattr(resident, 'is_tourist', False)
+                
                 if hasattr(resident, 'traveling') and resident.traveling:
                     # Get interpolated position for traveling agents
                     # Use progress to show position along the path within the current travel step
                     x, y = self._get_interpolated_position(resident, progress)
                     
-                    # Use a different color for traveling agents
-                    #Option to change the color of the traveling agents
-                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, markeredgecolor='black',
+                    # TEMPORARY: Use violet color for tourists, blue for regular residents
+                    color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
+                    dot = self.ax.plot(x, y, 'o', color=color, markersize=4, markeredgecolor='black',
                                         markeredgewidth=0.5, alpha=0.8)[0]  
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):
                         x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
-                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4,
-                                           markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]  # Blue for stationary
+                        
+                        # TEMPORARY: Use violet color for tourists, blue for regular residents
+                        color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
+                        dot = self.ax.plot(x, y, 'o', color=color, markersize=4,
+                                           markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]
                     else:
                         # Use geometry if available
                         x, y = resident.geometry.x, resident.geometry.y
-                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=3, alpha=0.7)[0]
+                        
+                        # TEMPORARY: Use violet color for tourists, blue for regular residents
+                        color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
+                        dot = self.ax.plot(x, y, 'o', color=color, markersize=3, alpha=0.7)[0]
                 
                 self.agent_dots.append(dot)
+                
+                # Register with interactive enhancer if available
+                if self.interactive_enhancer:
+                    self.interactive_enhancer.register_layer_artist(dot, 'agents')
+                    
             except Exception as e:
                 print(f"Error plotting resident {resident.unique_id}: {e}")
     
@@ -405,6 +498,11 @@ class SimulationAnimator:
                                      markersize=size, alpha=0.8)[0]
                 
                 self.poi_markers.append(marker)
+                
+                # Register with interactive enhancer if available
+                if self.interactive_enhancer:
+                    self.interactive_enhancer.register_layer_artist(marker, 'pois')
+                    
             except Exception as e:
                 print(f"Error plotting POI agent {poi.unique_id}: {e}")
         
@@ -445,6 +543,13 @@ class SimulationAnimator:
             plt.Line2D([0], [0], marker='o', color='w',
                       markerfacecolor='#00BFFF', markersize=8,
                       label='Residents')
+        )
+        
+        # TEMPORARY: Add tourists to legend
+        legend_elements.append(
+            plt.Line2D([0], [0], marker='o', color='w',
+                      markerfacecolor='#8A2BE2', markersize=8,
+                      label='Tourists')
         )
         
         # Add environment elements to legend if they exist

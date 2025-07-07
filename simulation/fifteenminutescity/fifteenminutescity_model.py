@@ -2,7 +2,7 @@ import mesa
 from mesa import Model
 from mesa.space import NetworkGrid
 import random
-from agents.fifteenminutescity.resident import Resident
+from agents.fifteenminutescity.resident import Resident 
 from agents.fifteenminutescity.poi import POI
 import networkx as nx
 import osmnx as ox
@@ -17,6 +17,7 @@ from mesa_geo import GeoSpace
 from mesa.datacollection import DataCollector
 import geopandas as gpd
 from outputs import OutputController
+import os  # NEW
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
@@ -235,21 +236,58 @@ class FifteenMinuteCity(Model):
         # Initialize output controller for tracking metrics
         self.output_controller = OutputController(self)
         
-        # -----------------------------------------------------
-        # Create resident agents
-        # -----------------------------------------------------
-        if self.random_distribution or self.parish_distribution is None:
-            # Fallback to random placement when no parish distribution is given
-            self._create_residents_randomly(num_residents)
+        # --- Load demographic distribution data BEFORE creating residents ---
+        # --- Load industry distribution data (education -> industry probabilities) ---
+        industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
+        self.industry_distribution = {}
+        if self.city == "Macau, China" and industry_path and os.path.exists(industry_path):
+            self._load_industry_distribution(industry_path)
         else:
-            # Use proportional distribution across specified parishes
-            self._create_residents_with_distribution(num_residents)
+            if self.city == "Macau, China":
+                self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
+
+        # --- Load occupation distribution data (age -> occupation probabilities) ---
+        occupation_path = kwargs.get('occupation_path', 'data/demographics_macau/occupation.json')
+        self.occupation_distribution = {}
+        if self.city == "Macau, China" and occupation_path and os.path.exists(occupation_path):
+            self._load_occupation_distribution(occupation_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
+
+        # --- Load income distribution data (occupation -> income probabilities) ---
+        income_path = kwargs.get('income_path', 'data/demographics_macau/income.json')
+        self.income_distribution = {}
+        if self.city == "Macau, China" and income_path and os.path.exists(income_path):
+            self._load_income_distribution(income_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
+        
+        # --- Load economic status distribution data (age -> gender -> status probabilities) ---
+        economic_status_path = kwargs.get('economic_status_path', 'data/demographics_macau/economic_status.json')
+        self.economic_status_distribution = {}
+        
+        if self.city == "Macau, China" and economic_status_path and os.path.exists(economic_status_path):
+            self._load_economic_status_distribution(economic_status_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Economic status distribution file not found at {economic_status_path}. 'economic_status' attribute will default to None.")
+
+        # Create resident agents with proportional distribution (NOW with distributions loaded)
+        self._create_residents_with_distribution(num_residents)
+
+        # Print demographic statistics after all residents are created
+        self.print_demographic_statistics()
 
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
         print("\nCreating POI agents from POI dictionary:")
+        poi_counts_by_category = {}  # Track counts by category
+        
         for category, poi_list in pois.items():
             print(f"Category: {category} - {len(poi_list)} POIs")
+            category_count = 0
             for poi_data in poi_list:
                 if isinstance(poi_data, tuple):
                     node_id, poi_type = poi_data  # Unpack node and type
@@ -277,14 +315,25 @@ class FifteenMinuteCity(Model):
                     parish=parish
                 )
                 
-                # Debug: Print the POI agent's category
-                print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
+                # Comment out detailed debug message
+                # print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
                 
                 self.grid.place_agent(poi_agent, node_id)
                 self.schedule.add(poi_agent)
                 self.poi_agents.append(poi_agent)
                 self.all_agents.append(poi_agent)
                 poi_id += 1
+                category_count += 1
+            
+            # Track count for this category
+            poi_counts_by_category[category] = category_count
+        
+        # Print summary of POIs created by category
+        print(f"\nPOI Creation Summary:")
+        for category, count in poi_counts_by_category.items():
+            print(f"  {category}: {count} POIs created")
+        print(f"Total POIs created: {sum(poi_counts_by_category.values())}")
+        print()
 
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
@@ -323,12 +372,6 @@ class FifteenMinuteCity(Model):
     def _get_parish_for_node(self, node_id):
         """
         Get the parish name for a given node ID.
-        
-        Args:
-            node_id: The ID of the node to look up
-            
-        Returns:
-            String parish name or None if not found
         """
         return self.node_to_parish.get(node_id, None)
     
@@ -424,136 +467,171 @@ class FifteenMinuteCity(Model):
         # This is a placeholder. You can add model-wide dynamics here.
         pass
     
-    def _load_demographics(self, demographics_path):
+
+    
+    def _load_industry_distribution(self, industry_path):  # NEW METHOD
         """
-        Load demographic data from a JSON file.
-        
-        Args:
-            demographics_path: Path to the JSON file with demographic data
+        Load industry distribution probabilities from a JSON file.
+        Expected format: {education_level: {industry_name: probability, ...}, ...}
         """
         try:
-            with open(demographics_path, 'r') as f:
-                self.demographics = json.load(f)
-            self.logger.info("Loaded demographics data")
-        except Exception as e:
-            self.logger.error(f"Error loading demographics: {e}")
-            # Set default demographics
-            self.demographics = {
-                "age_distribution": {"0-18": 0.2, "19-35": 0.3, "36-65": 0.4, "65+": 0.1},
-                "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
-                "income_distribution": {"low": 0.3, "medium": 0.5, "high": 0.2},
-                "education_distribution": {
-                    "no_education": 0.1,
-                    "primary": 0.2,
-                    "high_school": 0.4,
-                    "bachelor": 0.2,
-                    "master": 0.08,
-                    "phd": 0.02
-                }
+            with open(industry_path, 'r') as f:
+                self.industry_distribution = json.load(f)
+            # Normalise keys to facilitate matching (lowercase, stripped)
+            self.industry_distribution = {
+                self._normalise_string(k): v for k, v in self.industry_distribution.items()
             }
-    
+            self.logger.info("Loaded industry distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading industry distribution data: {e}")
+            self.industry_distribution = {}
 
-    def _generate_agent_properties(self, parish=None):
+    def _load_occupation_distribution(self, occupation_path):
         """
-        Generate agent properties based on demographic distributions.
-        If a parish is specified and parish-specific demographics exist,
-        use those instead of the global demographics.
+        Load occupation distribution probabilities from a JSON file.
+        Expected format: {age_group: {occupation_name: probability, ...}, ...}
+        """
+        try:
+            with open(occupation_path, 'r') as f:
+                self.occupation_distribution = json.load(f)
+            self.logger.info("Loaded occupation distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading occupation distribution data: {e}")
+            self.occupation_distribution = {}
+
+    def _load_income_distribution(self, income_path):
+        """
+        Load income distribution probabilities from a JSON file.
+        Expected format: {occupation: {income_level: probability, ...}, ...}
+        """
+        try:
+            with open(income_path, 'r') as f:
+                self.income_distribution = json.load(f)
+            self.logger.info("Loaded income distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading income distribution data: {e}")
+            self.income_distribution = {}
+
+    def _load_economic_status_distribution(self, economic_status_path):
+        """
+        Load economic status distribution probabilities from a JSON file.
+        Expected format: {age_group: {gender: {status: probability, ...}, ...}, ...}
+        """
+        # print(f"DEBUG: _load_economic_status_distribution called with path: {economic_status_path}")
+        try:
+            with open(economic_status_path, 'r') as f:
+                self.economic_status_distribution = json.load(f)
+            # print(f"DEBUG: Successfully loaded economic status data with {len(self.economic_status_distribution)} age groups")
+            # print(f"DEBUG: Sample age groups: {list(self.economic_status_distribution.keys())[:3]}")
+            self.logger.info("Loaded economic status distribution data")
+        except Exception as e:
+            # print(f"DEBUG: Exception during economic status loading: {e}")
+            self.logger.error(f"Error loading economic status distribution data: {e}")
+            self.economic_status_distribution = {}
+
+    def _normalise_string(self, s):  # NEW HELPER
+        import re
+        return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
+
+    def _convert_income_bracket_to_value(self, income_bracket):
+        """
+        Convert income bracket string to actual income value.
         
         Args:
-            parish: The parish name to use for demographics (optional)
+            income_bracket: String like "20 000 - 29 999", "≧60 000", "< 3 500", etc.
             
         Returns:
-            Dictionary of agent properties
+            Random income value within the bracket range
         """
-        # Use parish-specific demographics if available
-        demographics = self.demographics
-        if parish and parish in self.parish_demographics:
-            demographics = self.parish_demographics[parish]
+        if not income_bracket or income_bracket == "Unpaid family worker":
+            return 0
         
-        if not demographics:
-            return {}
+        # Handle different bracket formats
+        if "≧" in income_bracket:  # e.g., "≧60 000"
+            min_income = int(income_bracket.replace("≧", "").replace(" ", ""))
+            # For open-ended high brackets, use min + reasonable range
+            return self.random.randint(min_income, min_income + 40000)
+        elif "<" in income_bracket:  # e.g., "< 3 500"
+            max_income = int(income_bracket.replace("<", "").replace(" ", ""))
+            # For open-ended low brackets, use reasonable minimum
+            return self.random.randint(max(1000, max_income - 1000), max_income - 1)
+        elif "-" in income_bracket:  # e.g., "20 000 - 29 999"
+            parts = income_bracket.split("-")
+            if len(parts) == 2:
+                min_income = int(parts[0].strip().replace(" ", ""))
+                max_income = int(parts[1].strip().replace(" ", ""))
+                return self.random.randint(min_income, max_income)
         
-        props = {}
-        
-        # Generate age
-        age_dist = demographics.get('age_distribution', {})
-        age_group = self._sample_from_distribution(age_dist)
-        
-        # Convert age group to actual age
-        if age_group == "0-18":
-            props['age'] = self.random.randint(0, 18)
-        elif age_group == "19-35":
-            props['age'] = self.random.randint(19, 35)
-        elif age_group == "36-65":
-            props['age'] = self.random.randint(36, 65)
-        else:  # 65+
-            props['age'] = self.random.randint(65, 90)
-        
-        # Generate gender
-        gender_dist = demographics.get('gender_distribution', {})
-        props['gender'] = self._sample_from_distribution(gender_dist)
-        
-        # Generate income
-        income_dist = demographics.get('income_distribution', {})
-        income_level = self._sample_from_distribution(income_dist)
-        
-        # Convert income level to actual income - use parish-specific ranges if available
-        income_ranges = demographics.get('income_ranges', {
-            "low": (10000, 30000),
-            "medium": (30001, 100000),
-            "high": (100001, 500000)
-        })
-        
-        if income_level in income_ranges:
-            min_val, max_val = income_ranges[income_level]
-            props['income'] = self.random.randint(min_val, max_val)
-        else:
-            # Fallback to default ranges
-            if income_level == "low":
-                props['income'] = self.random.randint(10000, 30000)
-            elif income_level == "medium":
-                props['income'] = self.random.randint(30001, 100000)
-            else:  # high
-                props['income'] = self.random.randint(100001, 500000)
-        
-        # Generate education
-        education_dist = demographics.get('education_distribution', {})
-        props['education'] = self._sample_from_distribution(education_dist)
+        # Fallback for unrecognized formats
+        return None
 
-        # Default values for employment status and household type
-        # These will be initialized later with sociodemographic data
-        props['employment_status'] = "employed"
-        props['household_type'] = "single"
-        
-        # We no longer add parish to props since it's passed separately
-        # This avoids the "got multiple values for keyword argument 'parish'" error
-        
-        return props
-    
-
-    def _sample_from_distribution(self, distribution):
+    def print_demographic_statistics(self):
         """
-        Sample a value from a probability distribution.
-        
-        Args:
-            distribution: Dictionary mapping values to probabilities
-            
-        Returns:
-            A sampled value from the distribution
+        Print demographic statistics of all residents including percentages and counts.
+        Shows distribution of age_class, gender, education, occupation, and industry.
         """
-        if not distribution:
-            return None
+        print("\n" + "="*60)
+        print("DEMOGRAPHIC STATISTICS")
+        print("="*60)
+        
+        total_residents = len(self.residents)
+        print(f"Total Residents: {total_residents}")
+        print("-" * 60)
+        
+        # Helper function to print category statistics
+        def print_category_stats(category_name, attribute_name):
+            print(f"\n{category_name.upper()} DISTRIBUTION:")
+            print("-" * 40)
             
-        items = list(distribution.keys())
-        probabilities = list(distribution.values())
+            # Count occurrences
+            counts = {}
+            for resident in self.residents:
+                value = resident.attributes.get(attribute_name, 'N/A')
+                if value is None:
+                    value = 'N/A'
+                counts[value] = counts.get(value, 0) + 1
+            
+            # Sort by count (descending)
+            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            
+            for value, count in sorted_counts:
+                percentage = (count / total_residents) * 100
+                print(f"  {value:<35} {count:>6} ({percentage:>5.1f}%)")
         
-        # Normalize probabilities if they don't sum to 1
-        prob_sum = sum(probabilities)
-        if prob_sum != 1.0 and prob_sum > 0:
-            probabilities = [p / prob_sum for p in probabilities]
+        # Print statistics for each category
+        print_category_stats("Age Class", "age_class")
+        print_category_stats("Gender", "gender")
+        print_category_stats("Education", "education")
+        print_category_stats("Occupation", "occupation")
+        print_category_stats("Industry", "industry")
         
-        return self.random.choices(items, probabilities)[0]
-    
+        # Additional employment statistics
+        print(f"\nEMPLOYMENT STATUS:")
+        print("-" * 40)
+        employment_counts = {}
+        for resident in self.residents:
+            status = resident.employment_status
+            employment_counts[status] = employment_counts.get(status, 0) + 1
+        
+        for status, count in sorted(employment_counts.items(), key=lambda x: x[1], reverse=True):
+            percentage = (count / total_residents) * 100
+            print(f"  {status.title():<35} {count:>6} ({percentage:>5.1f}%)")
+        
+        # Income statistics
+        print(f"\nINCOME STATISTICS:")
+        print("-" * 40)
+        incomes = [resident.attributes.get('income', 0) for resident in self.residents]
+        if incomes:
+            avg_income = sum(incomes) / len(incomes)
+            min_income = min(incomes)
+            max_income = max(incomes)
+            print(f"  Average Monthly Income: ${avg_income:,.2f}")
+            print(f"  Minimum Monthly Income: ${min_income:,.2f}")
+            print(f"  Maximum Monthly Income: ${max_income:,.2f}")
+        
+        print("="*60)
+        print("END DEMOGRAPHIC STATISTICS")
+        print("="*60 + "\n")
 
     def _initialize_social_networks(self, density=0.1):
         """
@@ -612,6 +690,17 @@ class FifteenMinuteCity(Model):
         Args:
             num_residents: Total number of residents to create
         """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+        
+        # Handle case where parish_distribution is None (fallback to random distribution)
+        if self.parish_distribution is None:
+            self.logger.info("No parish distribution provided. Using random distribution.")
+            self._create_residents_randomly(num_residents)
+            return
+            
         agent_id = 0
         
         # Check if we should use buildings for placement
@@ -640,19 +729,34 @@ class FifteenMinuteCity(Model):
                     buildings_in_parish = self.residential_buildings[self.residential_buildings.within(parish_geom)]
                     
                     if not buildings_in_parish.empty:
-                        # Sample buildings with replacement for the number of residents
-                        selected_buildings = buildings_in_parish.sample(n=num_parish_residents, replace=True, random_state=self.random.randint(0, 1000000))
+                        # Calculate building areas for proportional sampling using projected coordinates
+                        buildings_in_parish = self._calculate_building_areas(buildings_in_parish)
                         
-                        for _, building in selected_buildings.iterrows():
-                            # Use centroid for agent geometry
-                            point_geometry = building.geometry.centroid
-                            # Find nearest network node for travel
-                            home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
-                            home_locations.append({'geometry': point_geometry, 'node': home_node})
+                        # Remove buildings with zero or negative area
+                        buildings_in_parish = buildings_in_parish[buildings_in_parish['area'] > 0]
+                        
+                        if not buildings_in_parish.empty:
+                            # Sample buildings proportionally to their area
+                            weights = buildings_in_parish['area'] / buildings_in_parish['area'].sum()
+                            selected_buildings = buildings_in_parish.sample(
+                                n=num_parish_residents, 
+                                replace=True, 
+                                weights=weights,
+                                random_state=self.random.randint(0, 1000000)
+                            )
+                            
+                            self.logger.info(f"Parish {parish_name}: Selected {num_parish_residents} residents from {len(buildings_in_parish)} buildings (area-weighted)")
+                            
+                            for _, building in selected_buildings.iterrows():
+                                # Use centroid for agent geometry
+                                point_geometry = building.geometry.centroid
+                                # Find nearest network node for travel
+                                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                                home_locations.append({'geometry': point_geometry, 'node': home_node})
+                        else:
+                            self.logger.warning(f"No residential buildings with valid area found in parish {parish_name}. Falling back to random nodes for this parish.")
                     else:
                         self.logger.warning(f"No residential buildings found in parish {parish_name}. Falling back to random nodes for this parish.")
-                else:
-                    self.logger.warning(f"Could not find geometry for parish {parish_name}. Falling back to random nodes.")
             
             # Fallback or default behavior: use random nodes
             if not home_locations:
@@ -670,7 +774,7 @@ class FifteenMinuteCity(Model):
                     home_locations.append({'geometry': point_geometry, 'node': home_node})
 
             # --- Residents Creation ---
-            for location in home_locations:
+            for i, location in enumerate(home_locations):
                 home_node = location['node']
                 point_geometry = location['geometry']
                 
@@ -680,9 +784,30 @@ class FifteenMinuteCity(Model):
                     lat1=point_geometry.y, lon1=point_geometry.x,
                     lat2=home_node_geom['y'], lon2=home_node_geom['x']
                 )
-                # print(f"DEBUG: Agent {agent_id} has an access distance of {access_distance_meters:.2f} meters.")
                 parish = self._get_parish_for_node(home_node)
-                agent_props = self._generate_agent_properties(parish)
+                agent_props = Resident._generate_agent_properties(
+                    parish=parish,
+                    demographics=self.demographics,
+                    parish_demographics=getattr(self, 'parish_demographics', {}),
+                    city=getattr(self, 'city', None),
+                    industry_distribution=self.industry_distribution,
+                    occupation_distribution=self.occupation_distribution,
+                    income_distribution=self.income_distribution,
+                    economic_status_distribution=self.economic_status_distribution
+                )
+                
+                # TEMPORARY FEATURE: For Taipa parish, spawn 30% of residents at casinos
+                if parish_name == "Taipa" and self.pois.get('casino') and i < len(home_locations) * 0.3:
+                    # Find a random casino location
+                    casino_pois = self.pois['casino']
+                    if casino_pois:
+                        casino_node, _ = self.random.choice(casino_pois)
+                        casino_coords = self.graph.nodes[casino_node]
+                        point_geometry = Point(casino_coords['x'], casino_coords['y'])
+                        home_node = casino_node
+                        # TEMPORARY: Mark as tourist for special visualization
+                        agent_props['is_tourist'] = True
+                        # self.logger.info(f"Spawning Taipa resident {agent_id} at casino location as tourist")
 
                 # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
@@ -692,7 +817,6 @@ class FifteenMinuteCity(Model):
                 accessible_nodes = dict(nx.single_source_dijkstra_path_length(
                     self.graph, home_node, cutoff=accessibility_radius, weight='length'
                 ))
-                
                 
                 resident = Resident(
                     model=self, unique_id=agent_id, geometry=point_geometry,
@@ -722,16 +846,42 @@ class FifteenMinuteCity(Model):
         Args:
             num_residents: Total number of residents to create
         """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+            
         home_locations = []
         use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
 
         if use_buildings:
             self.logger.info("Initializing residents at random residential building locations.")
-            selected_buildings = self.residential_buildings.sample(n=num_residents, replace=True, random_state=self.random.randint(0, 1000000))
-            for _, building in selected_buildings.iterrows():
-                point_geometry = building.geometry.centroid
-                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
-                home_locations.append({'geometry': point_geometry, 'node': home_node})
+            
+            # Calculate building areas for proportional sampling using projected coordinates
+            residential_buildings_copy = self._calculate_building_areas(self.residential_buildings)
+            
+            # Remove buildings with zero or negative area
+            residential_buildings_copy = residential_buildings_copy[residential_buildings_copy['area'] > 0]
+            
+            if not residential_buildings_copy.empty:
+                # Sample buildings proportionally to their area
+                weights = residential_buildings_copy['area'] / residential_buildings_copy['area'].sum()
+                selected_buildings = residential_buildings_copy.sample(
+                    n=num_residents, 
+                    replace=True, 
+                    weights=weights,
+                    random_state=self.random.randint(0, 1000000)
+                )
+                
+                self.logger.info(f"Selected {num_residents} residents from {len(residential_buildings_copy)} buildings (area-weighted)")
+                
+                for _, building in selected_buildings.iterrows():
+                    point_geometry = building.geometry.centroid
+                    home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                    home_locations.append({'geometry': point_geometry, 'node': home_node})
+            else:
+                self.logger.warning("No residential buildings with valid area found. Falling back to random network nodes.")
+                use_buildings = False
         else:
             self.logger.info("No residential building data. Initializing residents at random network nodes.")
             random_nodes = random.choices(list(self.graph.nodes()), k=num_residents)
@@ -754,7 +904,16 @@ class FifteenMinuteCity(Model):
             parish = self._get_parish_for_node(home_node)
             # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
             
-            agent_props = self._generate_agent_properties(parish)
+            agent_props = Resident._generate_agent_properties(
+                parish=parish,
+                demographics=self.demographics,
+                parish_demographics=getattr(self, 'parish_demographics', {}),
+                city=getattr(self, 'city', None),
+                industry_distribution=self.industry_distribution,
+                occupation_distribution=self.occupation_distribution,
+                income_distribution=self.income_distribution,
+                economic_status_distribution=self.economic_status_distribution
+            )
 
             # Determine step size and accessibility radius based on agent's age
             is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
@@ -878,3 +1037,45 @@ class FifteenMinuteCity(Model):
                 return PersonaType.WORKING_PARENT
             else:
                 return PersonaType.YOUNG_PROFESSIONAL
+
+    def _calculate_building_areas(self, buildings_gdf):
+        """
+        Calculate building areas using proper projected coordinates to avoid geographic CRS warnings.
+        
+        Args:
+            buildings_gdf: GeoDataFrame with building geometries
+            
+        Returns:
+            GeoDataFrame with 'area' column added using projected coordinates
+        """
+        if buildings_gdf.empty:
+            return buildings_gdf
+        
+        # Make a copy to avoid modifying the original
+        buildings_copy = buildings_gdf.copy()
+        
+        # Check if we're in a geographic CRS (lat/lon)
+        if buildings_copy.crs and buildings_copy.crs.is_geographic:
+            # For Macau, use UTM Zone 49N (EPSG:32649) which is appropriate for the region
+            # For other cities, we could use a more general approach like Web Mercator (EPSG:3857)
+            if 'Macau' in self.city:
+                projected_crs = 'EPSG:32649'  # UTM Zone 49N for Macau
+            elif 'Barcelona' in self.city:
+                projected_crs = 'EPSG:32631'  # UTM Zone 31N for Barcelona
+            elif 'Hong Kong' in self.city:
+                projected_crs = 'EPSG:32650'  # UTM Zone 50N for Hong Kong
+            else:
+                # Default to Web Mercator for other cities
+                projected_crs = 'EPSG:3857'
+            
+            # Project to appropriate UTM zone and calculate area
+            buildings_projected = buildings_copy.to_crs(projected_crs)
+            buildings_copy['area'] = buildings_projected.geometry.area
+            
+            self.logger.debug(f"Calculated building areas using projected CRS: {projected_crs}")
+        else:
+            # Already in projected coordinates, calculate area directly
+            buildings_copy['area'] = buildings_copy.geometry.area
+            self.logger.debug("Calculated building areas using existing projected CRS")
+        
+        return buildings_copy
