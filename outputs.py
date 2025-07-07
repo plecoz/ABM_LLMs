@@ -52,36 +52,57 @@ class OutputController:
         self.energy_stats = {}  # Track energy consumption
         self.parish_mobility = {}  # Track inter-parish movement
         
-    def track_travel_start(self, agent_id: int, from_node: int, to_node: int, travel_time: int):
+    def track_travel_step(self, agent_id: int):
         """
-        Track when an agent starts traveling.
+        Track one step of actual travel time for an agent.
         
         Args:
             agent_id: ID of the traveling agent
-            from_node: Starting node
-            to_node: Destination node
-            travel_time: Expected travel time in minutes
         """
         # Initialize agent travel time if not exists
         if agent_id not in self.agent_travel_times:
             self.agent_travel_times[agent_id] = 0
         
-        # Add to total travel time
-        self.total_travel_time += travel_time
-        self.agent_travel_times[agent_id] += travel_time
+        # Add 1 minute of actual travel time
+        self.total_travel_time += 1
+        self.agent_travel_times[agent_id] += 1
         
-        # Record travel event for detailed analysis
+        # Update the most recent travel event for this agent with actual travel time
+        for event in reversed(self.travel_events):
+            if event['agent_id'] == agent_id:
+                event['travel_time'] += 1
+                break
+        
+        self.logger.debug(f"Agent {agent_id} traveled for 1 minute (total: {self.agent_travel_times[agent_id]})")
+    
+    def track_travel_start(self, agent_id: int, from_node: int, to_node: int, travel_time: int):
+        """
+        Track when an agent starts traveling (for event logging only, not time accumulation).
+        
+        Args:
+            agent_id: ID of the traveling agent
+            from_node: Starting node ID
+            to_node: Destination node ID
+            travel_time: Planned travel time in minutes (logged but not added to statistics)
+        """
+        # Store travel event for detailed analysis (but don't add planned time to statistics)
+        # The actual travel time will be tracked by track_travel_step() calls
         travel_event = {
             'agent_id': agent_id,
             'step': self.model.step_count,
             'from_node': from_node,
             'to_node': to_node,
-            'travel_time': travel_time,
+            'travel_time': 0,  # Actual travel time starts at 0, will be updated by track_travel_step
             'timestamp': self.model.get_current_time()
         }
         self.travel_events.append(travel_event)
         
-        self.logger.debug(f"Agent {agent_id} started travel: {travel_time} minutes from {from_node} to {to_node}")
+        self.logger.info(f"Agent {agent_id} started traveling from node {from_node} to node {to_node} "
+                        f"(planned time: {travel_time} minutes)")
+        
+        # Initialize agent travel time tracking if not exists (for when they actually start traveling)
+        if agent_id not in self.agent_travel_times:
+            self.agent_travel_times[agent_id] = 0
     
     def track_waiting_start(self, agent_id: int, poi_category: str, waiting_time: int):
         """

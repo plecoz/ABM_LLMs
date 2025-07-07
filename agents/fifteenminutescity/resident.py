@@ -1199,6 +1199,10 @@ class Resident(BaseAgent):
             
             # Handle ongoing travel
             if self.traveling:
+                # Track actual travel time in output controller
+                if hasattr(self.model, 'output_controller'):
+                    self.model.output_controller.track_travel_step(self.unique_id)
+                
                 self.travel_time_remaining -= 1
                 
                 # Check if we've arrived
@@ -1568,7 +1572,7 @@ class Resident(BaseAgent):
             POI type to move to, 'home' to go home, or None to stay put
         """
         # Simple probability check for random movement
-        if random.random() > 0.3:  # 70% chance to stay put for random movement
+        if random.random() > 0.7:  # 70% chance to stay put for random movement
             return None
         
         # Use existing random target selection
