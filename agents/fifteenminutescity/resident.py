@@ -4,6 +4,7 @@ import random
 import networkx as nx
 import logging
 import math
+import json
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
@@ -224,6 +225,11 @@ class Resident(BaseAgent):
         # Path selection for LLM agents
         self.selected_travel_path = None  # Store the path selected by LLM
         self.path_selection_history = []  # Track path choices for learning
+
+        # demographics attributes 
+        self.demographics = None
+        # Load parish-specific demographics if provided
+        self.parish_demographics = kwargs.get('parish_demographics', {})
         
         # Enhanced memory module
         self.memory = {
@@ -237,6 +243,219 @@ class Resident(BaseAgent):
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
+
+
+        def _load_demographics(self, demographics_path):
+            """
+            Load demographic data from a JSON file.
+            
+            Args:
+                demographics_path: Path to the JSON file with demographic data
+            """
+            try:
+                with open(demographics_path, 'r') as f:
+                    self.demographics = json.load(f)
+                self.logger.info("Loaded demographics data")
+            except Exception as e:
+                self.logger.error(f"Error loading demographics: {e}")
+                # Set default demographics
+                self.demographics = {
+                    "age_distribution": {"0-18": 0.2, "19-35": 0.3, "36-65": 0.4, "65+": 0.1},
+                    "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
+                    "income_distribution": {"low": 0.3, "medium": 0.5, "high": 0.2},
+                    "education_distribution": {
+                        "no_education": 0.1,
+                        "primary": 0.2,
+                        "high_school": 0.4,
+                        "bachelor": 0.2,
+                        "master": 0.08,
+                        "phd": 0.02
+                    }
+                }
+
+    @staticmethod
+    def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
+                                 city=None, industry_distribution=None, occupation_distribution=None, 
+                                 income_distribution=None):
+        """
+        Generate agent properties based on demographic distributions.
+        If a parish is specified and parish-specific demographics exist,
+        use those instead of the global demographics.
+        
+        Args:
+            parish: The parish name to use for demographics (optional)
+            demographics: Main demographics data
+            parish_demographics: Parish-specific demographics data
+            city: City name for location-specific logic
+            industry_distribution: Industry distribution data
+            occupation_distribution: Occupation distribution data
+            income_distribution: Income distribution data
+            
+        Returns:
+            Dictionary of agent properties
+        """
+        # Use parish-specific demographics if available
+        if parish and parish_demographics and parish in parish_demographics:
+            demographics = parish_demographics[parish]
+        
+        if not demographics:
+            return {}
+        
+        props = {}
+
+        # --- AGE & AGE CLASS ---
+        age_dist = demographics.get('age_distribution', {})
+        age_group = Resident._sample_from_distribution(age_dist)
+        props['age_class'] = age_group  # Store the sampled age class for reference
+
+        # Convert age group to an actual age value
+        if age_group is not None:
+            if '-' in age_group:  # e.g. "25-29"
+                min_age, max_age = age_group.split('-')
+                try:
+                    min_age = int(min_age)
+                    max_age = int(max_age)
+                    props['age'] = random.randint(min_age, max_age)
+                except ValueError:
+                    # Fallback in case parsing fails
+                    props['age'] = random.randint(18, 90)
+            elif age_group.endswith('+'):  # e.g. "85+"
+                try:
+                    min_age = int(age_group.rstrip('+'))
+                    props['age'] = random.randint(min_age, min_age + 10)
+                except ValueError:
+                    props['age'] = random.randint(65, 90)
+            else:  # Unknown pattern – fallback
+                props['age'] = random.randint(18, 90)
+        else:
+            # If no age group could be sampled, fallback to a default range
+            props['age'] = random.randint(18, 90)
+
+        # --- GENDER ---
+        gender_dist = {}
+        # Prefer age-specific gender distribution if available
+        if demographics.get('gender_by_age') and age_group in demographics['gender_by_age']:
+            gender_dist = demographics['gender_by_age'][age_group]
+        else:
+            gender_dist = demographics.get('gender_distribution', {})
+        props['gender'] = Resident._sample_from_distribution(gender_dist)
+
+        # --- INCOME ---
+        income_dist = demographics.get('income_distribution', {})
+        income_level = Resident._sample_from_distribution(income_dist)
+
+        # Convert income level to actual income - use parish-specific ranges if available
+        income_ranges = demographics.get('income_ranges', {
+            "low": (10000, 30000),
+            "medium": (30001, 100000),
+            "high": (100001, 500000)
+        })
+        
+        if income_level in income_ranges:
+            min_val, max_val = income_ranges[income_level]
+            props['income'] = random.randint(min_val, max_val)
+        else:
+            # Fallback to default ranges
+            if income_level == "low":
+                props['income'] = random.randint(10000, 30000)
+            elif income_level == "medium":
+                props['income'] = random.randint(30001, 100000)
+            else:  # high
+                props['income'] = random.randint(100001, 500000)
+
+        # Note: For Macau, income will be reassigned based on occupation after occupation is determined
+
+        # --- EDUCATION LEVEL ---
+        education_level = None
+        if (demographics.get('education_distribution_by_age_and_gender') and
+            age_group in demographics['education_distribution_by_age_and_gender'] and
+            props['gender'] in demographics['education_distribution_by_age_and_gender'][age_group]):
+            edu_dist_raw = demographics['education_distribution_by_age_and_gender'][age_group][props['gender']]
+            # Flatten nested structures (e.g. Primary education -> complete/incomplete)
+            flattened_edu_dist = {}
+            for k, v in edu_dist_raw.items():
+                if isinstance(v, dict):
+                    for sub_k, sub_v in v.items():
+                        flattened_edu_dist[f"{k} {sub_k}"] = sub_v
+                else:
+                    flattened_edu_dist[k] = v
+            education_level = Resident._sample_from_distribution(flattened_edu_dist)
+        else:
+            # Fallback to generic education distribution if provided
+            education_dist = demographics.get('education_distribution', {})
+            education_level = Resident._sample_from_distribution(education_dist)
+        props['education'] = education_level
+
+        # --- INDUSTRY ---  NEW SECTION
+        industry_choice = None
+        if (city == "Macau, China" and education_level and industry_distribution):
+            norm_edu = Resident._normalise_string(education_level)
+            # direct match or attempt to map common synonyms
+            industry_dist = industry_distribution.get(norm_edu)
+            if not industry_dist:
+                # Try some heuristic replacements
+                for key, dist in industry_distribution.items():
+                    if key in norm_edu or norm_edu in key:
+                        industry_dist = dist
+                        break
+            if industry_dist:
+                industry_choice = Resident._sample_from_distribution(industry_dist)
+        props['industry'] = industry_choice
+
+        # --- OCCUPATION ---
+        occupation_choice = None
+        if (city == "Macau, China" and props.get('age') is not None and occupation_distribution):
+            age = props['age']
+            # Map age to age group used in occupation.json
+            age_group = None
+            if 16 <= age <= 24:
+                age_group = "16-24"
+            elif 25 <= age <= 29:
+                age_group = "25-29"
+            elif 30 <= age <= 34:
+                age_group = "30-34"
+            elif 35 <= age <= 39:
+                age_group = "35-39"
+            elif 40 <= age <= 44:
+                age_group = "40-44"
+            elif 45 <= age <= 49:
+                age_group = "45-49"
+            elif 50 <= age <= 54:
+                age_group = "50-54"
+            elif 55 <= age <= 59:
+                age_group = "55-59"
+            elif 60 <= age <= 64:
+                age_group = "60-64"
+            elif age >= 65:
+                age_group = "≧65"
+            
+            if age_group and age_group in occupation_distribution:
+                occupation_dist = occupation_distribution[age_group]
+                occupation_choice = Resident._sample_from_distribution(occupation_dist)
+        props['occupation'] = occupation_choice
+
+        # --- INCOME (Reassign for Macau based on occupation) ---
+        if (city == "Macau, China" and occupation_choice and income_distribution):
+            # Handle slight naming differences between occupation.json and income.json
+            income_key = occupation_choice
+            
+            if income_key in income_distribution:
+                income_bracket_dist = income_distribution[income_key]
+                income_bracket = Resident._sample_from_distribution(income_bracket_dist)
+                
+                # Convert income bracket to actual income value
+                if income_bracket:
+                    actual_income = Resident._convert_income_bracket_to_value(income_bracket)
+                    if actual_income is not None:
+                        props['income'] = actual_income
+
+        # Default values for additional attributes
+        props['employment_status'] = "employed"
+        props['household_type'] = "single"
+
+        return props
+
+
 
     def calculate_travel_time(self, from_node, to_node):
         """
@@ -2106,3 +2325,67 @@ class Resident(BaseAgent):
         except Exception as e:
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error updating emotional state from POI visit: {e}")
+
+
+
+
+    @staticmethod
+    def _sample_from_distribution(distribution):
+        """
+        Sample a value from a probability distribution.
+        
+        Args:
+            distribution: Dictionary mapping values to probabilities
+            
+        Returns:
+            A sampled value from the distribution
+        """
+        if not distribution:
+            return None
+            
+        items = list(distribution.keys())
+        probabilities = list(distribution.values())
+        
+        # Normalize probabilities if they don't sum to 1
+        prob_sum = sum(probabilities)
+        if prob_sum != 1.0 and prob_sum > 0:
+            probabilities = [p / prob_sum for p in probabilities]
+        
+        return random.choices(items, probabilities)[0]
+
+    @staticmethod
+    def _normalise_string(s):
+        """Normalize a string by removing spaces and converting to lowercase."""
+        if not s:
+            return ""
+        return s.replace(" ", "").lower()
+
+    @staticmethod
+    def _convert_income_bracket_to_value(income_bracket):
+        """Convert income bracket string to actual income value."""
+        if not income_bracket:
+            return None
+        
+        # Handle common income bracket formats
+        if "10,000" in income_bracket and "19,999" in income_bracket:
+            return random.randint(10000, 19999)
+        elif "20,000" in income_bracket and "29,999" in income_bracket:
+            return random.randint(20000, 29999)
+        elif "30,000" in income_bracket and "39,999" in income_bracket:
+            return random.randint(30000, 39999)
+        elif "40,000" in income_bracket and "49,999" in income_bracket:
+            return random.randint(40000, 49999)
+        elif "50,000" in income_bracket and "59,999" in income_bracket:
+            return random.randint(50000, 59999)
+        elif "60,000" in income_bracket and "69,999" in income_bracket:
+            return random.randint(60000, 69999)
+        elif "70,000" in income_bracket and "79,999" in income_bracket:
+            return random.randint(70000, 79999)
+        elif "80,000" in income_bracket and "89,999" in income_bracket:
+            return random.randint(80000, 89999)
+        elif "90,000" in income_bracket and "99,999" in income_bracket:
+            return random.randint(90000, 99999)
+        elif "100,000" in income_bracket:
+            return random.randint(100000, 200000)
+        else:
+            return 50000  # Default fallback

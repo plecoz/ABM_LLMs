@@ -541,7 +541,7 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         animator.initialize()  # Draw initial state
         
         # Start the animation loop
-        animator.start_animation(steps, interval=50)  # 50ms between frames
+        animator.start_animation(steps, interval=25)  # 50ms between frames
         
         plt.ioff()  # Turn off interactive mode
         plt.show()  # Keep window open at end
