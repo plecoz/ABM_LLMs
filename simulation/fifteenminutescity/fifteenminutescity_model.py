@@ -620,14 +620,16 @@ class FifteenMinuteCity(Model):
         # Income statistics
         print(f"\nINCOME STATISTICS:")
         print("-" * 40)
-        incomes = [resident.attributes.get('income', 0) for resident in self.residents]
-        if incomes:
-            avg_income = sum(incomes) / len(incomes)
-            min_income = min(incomes)
-            max_income = max(incomes)
-            print(f"  Average Monthly Income: ${avg_income:,.2f}")
-            print(f"  Minimum Monthly Income: ${min_income:,.2f}")
-            print(f"  Maximum Monthly Income: ${max_income:,.2f}")
+        daily_incomes = [resident.daily_income for resident in self.residents if hasattr(resident, 'daily_income')]
+        if daily_incomes:
+            avg_daily_income = sum(daily_incomes) / len(daily_incomes)
+            min_daily_income = min(daily_incomes)
+            max_daily_income = max(daily_incomes)
+            print(f"  Average Daily Income: ${avg_daily_income:,.2f}")
+            print(f"  Minimum Daily Income: ${min_daily_income:,.2f}")
+            print(f"  Maximum Daily Income: ${max_daily_income:,.2f}")
+        else:
+            print("  No daily income data available")
         
         print("="*60)
         print("END DEMOGRAPHIC STATISTICS")
