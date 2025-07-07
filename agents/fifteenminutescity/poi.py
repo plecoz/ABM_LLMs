@@ -37,7 +37,7 @@ class POI(GeoAgent):
         # If category is explicitly provided, use it, otherwise determine it from poi_type
         if category is not None:
             self.category = category
-            # print(f"Using provided category for POI {unique_id}: {self.category}")
+            #print(f"Using provided category for POI {unique_id}: {self.category}")
         else:
             self.category = self._determine_category(poi_type)
         

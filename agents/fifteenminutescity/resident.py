@@ -104,6 +104,8 @@ class Resident(BaseAgent):
             'gender': kwargs.get('gender', 'male'),
             'income': kwargs.get('income', 50000),
             'education': kwargs.get('education', 'high_school'),
+            'occupation': kwargs.get('occupation', None),
+            'industry': kwargs.get('industry', None),
             
             # Location and social
             'parish': kwargs.get('parish', None),

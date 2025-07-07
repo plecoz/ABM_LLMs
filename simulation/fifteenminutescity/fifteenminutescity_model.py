@@ -236,7 +236,45 @@ class FifteenMinuteCity(Model):
         # Initialize output controller for tracking metrics
         self.output_controller = OutputController(self)
         
-        # Create resident agents with proportional distribution
+        # --- Load demographic distribution data BEFORE creating residents ---
+        # --- Load industry distribution data (education -> industry probabilities) ---
+        industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
+        self.industry_distribution = {}
+        if self.city == "Macau, China" and industry_path and os.path.exists(industry_path):
+            self._load_industry_distribution(industry_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
+
+        # --- Load occupation distribution data (age -> occupation probabilities) ---
+        occupation_path = kwargs.get('occupation_path', 'data/demographics_macau/occupation.json')
+        self.occupation_distribution = {}
+        if self.city == "Macau, China" and occupation_path and os.path.exists(occupation_path):
+            self._load_occupation_distribution(occupation_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
+
+        # --- Load income distribution data (occupation -> income probabilities) ---
+        income_path = kwargs.get('income_path', 'data/demographics_macau/income.json')
+        self.income_distribution = {}
+        if self.city == "Macau, China" and income_path and os.path.exists(income_path):
+            self._load_income_distribution(income_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
+        
+        # --- Load economic status distribution data (age -> gender -> status probabilities) ---
+        economic_status_path = kwargs.get('economic_status_path', 'data/demographics_macau/economic_status.json')
+        self.economic_status_distribution = {}
+        
+        if self.city == "Macau, China" and economic_status_path and os.path.exists(economic_status_path):
+            self._load_economic_status_distribution(economic_status_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Economic status distribution file not found at {economic_status_path}. 'economic_status' attribute will default to None.")
+
+        # Create resident agents with proportional distribution (NOW with distributions loaded)
         self._create_residents_with_distribution(num_residents)
 
         # Create POI agents from the pois dictionary
@@ -296,44 +334,6 @@ class FifteenMinuteCity(Model):
 
         self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
-
-        # --- Load industry distribution data (education -> industry probabilities) ---  NEW BLOCK
-        industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
-        self.industry_distribution = {}
-        if self.city == "Macau, China" and industry_path and os.path.exists(industry_path):
-            self._load_industry_distribution(industry_path)
-        else:
-            if self.city == "Macau, China":
-                self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
-
-        # --- Load occupation distribution data (age -> occupation probabilities) ---
-        occupation_path = kwargs.get('occupation_path', 'data/demographics_macau/occupation.json')
-        self.occupation_distribution = {}
-        if self.city == "Macau, China" and occupation_path and os.path.exists(occupation_path):
-            self._load_occupation_distribution(occupation_path)
-        else:
-            if self.city == "Macau, China":
-                self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
-
-        # --- Load income distribution data (occupation -> income probabilities) ---
-        income_path = kwargs.get('income_path', 'data/demographics_macau/income.json')
-        self.income_distribution = {}
-        if self.city == "Macau, China" and income_path and os.path.exists(income_path):
-            self._load_income_distribution(income_path)
-        else:
-            if self.city == "Macau, China":
-                self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
-        
-        # --- Load economic status distribution data (age -> gender -> status probabilities) ---
-        economic_status_path = kwargs.get('economic_status_path', 'data/demographics_macau/economic_status.json')
-        self.economic_status_distribution = {}
-        if self.city == "Macau, China" and economic_status_path and os.path.exists(economic_status_path):
-            self._load_economic_status_distribution(economic_status_path)
-        else:
-            if self.city == "Macau, China":
-                self.logger.warning(f"Economic status distribution file not found at {economic_status_path}. 'economic_status' attribute will default to None.")
-        
-        # --- Load parish-specific demographics if provided ---
 
     def _map_nodes_to_parishes(self):
         """
@@ -514,11 +514,15 @@ class FifteenMinuteCity(Model):
         Load economic status distribution probabilities from a JSON file.
         Expected format: {age_group: {gender: {status: probability, ...}, ...}, ...}
         """
+        print(f"DEBUG: _load_economic_status_distribution called with path: {economic_status_path}")
         try:
             with open(economic_status_path, 'r') as f:
                 self.economic_status_distribution = json.load(f)
+            print(f"DEBUG: Successfully loaded economic status data with {len(self.economic_status_distribution)} age groups")
+            print(f"DEBUG: Sample age groups: {list(self.economic_status_distribution.keys())[:3]}")
             self.logger.info("Loaded economic status distribution data")
         except Exception as e:
+            print(f"DEBUG: Exception during economic status loading: {e}")
             self.logger.error(f"Error loading economic status distribution data: {e}")
             self.economic_status_distribution = {}
 
@@ -715,10 +719,10 @@ class FifteenMinuteCity(Model):
                     demographics=self.demographics,
                     parish_demographics=getattr(self, 'parish_demographics', {}),
                     city=getattr(self, 'city', None),
-                    industry_distribution=getattr(self, 'industry_distribution', {}),
-                    occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                    income_distribution=getattr(self, 'income_distribution', {}),
-                    economic_status_distribution=getattr(self, 'economic_status_distribution', {})
+                    industry_distribution=self.industry_distribution,
+                    occupation_distribution=self.occupation_distribution,
+                    income_distribution=self.income_distribution,
+                    economic_status_distribution=self.economic_status_distribution
                 )
                 
                 # TEMPORARY FEATURE: For Taipa parish, spawn 30% of residents at casinos
@@ -832,10 +836,10 @@ class FifteenMinuteCity(Model):
                 demographics=self.demographics,
                 parish_demographics=getattr(self, 'parish_demographics', {}),
                 city=getattr(self, 'city', None),
-                industry_distribution=getattr(self, 'industry_distribution', {}),
-                occupation_distribution=getattr(self, 'occupation_distribution', {}),
-                income_distribution=getattr(self, 'income_distribution', {}),
-                economic_status_distribution=getattr(self, 'economic_status_distribution', {})
+                industry_distribution=self.industry_distribution,
+                occupation_distribution=self.occupation_distribution,
+                income_distribution=self.income_distribution,
+                economic_status_distribution=self.economic_status_distribution
             )
 
             # Determine step size and accessibility radius based on agent's age
