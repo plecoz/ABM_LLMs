@@ -97,8 +97,8 @@ class OutputController:
         }
         self.travel_events.append(travel_event)
         
-        self.logger.info(f"Agent {agent_id} started traveling from node {from_node} to node {to_node} "
-                        f"(planned time: {travel_time} minutes)")
+        # self.logger.info(f"Agent {agent_id} started traveling from node {from_node} to node {to_node} "
+        #                 f"(planned time: {travel_time} minutes)")
         
         # Initialize agent travel time tracking if not exists (for when they actually start traveling)
         if agent_id not in self.agent_travel_times:

@@ -277,6 +277,9 @@ class FifteenMinuteCity(Model):
         # Create resident agents with proportional distribution (NOW with distributions loaded)
         self._create_residents_with_distribution(num_residents)
 
+        # Print demographic statistics after all residents are created
+        self.print_demographic_statistics()
+
         # Create POI agents from the pois dictionary
         poi_id = num_residents  # Start POI IDs after resident IDs
         print("\nCreating POI agents from POI dictionary:")
@@ -514,15 +517,15 @@ class FifteenMinuteCity(Model):
         Load economic status distribution probabilities from a JSON file.
         Expected format: {age_group: {gender: {status: probability, ...}, ...}, ...}
         """
-        print(f"DEBUG: _load_economic_status_distribution called with path: {economic_status_path}")
+        # print(f"DEBUG: _load_economic_status_distribution called with path: {economic_status_path}")
         try:
             with open(economic_status_path, 'r') as f:
                 self.economic_status_distribution = json.load(f)
-            print(f"DEBUG: Successfully loaded economic status data with {len(self.economic_status_distribution)} age groups")
-            print(f"DEBUG: Sample age groups: {list(self.economic_status_distribution.keys())[:3]}")
+            # print(f"DEBUG: Successfully loaded economic status data with {len(self.economic_status_distribution)} age groups")
+            # print(f"DEBUG: Sample age groups: {list(self.economic_status_distribution.keys())[:3]}")
             self.logger.info("Loaded economic status distribution data")
         except Exception as e:
-            print(f"DEBUG: Exception during economic status loading: {e}")
+            # print(f"DEBUG: Exception during economic status loading: {e}")
             self.logger.error(f"Error loading economic status distribution data: {e}")
             self.economic_status_distribution = {}
 
@@ -561,6 +564,74 @@ class FifteenMinuteCity(Model):
         
         # Fallback for unrecognized formats
         return None
+
+    def print_demographic_statistics(self):
+        """
+        Print demographic statistics of all residents including percentages and counts.
+        Shows distribution of age_class, gender, education, occupation, and industry.
+        """
+        print("\n" + "="*60)
+        print("DEMOGRAPHIC STATISTICS")
+        print("="*60)
+        
+        total_residents = len(self.residents)
+        print(f"Total Residents: {total_residents}")
+        print("-" * 60)
+        
+        # Helper function to print category statistics
+        def print_category_stats(category_name, attribute_name):
+            print(f"\n{category_name.upper()} DISTRIBUTION:")
+            print("-" * 40)
+            
+            # Count occurrences
+            counts = {}
+            for resident in self.residents:
+                value = resident.attributes.get(attribute_name, 'N/A')
+                if value is None:
+                    value = 'N/A'
+                counts[value] = counts.get(value, 0) + 1
+            
+            # Sort by count (descending)
+            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            
+            for value, count in sorted_counts:
+                percentage = (count / total_residents) * 100
+                print(f"  {value:<35} {count:>6} ({percentage:>5.1f}%)")
+        
+        # Print statistics for each category
+        print_category_stats("Age Class", "age_class")
+        print_category_stats("Gender", "gender")
+        print_category_stats("Education", "education")
+        print_category_stats("Occupation", "occupation")
+        print_category_stats("Industry", "industry")
+        
+        # Additional employment statistics
+        print(f"\nEMPLOYMENT STATUS:")
+        print("-" * 40)
+        employment_counts = {}
+        for resident in self.residents:
+            status = resident.employment_status
+            employment_counts[status] = employment_counts.get(status, 0) + 1
+        
+        for status, count in sorted(employment_counts.items(), key=lambda x: x[1], reverse=True):
+            percentage = (count / total_residents) * 100
+            print(f"  {status.title():<35} {count:>6} ({percentage:>5.1f}%)")
+        
+        # Income statistics
+        print(f"\nINCOME STATISTICS:")
+        print("-" * 40)
+        incomes = [resident.attributes.get('income', 0) for resident in self.residents]
+        if incomes:
+            avg_income = sum(incomes) / len(incomes)
+            min_income = min(incomes)
+            max_income = max(incomes)
+            print(f"  Average Monthly Income: ${avg_income:,.2f}")
+            print(f"  Minimum Monthly Income: ${min_income:,.2f}")
+            print(f"  Maximum Monthly Income: ${max_income:,.2f}")
+        
+        print("="*60)
+        print("END DEMOGRAPHIC STATISTICS")
+        print("="*60 + "\n")
 
     def _initialize_social_networks(self, density=0.1):
         """
@@ -736,7 +807,7 @@ class FifteenMinuteCity(Model):
                         home_node = casino_node
                         # TEMPORARY: Mark as tourist for special visualization
                         agent_props['is_tourist'] = True
-                        self.logger.info(f"Spawning Taipa resident {agent_id} at casino location as tourist")
+                        # self.logger.info(f"Spawning Taipa resident {agent_id} at casino location as tourist")
 
                 # Determine step size and accessibility radius based on agent's age
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
