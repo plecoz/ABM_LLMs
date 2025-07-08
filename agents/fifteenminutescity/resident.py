@@ -2189,53 +2189,93 @@ class Resident(BaseAgent):
         return 50000
 
     def _choose_concordia_based_target(self):
-        """Use the embedded Concordia brain to select a movement target."""
+        """Use the embedded Concordia brain to select a movement target.
+
+        New behaviour: ask LLM for JSON output::
+
+            {"action": "move", "target_poi_id": 123}
+
+        action 可取 "move", "home", "stay"。当 action=="move" 时必须给出 target_poi_id。
+        如果解析或校验失败，则回退到旧的 need-based 逻辑。
+        """
+
+        import json
+
         if self.brain is None:
             return self._choose_need_based_target()
 
-        # Compose a succinct observation describing current state
+        # -------- 1) 准备可达 POI 列表 --------
+        accessible_info = []
+        try:
+            for poi in getattr(self.model, 'poi_agents', []):
+                if poi.node_id not in self.accessible_nodes:
+                    continue
+
+                # 估算旅行时间（分钟）；若失败则用 None
+                try:
+                    ttime = self.calculate_travel_time(self.current_node, poi.node_id)
+                except Exception:
+                    ttime = None
+
+                accessible_info.append({
+                    "id": poi.unique_id,
+                    "type": getattr(poi, 'poi_type', 'unknown'),
+                    "travel_time": ttime,
+                })
+        except Exception as _e:
+            self.logger.warning(f"Error building accessible POI info: {_e}")
+
+        # 只保留最近的 20 个（按 travel_time 升序）以避免 prompt 太长
+        accessible_info = sorted(accessible_info, key=lambda x: (x["travel_time"] or 1e9))[:20]
+
+        # -------- 2) 构造 observation --------
         needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
-        poi_types = [getattr(poi, 'poi_type', 'unknown') for poi in getattr(self.model, 'poi_agents', [])]
-        poi_list = ", ".join(sorted(set(poi_types)))
         observation = (
-            f"Current needs => {needs_summary}. "
-            f"Accessible POI types => {poi_list}."
+            "Current needs => " + needs_summary + ". "
+            "Accessible POIs (first 20) => " + json.dumps(accessible_info) + "."
         )
+
+        # -------- 3) 与 LLM 交互 --------
         try:
             self.brain.observe(observation)
             reply = self.brain.decide(
-                "Where should you go next? Respond with a single keyword such as 'restaurant', 'shop', 'home' or 'stay'."
-            ).lower()
+                (
+                    "Decide your next movement. Respond STRICTLY in JSON with keys: "
+                    "'action' (move|home|stay) and, if action=='move', 'target_poi_id' (integer). "
+                    "Do NOT output anything except the JSON object."
+                )
+            )
         except Exception as _e:
-            # Fall back if Concordia errors out
             self.logger.error(f"Concordia brain error: {_e}")
             return self._choose_need_based_target()
 
-        # Basic interpretation of LLM reply
         if not reply:
             return None
-        if 'home' in reply:
+
+        # -------- 4) 解析 JSON --------
+        try:
+            decision = json.loads(reply)
+        except Exception as _e:
+            self.logger.warning(f"LLM reply is not valid JSON: {reply} / {_e}")
+            return self._choose_need_based_target()
+
+        action = str(decision.get("action", "")).lower()
+        if action == "home":
             return 'home'
-        if 'stay' in reply or 'wait' in reply:
+        if action in ("stay", "wait", "rest"):
             return None
 
-        # Map common synonyms to POI types
-        mapping = {
-            'shop': 'shop', 'store': 'shop', 'shopping': 'shop',
-            'restaurant': 'restaurant', 'eat': 'restaurant', 'food': 'restaurant',
-            'hospital': 'hospital', 'health': 'hospital', 'clinic': 'hospital',
-            'park': 'park', 'garden': 'park',
-            'gym': 'gym', 'fitness': 'gym',
-            'school': 'school', 'education': 'school',
-            'library': 'library', 'read': 'library',
-            'cinema': 'cinema', 'movie': 'cinema',
-            'bank': 'bank', 'money': 'bank',
-            'pharmacy': 'pharmacy', 'medicine': 'pharmacy',
-            'supermarket': 'supermarket', 'grocer': 'supermarket',
-        }
-        for key, poi in mapping.items():
-            if key in reply:
-                return poi
+        if action == "move":
+            poi_id = decision.get("target_poi_id")
+            if isinstance(poi_id, int):
+                # 校验 poi 是否存在且可达
+                if any(p.unique_id == poi_id and p.node_id in self.accessible_nodes for p in self.model.poi_agents):
+                    return poi_id
+                else:
+                    self.logger.warning(f"LLM suggested POI {poi_id} not accessible/exists.")
+            # 如果 target_poi_id 无效，则回退
+            return self._choose_need_based_target()
 
-        # Default: assume reply is a valid POI type
-        return reply.strip() or None
+        # 未识别 action，回退
+        self.logger.warning(f"Unknown action from LLM: {decision}")
+        return self._choose_need_based_target()

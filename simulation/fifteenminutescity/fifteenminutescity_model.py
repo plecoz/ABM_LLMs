@@ -1024,10 +1024,9 @@ class FifteenMinuteCity(Model):
         elif age < 25:
             if economic_status == 'Inactive' and random.random() < 0.9:
                 return PersonaType.STUDENT
-            if economic_status == 'Inactive' and random.random() >= 0.9:
-                return PersonaType.UNEMPLOYED
-            else:
-                return PersonaType.YOUNG_PROFESSIONAL
+            # NOTE: PersonaType.UNEMPLOYED 尚未实现，临时回退为 YOUNG_PROFESSIONAL
+            # TODO(agents-team): 实现 UNEMPLOYED persona 后恢复
+            return PersonaType.YOUNG_PROFESSIONAL
         elif 25 <= age < 45:
             # For middle-aged adults, consider family status and employment
             household_type = getattr(resident, 'household_type', 'single')

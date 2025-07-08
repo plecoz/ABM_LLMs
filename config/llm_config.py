@@ -17,7 +17,7 @@ MODEL_NAME: str = "gpt-4.1-nano"
 
 # API key (or leave blank and set the corresponding environment variable,
 # e.g.  OPENAI_API_KEY, AZURE_OPENAI_KEY, etc.)
-API_KEY: str = "sk-0DBN4qc3xmE4TukADf241a1eCeA94a6f8c221d8646848669"
+API_KEY: str = "sk-Odug1h3sFBqLiAeC1c16E5B9028c4cBbA96e8b1003310519"
 
 # Optional: custom base URL (useful for self-hosted or proxy endpoints)
 BASE_URL: str | None = "https://one-api.jiaancc.site/v1"  # Set to None to use default OpenAI URL 

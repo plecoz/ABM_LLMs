@@ -34,8 +34,15 @@ from concordia.language_model.no_language_model import NoLanguageModel
 from concordia.language_model.gpt_model import GptLanguageModel
 from concordia.typing import entity as concordia_entity
 
+# ---------------------- 官方上下文组件 ----------------------
+from concordia.components.agent.memory import (
+    ListMemory,
+    DEFAULT_MEMORY_COMPONENT_KEY as _MEM_KEY,
+)
+from concordia.components.agent.observation import ObservationToMemory, LastNObservations
+
 # -----------------------------------------------------------------------------
-# Custom OpenAI wrapper with base_url support
+# Custom OpenAI wrapper with base_url support （保留）
 # -----------------------------------------------------------------------------
 import openai  # noqa: E402
 from concordia.language_model.base_gpt_model import BaseGPTModel  # noqa: E402
@@ -67,46 +74,7 @@ class CustomOpenAILanguageModel(BaseGPTModel):
 from concordia.typing import entity_component  # noqa: E402
 
 
-class RecentObservation(entity_component.ContextComponent):
-    """Stores the most recent observation and exposes it during `pre_act`."""
-
-    def __init__(self, max_chars: int | None = 1200) -> None:
-        super().__init__()
-        self._last: str = ""
-        self._max = max_chars
-
-    def pre_observe(self, observation: str) -> str:  # noqa: D401
-        self._last = observation[-self._max:] if self._max else observation
-        return ""
-
-    def pre_act(self, _action_spec):  # noqa: D401
-        return f"Last observation:\n{self._last}\n" if self._last else ""
-
-    def update(self):
-        pass
-
-
-class SimpleMemory(entity_component.ContextComponent):
-    """Keeps the last *max_len* observations & actions, injects them at act time."""
-
-    def __init__(self, max_len: int = 30):
-        super().__init__()
-        self._buf: List[str] = []
-        self._max = max_len
-
-    def pre_observe(self, observation: str) -> str:
-        self._buf.append(observation.strip())
-        self._buf = self._buf[-self._max :]
-        return ""
-
-    def pre_act(self, _action_spec):
-        if not self._buf:
-            return ""
-        joined = "\n".join(self._buf)
-        return f"Recent memories (most recent last):\n{joined}\n"
-
-    def update(self):
-        pass
+# 移除自定义 RecentObservation / SimpleMemory，改用官方组件
 
 
 class PersonaContext(entity_component.ContextComponent):
@@ -151,10 +119,14 @@ class ConcordiaBrain:
 
         act_component = ConcatActComponent(model=self._model, prefix_entity_name=False)
 
+        # -------------------- 组装官方组件 --------------------
         ctx_components = {
-            "obs": RecentObservation(),
-            "mem": SimpleMemory(max_len=30),
+            _MEM_KEY: ListMemory(memory_bank=[]),         # 核心记忆存储
+            "obs_writer": ObservationToMemory(),          # 把 observation 写入记忆
+            "obs": LastNObservations(history_length=10), # 决策时回显最近观察
         }
+
+        # 若传入 persona，则追加 persona context（沿用本文件定义的PersonaContext）
         if persona:
             ctx_components["persona"] = PersonaContext(persona)
 

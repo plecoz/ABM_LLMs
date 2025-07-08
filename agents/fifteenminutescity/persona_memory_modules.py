@@ -297,6 +297,67 @@ class PersonaTemplateManager:
                 {"goal": "health_tracking", "priority": 0.6}
             ]
         )
+
+        # Student Persona (NEW) --------------------------------------------------
+        self.templates[PersonaType.STUDENT] = PersonaTemplate(
+            persona_type=PersonaType.STUDENT,
+            name="Student",
+            description="Full-time student balancing studies, social life and limited budget; tech-savvy and adaptive.",
+            demographics={
+                "age_range": (18, 25),
+                "income_level": "low",
+                "education": ["secondary", "university"],
+                "family_status": "single",
+                "employment": "part_time_or_none"
+            },
+            core_values=["learning", "friendship", "growth", "experience", "adaptability"],
+            beliefs={
+                "healthcare_access": "Affordable, walk-in services and campus clinics are important",
+                "technology": "Digital tools make life easier and cheaper",
+                "prevention": "Staying healthy avoids missing classes and activities",
+                "budget": "Cost is a critical factor in every decision"
+            },
+            behavioral_tendencies={
+                "technology_adoption": 0.95,
+                "budget_conscious": 0.9,
+                "social_interaction": 0.85,
+                "night_owl": 0.7,
+                "convenience_seeking": 0.75
+            },
+            decision_patterns={
+                "healthcare": "Prefers low-cost or free services, considers peer advice heavily",
+                "information_seeking": "Relies on internet and friends for quick answers",
+                "scheduling": "Flexible but often last-minute"
+            },
+            healthcare_attitudes={
+                "preventive_care": 0.4,
+                "trust_in_doctors": 0.6,
+                "comfort_with_telemedicine": 0.9,
+                "self_medication": 0.5
+            },
+            social_preferences={
+                "peer_influence": 0.9,
+                "online_communities": 0.85,
+                "family_involvement": 0.4
+            },
+            risk_tolerance=0.7,
+            trust_levels={
+                "healthcare_professionals": 0.6,
+                "online_resources": 0.8,
+                "peer_reviews": 0.85,
+                "family": 0.5
+            },
+            communication_style={
+                "formality": "low",
+                "detail_preference": "summary",
+                "channel_preference": "digital_first"
+            },
+            goals_priorities=[
+                {"goal": "graduate", "priority": 0.9},
+                {"goal": "social_life", "priority": 0.8},
+                {"goal": "part_time_income", "priority": 0.6}
+            ]
+        )
         
         # Chronic Patient Persona
         self.templates[PersonaType.CHRONIC_PATIENT] = PersonaTemplate(
