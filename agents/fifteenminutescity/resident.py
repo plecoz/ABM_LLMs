@@ -242,6 +242,14 @@ class Resident(BaseAgent):
         # Initialize last path calculation time to prevent rapid recalculation
         self.last_path_calculation_time = 0
         self.path_calculation_cooldown = 5  # Minimum 5 steps between path calculations
+        
+        # Path selection tracking for analysis
+        self.path_selection_stats = {
+            'total_multi_path_decisions': 0,  # Total times multiple paths were available
+            'shortest_path_not_selected': 0,  # Times shortest path was not chosen
+            'concordia_decisions': 0,  # Times Concordia brain made the decision
+            'fallback_decisions': 0   # Times fallback was used
+        }
 
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
@@ -1694,10 +1702,28 @@ class Resident(BaseAgent):
             return self._fallback_path_selection(path_options)
         
         try:
+            # Track statistics when multiple paths are available
+            if len(path_options) > 1:
+                self.path_selection_stats['total_multi_path_decisions'] += 1
+                # Identify the shortest path (by travel time)
+                shortest_path_index = min(range(len(path_options)), 
+                                        key=lambda i: path_options[i]['travel_time_minutes'])
+            else:
+                # Only one path available, no choice to make
+                return path_options[0]['path_nodes'] if path_options else None
+            
             # Check if we have a Concordia brain
             if not hasattr(self, 'brain') or self.brain is None:
                 print(f"DEBUG: Resident {self.unique_id} - No Concordia brain available, using fallback")
-                return self._fallback_path_selection(path_options)
+                self.path_selection_stats['fallback_decisions'] += 1
+                selected_path_nodes = self._fallback_path_selection(path_options)
+                # Track if fallback didn't select shortest path
+                if selected_path_nodes and len(path_options) > 1:
+                    fallback_selected_index = next((i for i, p in enumerate(path_options) 
+                                                  if p['path_nodes'] == selected_path_nodes), None)
+                    if fallback_selected_index is not None and fallback_selected_index != shortest_path_index:
+                        self.path_selection_stats['shortest_path_not_selected'] += 1
+                return selected_path_nodes
             
             # Step 1: Prepare observation for Concordia brain
             needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
@@ -1742,6 +1768,12 @@ class Resident(BaseAgent):
                 selected_path = path_options[selected_path_id]
                 self.logger.info(f"Concordia selected path {selected_path_id + 1}")
                 
+                # Track Concordia decision and whether shortest path was selected
+                self.path_selection_stats['concordia_decisions'] += 1
+                if selected_path_id != shortest_path_index:
+                    self.path_selection_stats['shortest_path_not_selected'] += 1
+                    self.logger.debug(f"Concordia chose path {selected_path_id + 1} instead of shortest path {shortest_path_index + 1}")
+                
                 # Validate path_nodes exists and is valid
                 if 'path_nodes' in selected_path and isinstance(selected_path['path_nodes'], list):
                     path_nodes = selected_path['path_nodes']
@@ -1753,14 +1785,41 @@ class Resident(BaseAgent):
                     print(f"DEBUG: Resident {self.unique_id} - Invalid path_nodes in selected path")
                 
                 # If path validation failed, use fallback
-                return self._fallback_path_selection(path_options)
+                self.path_selection_stats['fallback_decisions'] += 1
+                selected_path_nodes = self._fallback_path_selection(path_options)
+                # Track if fallback didn't select shortest path
+                if selected_path_nodes and len(path_options) > 1:
+                    fallback_selected_index = next((i for i, p in enumerate(path_options) 
+                                                  if p['path_nodes'] == selected_path_nodes), None)
+                    if fallback_selected_index is not None and fallback_selected_index != shortest_path_index:
+                        self.path_selection_stats['shortest_path_not_selected'] += 1
+                return selected_path_nodes
             else:
                 print(f"DEBUG: Resident {self.unique_id} - Could not parse Concordia response: {response}")
-                return self._fallback_path_selection(path_options)
+                self.path_selection_stats['fallback_decisions'] += 1
+                selected_path_nodes = self._fallback_path_selection(path_options)
+                # Track if fallback didn't select shortest path
+                if selected_path_nodes and len(path_options) > 1:
+                    fallback_selected_index = next((i for i, p in enumerate(path_options) 
+                                                  if p['path_nodes'] == selected_path_nodes), None)
+                    if fallback_selected_index is not None and fallback_selected_index != shortest_path_index:
+                        self.path_selection_stats['shortest_path_not_selected'] += 1
+                return selected_path_nodes
                 
         except Exception as e:
             self.logger.error(f"Error in Concordia path selection: {e}")
-            return self._fallback_path_selection(path_options)
+            if len(path_options) > 1:
+                self.path_selection_stats['fallback_decisions'] += 1
+                selected_path_nodes = self._fallback_path_selection(path_options)
+                # Track if fallback didn't select shortest path
+                if selected_path_nodes:
+                    fallback_selected_index = next((i for i, p in enumerate(path_options) 
+                                                  if p['path_nodes'] == selected_path_nodes), None)
+                    if fallback_selected_index is not None and fallback_selected_index != shortest_path_index:
+                        self.path_selection_stats['shortest_path_not_selected'] += 1
+                return selected_path_nodes
+            else:
+                return self._fallback_path_selection(path_options)
 
     def _parse_concordia_path_response(self, response, num_paths):
         """
@@ -2177,6 +2236,31 @@ class Resident(BaseAgent):
     def get_memory(self):
         """Return the resident's memory (income and visited POIs)."""
         return self.memory
+    
+    def get_path_selection_stats(self):
+        """Return the resident's path selection statistics."""
+        return self.path_selection_stats.copy()
+    
+    def get_non_shortest_path_percentage(self):
+        """
+        Calculate the percentage of times this resident did not select the shortest path.
+        
+        Returns:
+            Dictionary with percentage and counts, or None if no multi-path decisions made
+        """
+        if self.path_selection_stats['total_multi_path_decisions'] == 0:
+            return None
+        
+        percentage = (self.path_selection_stats['shortest_path_not_selected'] / 
+                     self.path_selection_stats['total_multi_path_decisions']) * 100
+        
+        return {
+            'percentage': percentage,
+            'non_shortest_selected': self.path_selection_stats['shortest_path_not_selected'],
+            'total_multi_path_decisions': self.path_selection_stats['total_multi_path_decisions'],
+            'concordia_decisions': self.path_selection_stats['concordia_decisions'],
+            'fallback_decisions': self.path_selection_stats['fallback_decisions']
+        }
 
     def go_home(self):
         """
