@@ -652,7 +652,7 @@ class Resident(BaseAgent):
         while retry_count < max_retries:
             try:
                 # Get multiple path options
-                path_options = self._get_multiple_path_options(from_node, to_node, max_paths=4)
+                path_options = self._get_multiple_path_options(from_node, to_node, max_paths=3)
                 
                 if not path_options:
                     self.logger.warning(f"No path options found from {from_node} to {to_node}")
@@ -743,9 +743,6 @@ class Resident(BaseAgent):
         Returns:
             Boolean indicating if the move was successful
         """
-        # If already traveling, don't start a new journey
-        if self.traveling:
-            return False
             
         # Find the POI agent with the specified ID
         target_poi = None
@@ -900,7 +897,7 @@ class Resident(BaseAgent):
             # Removed debug print
             return self._choose_concordia_based_target()
         else:
-            # Removed debug print
+            print(f"Agent {self.unique_id}: No brain found"	)
             pass
 
         # Concordia unavailable – fall back to need-based behaviour
@@ -1697,35 +1694,53 @@ class Resident(BaseAgent):
             return self._fallback_path_selection(path_options)
         
         try:
-            # Prepare context for LLM
-            context = {
-                'time_of_day': self.model.hour_of_day,
-                'from_node': from_node,
-                'to_node': to_node
-            }
-            
-            # Create agent state for LLM
-            agent_state = {
-                'age': getattr(self, 'age', 30),
-                'current_needs': getattr(self, 'current_needs', {}),
-                'agent_id': str(self.unique_id)
-            }
-            
-            # Delegate to LLM interaction layer
-            response = self.model.llm_interaction_layer.score_path_options(
-                agent_state, path_options, context
-            )
-            
-            # Validate response
-            if not hasattr(response, 'selected_path_id'):
-                print(f"DEBUG: Resident {self.unique_id} - Invalid LLM response format, using fallback")
+            # Check if we have a Concordia brain
+            if not hasattr(self, 'brain') or self.brain is None:
+                print(f"DEBUG: Resident {self.unique_id} - No Concordia brain available, using fallback")
                 return self._fallback_path_selection(path_options)
             
-            # Extract selected path
-            selected_path_id = response.selected_path_id
-            if isinstance(selected_path_id, int) and 0 <= selected_path_id < len(path_options):
+            # Step 1: Prepare observation for Concordia brain
+            needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
+            time_context = f"Time: {self.model.hour_of_day}:00" if hasattr(self.model, 'hour_of_day') else "Time: unknown"
+            
+            # Format path options for Concordia
+            path_descriptions = []
+            for i, path in enumerate(path_options):
+                path_desc = (
+                    f"Path {i+1}: {path['distance_meters']}m, "
+                    f"{path['travel_time_minutes']} min, "
+                    f"road type: {path['dominant_road_type']}, "
+                    f"{path['total_segments']} segments"
+                )
+                path_descriptions.append(path_desc)
+            
+            paths_text = "\n".join(path_descriptions)
+            
+            # Create observation for Concordia
+            observation = (
+                f"Agent {self.unique_id} needs to choose a path from node {from_node} to {to_node}. "
+                f"Current needs: {needs_summary}. {time_context}. Age: {self.age}. "
+                f"Available paths:\n{paths_text}"
+            )
+            
+            # Step 2: Give observation to Concordia brain
+            self.brain.observe(observation)
+            
+            # Step 3: Ask Concordia to make decision
+            decision_prompt = (
+                "Choose the best path by responding with ONLY the path number (1, 2, 3, or 4). "
+                "Consider your needs, age, and path characteristics. "
+                "Respond with just the number, nothing else."
+            )
+            
+            response = self.brain.decide(decision_prompt)
+            
+            # Step 4: Parse Concordia response
+            selected_path_id = self._parse_concordia_path_response(response, len(path_options))
+            
+            if selected_path_id is not None:
                 selected_path = path_options[selected_path_id]
-                self.logger.info(f"LLM selected path {selected_path_id + 1}: {response.reasoning}")
+                self.logger.info(f"Concordia selected path {selected_path_id + 1}")
                 
                 # Validate path_nodes exists and is valid
                 if 'path_nodes' in selected_path and isinstance(selected_path['path_nodes'], list):
@@ -1740,12 +1755,55 @@ class Resident(BaseAgent):
                 # If path validation failed, use fallback
                 return self._fallback_path_selection(path_options)
             else:
-                print(f"DEBUG: Resident {self.unique_id} - Invalid path ID: {selected_path_id}, using fallback")
+                print(f"DEBUG: Resident {self.unique_id} - Could not parse Concordia response: {response}")
                 return self._fallback_path_selection(path_options)
                 
         except Exception as e:
-            self.logger.error(f"Error in LLM path selection: {e}")
+            self.logger.error(f"Error in Concordia path selection: {e}")
             return self._fallback_path_selection(path_options)
+
+    def _parse_concordia_path_response(self, response, num_paths):
+        """
+        Parse Concordia brain's response to extract path selection.
+        
+        Args:
+            response: Raw response from Concordia brain
+            num_paths: Number of available path options
+            
+        Returns:
+            Selected path index (0-based) or None if parsing fails
+        """
+        try:
+            # Clean the response
+            response = response.strip()
+            
+            # Try to extract just the number
+            import re
+            numbers = re.findall(r'\d+', response)
+            
+            if numbers:
+                path_num = int(numbers[0])  # Take the first number found
+                # Convert to 0-based index and validate
+                if 1 <= path_num <= num_paths:
+                    return path_num - 1  # Convert to 0-based index
+            
+            # If no valid number found, try to parse common text patterns
+            response_lower = response.lower()
+            if 'path 1' in response_lower or 'first' in response_lower:
+                return 0
+            elif 'path 2' in response_lower or 'second' in response_lower:
+                return 1 if num_paths > 1 else None
+            elif 'path 3' in response_lower or 'third' in response_lower:
+                return 2 if num_paths > 2 else None
+            elif 'path 4' in response_lower or 'fourth' in response_lower:
+                return 3 if num_paths > 3 else None
+            
+            # If all parsing fails, return None
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"Error parsing Concordia response '{response}': {e}")
+            return None
 
     def _fallback_path_selection(self, path_options):
         """
@@ -2297,9 +2355,6 @@ class Resident(BaseAgent):
         """
 
         import json
-
-        if self.brain is None:
-            return self._choose_need_based_target()
 
         # -------- 1) 准备可达 POI 列表 --------
         accessible_info = []
