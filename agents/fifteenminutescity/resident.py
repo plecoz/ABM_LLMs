@@ -227,8 +227,22 @@ class Resident(BaseAgent):
         if not hasattr(self, 'logger'):
             self.logger = logging.getLogger(f"Resident-{unique_id}")
 
-
+        # ---------------------------------------------------
+        # Concordia Brain (LLM) integration
+        # ---------------------------------------------------
+        print(f"🧠 Agent {unique_id}: Initializing brain...")
         
+        try:
+            from brains.concordia_brain import ConcordiaBrain
+            self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
+            print(f"✅ Agent {unique_id}: Brain initialized successfully")
+        except Exception as e:
+            print(f"❌ Agent {unique_id}: Brain initialization failed: {e}")
+            self.brain = None
+
+        # Initialize last path calculation time to prevent rapid recalculation
+        self.last_path_calculation_time = 0
+        self.path_calculation_cooldown = 5  # Minimum 5 steps between path calculations
 
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
@@ -542,10 +556,6 @@ class Resident(BaseAgent):
         # ---------------------------------------------------
         # Concordia Brain (LLM) integration
         # ---------------------------------------------------
-        try:
-            self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
-        except Exception as _e:
-            self.brain = None  # Fallback if Concordia cannot be initialised
 
     def calculate_travel_time(self, from_node, to_node):
         """
@@ -629,32 +639,66 @@ class Resident(BaseAgent):
         Returns:
             Number of time steps needed for travel using selected path
         """
-        try:
-            # Get multiple path options
-            path_options = self._get_multiple_path_options(from_node, to_node, max_paths=4)
-            
-            if not path_options:
-                self.logger.warning(f"No path options found from {from_node} to {to_node}")
-                return None
-            
-            # If only one path available, use it directly
-            if len(path_options) == 1:
-                selected_path = path_options[0]
-            else:
-                # Use LLM to score and select the best path
-                selected_path = self._select_path_with_llm(path_options, from_node, to_node)
-                print(f"DEBUG: Resident {self.unique_id} has selected a path between multiple ones : {selected_path}")
-            
-            # Store the selected path for actual travel
-            self.selected_travel_path = selected_path
-            
-            # Calculate travel time based on selected path
-            return self._calculate_time_for_path(selected_path)
-            
-        except Exception as e:
-            self.logger.error(f"Error in LLM path selection: {e}")
-            # Fall back to standard calculation
+        # Check cooldown to prevent rapid recalculation
+        current_time = getattr(self.model, 'step_count', 0)
+        if current_time - self.last_path_calculation_time < self.path_calculation_cooldown:
+            print(f"DEBUG: Resident {self.unique_id} - Path calculation on cooldown, using standard calculation")
             return self._calculate_standard_travel_time(from_node, to_node)
+        
+        # Update last calculation time
+        self.last_path_calculation_time = current_time
+        
+        # Circuit breaker to prevent infinite loops
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Get multiple path options
+                path_options = self._get_multiple_path_options(from_node, to_node, max_paths=4)
+                
+                if not path_options:
+                    self.logger.warning(f"No path options found from {from_node} to {to_node}")
+                    return None
+                
+                # If only one path available, use it directly
+                if len(path_options) == 1:
+                    selected_path = path_options[0]
+                else:
+                    # Use LLM to score and select the best path
+                    selected_path = self._select_path_with_llm(path_options, from_node, to_node)
+                    print(f"DEBUG: Resident {self.unique_id} has selected a path between multiple ones : {selected_path}")
+                
+                # Validate selected path
+                if selected_path is None or not isinstance(selected_path, list) or len(selected_path) < 2:
+                    retry_count += 1
+                    print(f"DEBUG: Resident {self.unique_id} got invalid path, retrying ({retry_count}/{max_retries})")
+                    continue
+                
+                # Store the selected path for actual travel
+                self.selected_travel_path = selected_path
+                
+                # Calculate travel time based on selected path
+                travel_time = self._calculate_time_for_path_nodes(selected_path)
+                
+                # Validate travel time
+                if travel_time is None or travel_time <= 0:
+                    retry_count += 1
+                    print(f"DEBUG: Resident {self.unique_id} got invalid travel time, retrying ({retry_count}/{max_retries})")
+                    continue
+                
+                return travel_time
+                
+            except Exception as e:
+                retry_count += 1
+                self.logger.error(f"Error in LLM path selection (attempt {retry_count}/{max_retries}): {e}")
+                
+                if retry_count >= max_retries:
+                    break
+        
+        # If all retries failed, fall back to standard calculation
+        print(f"DEBUG: Resident {self.unique_id} exhausted retries, falling back to standard calculation")
+        return self._calculate_standard_travel_time(from_node, to_node)
 
     def start_travel(self, target_node, target_geometry):
         """
@@ -800,18 +844,16 @@ class Resident(BaseAgent):
             self.current_needs[need_type] = max(0, self.current_needs[need_type] - satisfaction_amount)
 
     def choose_movement_target(self):
-        """
-        Choose where to move based on movement behavior setting.
-        For random movement, if no suitable POI is available (to avoid consecutive visits),
-        the agent will be forced to go home.
+        """Choose a movement target based on the configured movement behavior."""
+        print(f"🎯 Agent {self.unique_id}: choose_movement_target called with movement_behavior='{self.movement_behavior}'")
         
-        Returns:
-            POI ID to move to, 'home' to go home, or None if no movement should occur
-        """
-        if self.movement_behavior == 'need-based':
-            return self._choose_need_based_target()
-        elif self.movement_behavior == 'llms':
+        if self.movement_behavior == 'llms':
+            print(f"🤖 Agent {self.unique_id}: Using LLM-based movement")
             return self._choose_llm_based_target()
+        elif self.movement_behavior == 'need-based':
+            print(f"🎯 Agent {self.unique_id}: Using need-based movement")
+            return self._choose_need_based_target()
+
         else:  # random movement
             target = self._choose_random_target()
             if target is None and self.current_node != self.home_node:
@@ -858,12 +900,18 @@ class Resident(BaseAgent):
 
     def _choose_llm_based_target(self):
         """Choose movement target using Concordia LLM brain (if available)."""
+        print(f"🤖 Agent {self.unique_id}: _choose_llm_based_target called")
+        
         # Prefer Concordia brain if present
         if getattr(self, 'brain', None) is not None:
+            print(f"✅ Agent {self.unique_id}: Has Concordia brain - using it")
             return self._choose_concordia_based_target()
+        else:
+            print(f"❌ Agent {self.unique_id}: No Concordia brain found")
 
         # Concordia unavailable – fall back to need-based behaviour
-            return self._choose_need_based_target()
+        print(f"⚠️ Agent {self.unique_id}: Falling back to need-based movement")
+        return self._choose_need_based_target()
     
     def _get_episodic_memories(self):
         """
@@ -974,14 +1022,19 @@ class Resident(BaseAgent):
 
     def step(self):
         """Advance the agent one step"""
+        print(f"🔄 Agent {self.unique_id}: step() called at model step {self.model.step_count}")
+        
         try:
             super().step()
+            print(f"🔄 Agent {self.unique_id}: super().step() completed")
             
             # Increase needs over time
             self.increase_needs_over_time()
+            print(f"🔄 Agent {self.unique_id}: needs increased")
             
             # Handle ongoing travel
             if self.traveling:
+                print(f"🚶 Agent {self.unique_id}: Currently traveling, {self.travel_time_remaining} minutes remaining")
                 # Track actual travel time in output controller
                 if hasattr(self.model, 'output_controller'):
                     self.model.output_controller.track_travel_step(self.unique_id)
@@ -990,6 +1043,7 @@ class Resident(BaseAgent):
                 
                 # Check if we've arrived
                 if self.travel_time_remaining <= 0:
+                    print(f"🏁 Agent {self.unique_id}: Arrived at destination")
                     self.traveling = False
                     # Update last visited node before changing current node
                     self.last_visited_node = self.current_node
@@ -1047,10 +1101,12 @@ class Resident(BaseAgent):
                     self.destination_geometry = None
                 
                 # Still traveling, don't take any other movement actions
+                print(f"🚶 Agent {self.unique_id}: Still traveling, skipping movement decisions")
                 return
             
             # Handle ongoing actions at POIs
             if self.performing_action:
+                print(f"🎭 Agent {self.unique_id}: Performing action, {self.action_time_remaining} minutes remaining")
                 self.action_time_remaining -= 1
                 
                 # While performing an action, check for social interactions
@@ -1061,39 +1117,58 @@ class Resident(BaseAgent):
                     self._complete_current_action()
                 
                 # Still performing action, don't take any other movement actions
+                print(f"🎭 Agent {self.unique_id}: Still performing action, skipping movement decisions")
                 return
             
             # === MOVEMENT DECISION MAKING ===
             # This is where all movement decisions are made based on the movement behavior
             if not self.traveling:
+                print(f"🤔 Agent {self.unique_id}: Not traveling, checking if movement decision needed")
                 target_poi = None
                 
                 if self.movement_behavior == 'random':
+                    print(f"🎲 Agent {self.unique_id}: Using random movement behavior")
                     # Random movement - use existing simple logic
                     target_poi = self._make_random_movement_decision()
                     
                 elif self.movement_behavior == 'need-based':
+                    print(f"🎯 Agent {self.unique_id}: Using need-based movement behavior")
                     # Need-based movement - use existing logic but centralized here
                     target_poi = self._make_need_based_movement_decision()
                     
                 elif self.movement_behavior == 'llms':
+                    print(f"🤖 Agent {self.unique_id}: Using LLM-based movement behavior")
                     # LLM-based movement - placeholder for future sophisticated decision making
                     target_poi = self._make_llm_movement_decision()
+                else:
+                    print(f"⚠️ Agent {self.unique_id}: Unknown movement behavior '{self.movement_behavior}', using need-based")
+                    target_poi = self._make_need_based_movement_decision()
+                
+                print(f"🎯 Agent {self.unique_id}: Movement decision result: {target_poi}")
                 
                 # Execute the movement decision
                 if target_poi == 'home':
+                    print(f"🏠 Agent {self.unique_id}: Going home")
                     self.go_home()
                 elif target_poi:
+                    print(f"🚶 Agent {self.unique_id}: Moving to POI {target_poi}")
                     self.move_to_poi(target_poi)
+                else:
+                    print(f"⏸️ Agent {self.unique_id}: Staying at current location")
                 # If target_poi_type is None, resident stays put this step
             
             # Record needs snapshot periodically (every 15 minutes)
             if self.model.step_count % 15 == 0:
                 self.record_needs_snapshot()
             
+            print(f"✅ Agent {self.unique_id}: step() completed successfully")
+            
         except Exception as e:
+            print(f"❌ Agent {self.unique_id}: Error in step(): {e}")
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
+            import traceback
+            traceback.print_exc()
 
     def record_needs_snapshot(self):
         """
@@ -1379,11 +1454,19 @@ class Resident(BaseAgent):
         return None
 
     def _make_llm_movement_decision(self):
-        """Return a movement decision using Concordia brain; fallback to need-based."""
-        if getattr(self, 'brain', None) is not None:
-            return self._choose_concordia_based_target()
+        """Make an LLM-based movement decision."""
+        print(f"🤖 Agent {self.unique_id}: _make_llm_movement_decision() called")
+        
+        # Check if we have a brain
+        if not hasattr(self, 'brain') or self.brain is None:
+            print(f"🤖 Agent {self.unique_id}: No brain available, falling back to need-based")
             return self._make_need_based_movement_decision()
         
+        print(f"🤖 Agent {self.unique_id}: Brain available, calling _choose_llm_based_target()")
+        target = self._choose_llm_based_target()
+        print(f"🤖 Agent {self.unique_id}: LLM decision result: {target}")
+        return target
+
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
         """
         Generate 4 shortest path options between two nodes.
@@ -1613,7 +1696,7 @@ class Resident(BaseAgent):
             to_node: Destination node ID
             
         Returns:
-            Selected path nodes or None if LLM fails
+            Selected path nodes (list) or None if LLM fails
         """
         if not self.model.llm_enabled or not path_options:
             # Fallback to shortest path when LLM disabled
@@ -1639,12 +1722,31 @@ class Resident(BaseAgent):
                 agent_state, path_options, context
             )
             
+            # Validate response
+            if not hasattr(response, 'selected_path_id'):
+                print(f"DEBUG: Resident {self.unique_id} - Invalid LLM response format, using fallback")
+                return self._fallback_path_selection(path_options)
+            
             # Extract selected path
-            if 0 <= response.selected_path_id < len(path_options):
-                selected_path = path_options[response.selected_path_id]
-                self.logger.info(f"LLM selected path {response.selected_path_id + 1}: {response.reasoning}")
-                return selected_path['path_nodes']
+            selected_path_id = response.selected_path_id
+            if isinstance(selected_path_id, int) and 0 <= selected_path_id < len(path_options):
+                selected_path = path_options[selected_path_id]
+                self.logger.info(f"LLM selected path {selected_path_id + 1}: {response.reasoning}")
+                
+                # Validate path_nodes exists and is valid
+                if 'path_nodes' in selected_path and isinstance(selected_path['path_nodes'], list):
+                    path_nodes = selected_path['path_nodes']
+                    if len(path_nodes) >= 2:  # Must have at least start and end node
+                        return path_nodes
+                    else:
+                        print(f"DEBUG: Resident {self.unique_id} - Path too short: {len(path_nodes)} nodes")
+                else:
+                    print(f"DEBUG: Resident {self.unique_id} - Invalid path_nodes in selected path")
+                
+                # If path validation failed, use fallback
+                return self._fallback_path_selection(path_options)
             else:
+                print(f"DEBUG: Resident {self.unique_id} - Invalid path ID: {selected_path_id}, using fallback")
                 return self._fallback_path_selection(path_options)
                 
         except Exception as e:
@@ -1662,6 +1764,7 @@ class Resident(BaseAgent):
             Path nodes of shortest time path or None
         """
         if not path_options:
+            print(f"DEBUG: Resident {self.unique_id} - No path options available for fallback")
             return None
         
         # Select path with shortest travel time
@@ -2213,7 +2316,9 @@ class Resident(BaseAgent):
 
                 # 估算旅行时间（分钟）；若失败则用 None
                 try:
-                    ttime = self.calculate_travel_time(self.current_node, poi.node_id)
+                    # Use standard calculation for POI evaluation to avoid infinite loop
+                    # LLM path selection will be used later during actual travel
+                    ttime = self._calculate_standard_travel_time(self.current_node, poi.node_id)
                 except Exception:
                     ttime = None
 

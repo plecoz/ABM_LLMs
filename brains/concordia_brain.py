@@ -94,6 +94,22 @@ class PersonaContext(entity_component.ContextComponent):
     def update(self):
         pass
 
+    def get_state(self):
+        """Return the current state of the persona context."""
+        return {
+            'persona': self._persona,
+            'label': self._label
+        }
+
+    def set_state(self, state):
+        """Set the state of the persona context."""
+        if isinstance(state, dict):
+            self._persona = str(state.get('persona', '')).strip()
+            self._label = state.get('label', 'Persona')
+        else:
+            # Fallback for simple string input
+            self._persona = str(state).strip()
+
 
 # -----------------------------------------------------------------------------
 # ConcordiaBrain

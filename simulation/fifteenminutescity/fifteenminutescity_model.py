@@ -430,6 +430,8 @@ class FifteenMinuteCity(Model):
 
     def step(self):
         """Advance the model by one step"""
+        print(f"🏙️ Model step {self.step_count + 1}: Starting with {len(self.schedule.agents)} agents")
+        
         # Reset per-step counters
         self.interactions_this_step = 0
         
@@ -452,12 +454,16 @@ class FifteenMinuteCity(Model):
             self.logger.info(f"Day {self.day_count + 1}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
         
         # Use the scheduler to step all agents
+        print(f"🏙️ Model step {self.step_count}: Calling scheduler.step() for {len(self.schedule.agents)} agents")
         self.schedule.step()
+        print(f"🏙️ Model step {self.step_count}: Scheduler.step() completed")
         
         self.datacollector.collect(self)
         
         # Process any global model dynamics
         self._process_model_dynamics()
+        
+        print(f"🏙️ Model step {self.step_count}: Completed successfully")
 
     def _process_model_dynamics(self):
         """
