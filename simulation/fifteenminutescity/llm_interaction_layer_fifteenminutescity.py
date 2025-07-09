@@ -563,15 +563,29 @@ Example: 2
         Returns:
             Index of selected path (0-based)
         """
-        # PLACEHOLDER: Replace with actual LLM API call
-        # 
-        # Example integration:
-        # response = your_llm_service.generate(prompt)
-        # selected_path_number = int(response.strip())
-        # return selected_path_number - 1  # Convert to 0-based index
-        
-        # For now, use rule-based fallback
-        return self._rule_based_urban_scoring(path_options)
+        try:
+            # Try to use the actual LLM through the model's brain system
+            # This is a placeholder for actual LLM integration
+            # For now, we'll simulate an LLM response that returns a path number
+            
+            # Create a simple mock LLM response that returns a path number
+            # In a real implementation, this would call the actual LLM API
+            # response = your_llm_service.generate(prompt)
+            
+            # For now, use rule-based selection but return it as if from LLM
+            selected_index = self._rule_based_urban_scoring(path_options)
+            
+            # Ensure we return a valid integer index
+            if isinstance(selected_index, int) and 0 <= selected_index < len(path_options):
+                return selected_index
+            else:
+                # Fallback to first path if invalid index
+                return 0
+                
+        except Exception as e:
+            self.logger.error(f"Error in _call_llm_api: {e}")
+            # Fallback to rule-based selection
+            return self._rule_based_urban_scoring(path_options)
 
     def _rule_based_urban_scoring(self, path_options):
         """

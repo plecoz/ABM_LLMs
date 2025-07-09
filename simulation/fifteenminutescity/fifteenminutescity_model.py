@@ -236,6 +236,14 @@ class FifteenMinuteCity(Model):
         # Initialize output controller for tracking metrics
         self.output_controller = OutputController(self)
         
+        # Track path selection statistics
+        self.path_selection_stats = {
+            'total_multi_path_decisions': 0,
+            'shortest_path_not_selected': 0,
+            'concordia_decisions': 0,
+            'fallback_decisions': 0
+        }
+        
         # --- Load demographic distribution data BEFORE creating residents ---
         # --- Load industry distribution data (education -> industry probabilities) ---
         industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
@@ -430,6 +438,8 @@ class FifteenMinuteCity(Model):
 
     def step(self):
         """Advance the model by one step"""
+
+        
         # Reset per-step counters
         self.interactions_this_step = 0
         
@@ -451,13 +461,16 @@ class FifteenMinuteCity(Model):
         if self.step_count > 1 and current_minute == 0 and self.hour_of_day == 0:
             self.logger.info(f"Day {self.day_count + 1}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
         
-        # Use the scheduler to step all agents
+
         self.schedule.step()
+
         
         self.datacollector.collect(self)
         
         # Process any global model dynamics
         self._process_model_dynamics()
+        
+        print(f"Model step {self.step_count}: Completed successfully")
 
     def _process_model_dynamics(self):
         """
@@ -1082,3 +1095,74 @@ class FifteenMinuteCity(Model):
             self.logger.debug("Calculated building areas using existing projected CRS")
         
         return buildings_copy
+    
+    def aggregate_path_selection_stats(self):
+        """
+        Aggregate path selection statistics from all residents.
+        
+        Returns:
+            Dictionary with aggregated statistics
+        """
+        # Reset aggregated stats
+        self.path_selection_stats = {
+            'total_multi_path_decisions': 0,
+            'shortest_path_not_selected': 0,
+            'concordia_decisions': 0,
+            'fallback_decisions': 0
+        }
+        
+        # Aggregate from all residents
+        for resident in self.residents:
+            if hasattr(resident, 'path_selection_stats'):
+                for key in self.path_selection_stats:
+                    self.path_selection_stats[key] += resident.path_selection_stats[key]
+        
+        return self.path_selection_stats.copy()
+    
+    def display_path_selection_summary(self):
+        """
+        Display a summary of path selection statistics.
+        """
+        # Aggregate current stats
+        stats = self.aggregate_path_selection_stats()
+        
+        print("\n" + "="*60)
+        print("PATH SELECTION ANALYSIS")
+        print("="*60)
+        
+        if stats['total_multi_path_decisions'] == 0:
+            print("No multi-path decisions were made during the simulation.")
+            print("This could mean:")
+            print("- No agents used LLM path selection (movement_behavior != 'llms')")
+            print("- All path selections had only one available path")
+            print("- Path selection was not triggered")
+            return
+        
+        # Calculate percentage
+        percentage = (stats['shortest_path_not_selected'] / stats['total_multi_path_decisions']) * 100
+        
+        print(f"Total multi-path decisions: {stats['total_multi_path_decisions']}")
+        print(f"Times shortest path NOT selected: {stats['shortest_path_not_selected']}")
+        print(f"Percentage of non-shortest path selection: {percentage:.1f}%")
+        print()
+        
+        # Decision breakdown
+        print("Decision maker breakdown:")
+        print(f"- Concordia brain decisions: {stats['concordia_decisions']} ({stats['concordia_decisions']/stats['total_multi_path_decisions']*100:.1f}%)")
+        print(f"- Fallback decisions: {stats['fallback_decisions']} ({stats['fallback_decisions']/stats['total_multi_path_decisions']*100:.1f}%)")
+        print()
+        
+        # Detailed analysis
+        if stats['concordia_decisions'] > 0:
+            print("Behavioral insights:")
+            if percentage > 50:
+                print("- Agents frequently chose alternative paths over the shortest route")
+                print("- This suggests decision factors beyond simple distance/time optimization")
+            elif percentage > 20:
+                print("- Agents occasionally chose alternative paths")
+                print("- Mix of efficiency and other behavioral factors")
+            else:
+                print("- Agents mostly chose the shortest path")
+                print("- Behavior is primarily efficiency-driven")
+        
+        print("="*60)
