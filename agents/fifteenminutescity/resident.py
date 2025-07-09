@@ -232,12 +232,11 @@ class Resident(BaseAgent):
         # ---------------------------------------------------
         print(f"🧠 Agent {unique_id}: Initializing brain...")
         
+        # Initialize brain (Concordia integration)
         try:
             from brains.concordia_brain import ConcordiaBrain
             self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
-            print(f"✅ Agent {unique_id}: Brain initialized successfully")
         except Exception as e:
-            print(f"❌ Agent {unique_id}: Brain initialization failed: {e}")
             self.brain = None
 
         # Initialize last path calculation time to prevent rapid recalculation
@@ -573,7 +572,6 @@ class Resident(BaseAgent):
         """
         # For LLM-enabled agents, use path selection instead of simple shortest path
         if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
-            print(f"DEBUG: Resident {self.unique_id} using LLM for travel time calculation")
             return self._calculate_travel_time_with_path_selection(from_node, to_node)
         
         # Standard shortest path calculation for non-LLM agents
@@ -642,7 +640,6 @@ class Resident(BaseAgent):
         # Check cooldown to prevent rapid recalculation
         current_time = getattr(self.model, 'step_count', 0)
         if current_time - self.last_path_calculation_time < self.path_calculation_cooldown:
-            print(f"DEBUG: Resident {self.unique_id} - Path calculation on cooldown, using standard calculation")
             return self._calculate_standard_travel_time(from_node, to_node)
         
         # Update last calculation time
@@ -667,12 +664,10 @@ class Resident(BaseAgent):
                 else:
                     # Use LLM to score and select the best path
                     selected_path = self._select_path_with_llm(path_options, from_node, to_node)
-                    print(f"DEBUG: Resident {self.unique_id} has selected a path between multiple ones : {selected_path}")
                 
                 # Validate selected path
                 if selected_path is None or not isinstance(selected_path, list) or len(selected_path) < 2:
                     retry_count += 1
-                    print(f"DEBUG: Resident {self.unique_id} got invalid path, retrying ({retry_count}/{max_retries})")
                     continue
                 
                 # Store the selected path for actual travel
@@ -684,7 +679,6 @@ class Resident(BaseAgent):
                 # Validate travel time
                 if travel_time is None or travel_time <= 0:
                     retry_count += 1
-                    print(f"DEBUG: Resident {self.unique_id} got invalid travel time, retrying ({retry_count}/{max_retries})")
                     continue
                 
                 return travel_time
@@ -697,7 +691,6 @@ class Resident(BaseAgent):
                     break
         
         # If all retries failed, fall back to standard calculation
-        print(f"DEBUG: Resident {self.unique_id} exhausted retries, falling back to standard calculation")
         return self._calculate_standard_travel_time(from_node, to_node)
 
     def start_travel(self, target_node, target_geometry):
@@ -900,17 +893,18 @@ class Resident(BaseAgent):
 
     def _choose_llm_based_target(self):
         """Choose movement target using Concordia LLM brain (if available)."""
-        print(f"🤖 Agent {self.unique_id}: _choose_llm_based_target called")
+        # Removed debug print
         
         # Prefer Concordia brain if present
         if getattr(self, 'brain', None) is not None:
-            print(f"✅ Agent {self.unique_id}: Has Concordia brain - using it")
+            # Removed debug print
             return self._choose_concordia_based_target()
         else:
-            print(f"❌ Agent {self.unique_id}: No Concordia brain found")
+            # Removed debug print
+            pass
 
         # Concordia unavailable – fall back to need-based behaviour
-        print(f"⚠️ Agent {self.unique_id}: Falling back to need-based movement")
+        # Removed debug print
         return self._choose_need_based_target()
     
     def _get_episodic_memories(self):
@@ -1022,19 +1016,19 @@ class Resident(BaseAgent):
 
     def step(self):
         """Advance the agent one step"""
-        print(f"🔄 Agent {self.unique_id}: step() called at model step {self.model.step_count}")
+        # Removed debug print
         
         try:
             super().step()
-            print(f"🔄 Agent {self.unique_id}: super().step() completed")
+            # Removed debug print
             
             # Increase needs over time
             self.increase_needs_over_time()
-            print(f"🔄 Agent {self.unique_id}: needs increased")
+            # Removed debug print
             
             # Handle ongoing travel
             if self.traveling:
-                print(f"🚶 Agent {self.unique_id}: Currently traveling, {self.travel_time_remaining} minutes remaining")
+                # Removed debug print
                 # Track actual travel time in output controller
                 if hasattr(self.model, 'output_controller'):
                     self.model.output_controller.track_travel_step(self.unique_id)
@@ -1043,7 +1037,7 @@ class Resident(BaseAgent):
                 
                 # Check if we've arrived
                 if self.travel_time_remaining <= 0:
-                    print(f"🏁 Agent {self.unique_id}: Arrived at destination")
+                    # Removed debug print
                     self.traveling = False
                     # Update last visited node before changing current node
                     self.last_visited_node = self.current_node
@@ -1101,12 +1095,12 @@ class Resident(BaseAgent):
                     self.destination_geometry = None
                 
                 # Still traveling, don't take any other movement actions
-                print(f"🚶 Agent {self.unique_id}: Still traveling, skipping movement decisions")
+                # Removed debug print
                 return
             
             # Handle ongoing actions at POIs
             if self.performing_action:
-                print(f"🎭 Agent {self.unique_id}: Performing action, {self.action_time_remaining} minutes remaining")
+                # Removed debug print
                 self.action_time_remaining -= 1
                 
                 # While performing an action, check for social interactions
@@ -1117,54 +1111,55 @@ class Resident(BaseAgent):
                     self._complete_current_action()
                 
                 # Still performing action, don't take any other movement actions
-                print(f"🎭 Agent {self.unique_id}: Still performing action, skipping movement decisions")
+                # Removed debug print
                 return
             
             # === MOVEMENT DECISION MAKING ===
             # This is where all movement decisions are made based on the movement behavior
             if not self.traveling:
-                print(f"🤔 Agent {self.unique_id}: Not traveling, checking if movement decision needed")
+                # Removed debug print
                 target_poi = None
                 
                 if self.movement_behavior == 'random':
-                    print(f"🎲 Agent {self.unique_id}: Using random movement behavior")
+                    # Removed debug print
                     # Random movement - use existing simple logic
                     target_poi = self._make_random_movement_decision()
                     
                 elif self.movement_behavior == 'need-based':
-                    print(f"🎯 Agent {self.unique_id}: Using need-based movement behavior")
+                    # Removed debug print
                     # Need-based movement - use existing logic but centralized here
                     target_poi = self._make_need_based_movement_decision()
                     
                 elif self.movement_behavior == 'llms':
-                    print(f"🤖 Agent {self.unique_id}: Using LLM-based movement behavior")
+                    # Removed debug print
                     # LLM-based movement - placeholder for future sophisticated decision making
                     target_poi = self._make_llm_movement_decision()
                 else:
-                    print(f"⚠️ Agent {self.unique_id}: Unknown movement behavior '{self.movement_behavior}', using need-based")
+                    # Removed debug print
                     target_poi = self._make_need_based_movement_decision()
                 
-                print(f"🎯 Agent {self.unique_id}: Movement decision result: {target_poi}")
+                # Removed debug print
                 
                 # Execute the movement decision
                 if target_poi == 'home':
-                    print(f"🏠 Agent {self.unique_id}: Going home")
+                    # Removed debug print
                     self.go_home()
                 elif target_poi:
-                    print(f"🚶 Agent {self.unique_id}: Moving to POI {target_poi}")
+                    # Removed debug print
                     self.move_to_poi(target_poi)
                 else:
-                    print(f"⏸️ Agent {self.unique_id}: Staying at current location")
+                    # Removed debug print
+                    pass
                 # If target_poi_type is None, resident stays put this step
             
             # Record needs snapshot periodically (every 15 minutes)
             if self.model.step_count % 15 == 0:
                 self.record_needs_snapshot()
             
-            print(f"✅ Agent {self.unique_id}: step() completed successfully")
+            # Removed debug print
             
         except Exception as e:
-            print(f"❌ Agent {self.unique_id}: Error in step(): {e}")
+            # Removed debug print
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
             import traceback
@@ -1455,16 +1450,16 @@ class Resident(BaseAgent):
 
     def _make_llm_movement_decision(self):
         """Make an LLM-based movement decision."""
-        print(f"🤖 Agent {self.unique_id}: _make_llm_movement_decision() called")
+        # Removed debug print
         
         # Check if we have a brain
         if not hasattr(self, 'brain') or self.brain is None:
-            print(f"🤖 Agent {self.unique_id}: No brain available, falling back to need-based")
+            # Removed debug print
             return self._make_need_based_movement_decision()
         
-        print(f"🤖 Agent {self.unique_id}: Brain available, calling _choose_llm_based_target()")
+        # Removed debug print
         target = self._choose_llm_based_target()
-        print(f"🤖 Agent {self.unique_id}: LLM decision result: {target}")
+        # Removed debug print
         return target
 
     def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
@@ -1491,7 +1486,6 @@ class Resident(BaseAgent):
                     path_data = self._extract_path_metadata(path_nodes, i + 1)
                     if path_data:
                         path_options.append(path_data)
-            print(f"DEBUG: Resident {self.unique_id} has generated {len(path_options)} path options")
             return path_options
             
         except Exception as e:
