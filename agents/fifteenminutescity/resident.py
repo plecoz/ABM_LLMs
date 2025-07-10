@@ -1803,12 +1803,16 @@ class Resident(BaseAgent):
         """
         # Simple probability check for random movement
         if random.random() > 0.7:  # 70% chance to stay put for random movement
+            if self.model.step_count % 60 == 0:  # Debug every hour
+                print(f"DEBUG Random Movement - Resident {self.unique_id}: Staying put")
             return None
         
         # Use existing random target selection
         target = self._choose_random_target()
         if target is None and self.current_node != self.home_node:
             # No suitable POI available and not at home - force going home
+            if self.model.step_count % 60 == 0:  # Debug every hour
+                print(f"DEBUG Random Movement - Resident {self.unique_id}: No POI available, going home")
             return 'home'
         return target
 

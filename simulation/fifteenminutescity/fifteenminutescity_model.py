@@ -250,6 +250,14 @@ class FifteenMinuteCity(Model):
         self.time_period = "daytime"  # Default time period
         self._auto_update_time_period()  # Set initial time period based on hour
         
+        # Debug: Show initial environmental setup
+        print(f"DEBUG Environmental Setup:")
+        print(f"  - Base temperature: {self.base_temperature}°C")
+        print(f"  - Initial temperature: {self.temperature}°C")
+        print(f"  - Initial time period: {self.time_period}")
+        print(f"  - Initial hour: {self.hour_of_day}")
+        print(f"  - Weather description: {self._get_weather_description()}")
+        
         # Temperature modeling parameters
         self.daily_temperature_amplitude = 6.0  # Daily temperature variation (±6°C from base)
         self.daily_random_epsilon = 2.0  # Random daily variation amplitude
@@ -1277,8 +1285,14 @@ class FifteenMinuteCity(Model):
         # Update tracking
         self.last_temperature_update_hour = current_hour
         
-        # Log temperature changes (optional, can be removed for performance)
+        # Log temperature changes (debug output)
         if self.step_count % 60 == 0:  # Log every hour
+            print(f"DEBUG Temperature - Hour {current_hour:02d}: {self.temperature:.1f}°C "
+                  f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "
+                  f"daily_offset={daily_random:.1f}, noise={hourly_noise:.1f})")
+            print(f"DEBUG Time Period: '{self.time_period}' Weather: '{self._get_weather_description()}'")
+            
+            # Also log with logger for file output
             self.logger.debug(
                 f"Hour {current_hour:02d}: T={self.temperature:.1f}°C "
                 f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "

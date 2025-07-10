@@ -42,8 +42,29 @@ def load_city_network(place_name="Macau, China", mode="walk"):
         print(f"⚠ Could not add elevation data: {e}")
         print("  Will use OSM incline tags only")
     
-    # Verify conversion
+    # Verify conversion and check data coverage
     print(f"Graph loaded with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
+    
+    # Check percentage of edges with slope and speed data
+    total_edges = len(graph.edges())
+    edges_with_slopes = 0
+    edges_with_speed_limits = 0
+    
+    for u, v, data in graph.edges(data=True):
+        # Check for slope data (either calculated grade or OSM incline)
+        if data.get('grade') is not None or data.get('incline') is not None:
+            edges_with_slopes += 1
+        
+        # Check for speed limit data
+        if data.get('maxspeed') is not None:
+            edges_with_speed_limits += 1
+    
+    slope_percentage = (edges_with_slopes / total_edges) * 100 if total_edges > 0 else 0
+    speed_percentage = (edges_with_speed_limits / total_edges) * 100 if total_edges > 0 else 0
+    
+    print(f"Data coverage:")
+    print(f"  - Edges with slope data: {edges_with_slopes}/{total_edges} ({slope_percentage:.1f}%)")
+    print(f"  - Edges with speed limits: {edges_with_speed_limits}/{total_edges} ({speed_percentage:.1f}%)")
     
     return graph
 
