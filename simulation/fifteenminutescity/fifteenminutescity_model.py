@@ -265,6 +265,11 @@ class FifteenMinuteCity(Model):
         self.daily_random_offset = 0.0  # Random offset for the current day
         self.last_temperature_update_hour = -1  # Track when temperature was last updated
         
+        # Temperature statistics tracking
+        self.temperature_history = []  # Store all temperature readings with timestamps
+        self.daily_temperature_stats = {}  # Store daily temperature statistics
+        self.nighttime_temperature_stats = {}  # Store nighttime temperature statistics
+        
         # --- Load demographic distribution data BEFORE creating residents ---
         # --- Load industry distribution data (education -> industry probabilities) ---
         industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
@@ -1285,6 +1290,15 @@ class FifteenMinuteCity(Model):
         # Update tracking
         self.last_temperature_update_hour = current_hour
         
+        # Record temperature reading for statistics
+        self.temperature_history.append({
+            'step': self.step_count,
+            'hour': current_hour,
+            'day': self.day_count,
+            'time_period': self.time_period,
+            'temperature': self.temperature
+        })
+        
         # Log temperature changes (debug output)
         if self.step_count % 60 == 0:  # Log every hour
             print(f"DEBUG Temperature - Hour {current_hour:02d}: {self.temperature:.1f}°C "
@@ -1393,3 +1407,107 @@ class FifteenMinuteCity(Model):
                         self.daily_random_offset)
         
         return expected_temp
+    
+    def calculate_temperature_statistics(self):
+        """
+        Calculate temperature statistics for individual day and night periods.
+        
+        Returns:
+            dict: Temperature statistics including individual daily and nightly averages
+        """
+        if not self.temperature_history:
+            return None
+        
+        # Group temperatures by individual day and night cycles
+        daily_periods = {}  # day_num -> {'day': [temps], 'night': [temps]}
+        
+        for record in self.temperature_history:
+            day_num = record['day'] + 1  # Convert 0-based to 1-based for display
+            
+            if day_num not in daily_periods:
+                daily_periods[day_num] = {'day': [], 'night': []}
+            
+            if record['time_period'] in ['daytime', 'dawn', 'sunrise']:
+                daily_periods[day_num]['day'].append(record['temperature'])
+            else:  # night
+                daily_periods[day_num]['night'].append(record['temperature'])
+        
+        # Calculate overall statistics
+        stats = {
+            'overall': {
+                'mean': sum(r['temperature'] for r in self.temperature_history) / len(self.temperature_history),
+                'min': min(r['temperature'] for r in self.temperature_history),
+                'max': max(r['temperature'] for r in self.temperature_history),
+                'count': len(self.temperature_history)
+            },
+            'daily_periods': {}
+        }
+        
+        # Calculate statistics for each day/night period
+        for day_num in sorted(daily_periods.keys()):
+            day_temps = daily_periods[day_num]['day']
+            night_temps = daily_periods[day_num]['night']
+            
+            stats['daily_periods'][day_num] = {}
+            
+            if day_temps:
+                stats['daily_periods'][day_num]['day'] = {
+                    'mean': sum(day_temps) / len(day_temps),
+                    'min': min(day_temps),
+                    'max': max(day_temps),
+                    'count': len(day_temps)
+                }
+            
+            if night_temps:
+                stats['daily_periods'][day_num]['night'] = {
+                    'mean': sum(night_temps) / len(night_temps),
+                    'min': min(night_temps),
+                    'max': max(night_temps),
+                    'count': len(night_temps)
+                }
+        
+        return stats
+    
+    def display_temperature_statistics(self):
+        """
+        Display temperature statistics for the simulation.
+        """
+        stats = self.calculate_temperature_statistics()
+        
+        if not stats:
+            print("No temperature data available for statistics.")
+            return
+        
+        print("\n" + "="*60)
+        print("TEMPERATURE STATISTICS")
+        print("="*60)
+        
+        # Overall statistics
+        overall = stats['overall']
+        print(f"Overall simulation:")
+        print(f"  Mean temperature: {overall['mean']:.1f}°C")
+        print(f"  Temperature range: {overall['min']:.1f}°C to {overall['max']:.1f}°C")
+        print(f"  Total readings: {overall['count']}")
+        print()
+        
+        # Individual day and night period statistics
+        if 'daily_periods' in stats and stats['daily_periods']:
+            print("Day and Night Period Averages:")
+            print("-" * 40)
+            
+            for day_num in sorted(stats['daily_periods'].keys()):
+                periods = stats['daily_periods'][day_num]
+                
+                if 'day' in periods:
+                    day_avg = periods['day']['mean']
+                    print(f"  Day {day_num} average temperature: {day_avg:.1f}°C")
+                
+                if 'night' in periods:
+                    night_avg = periods['night']['mean']
+                    print(f"  Night {day_num} average temperature: {night_avg:.1f}°C")
+                
+                # Add spacing between days for readability
+                if day_num < max(stats['daily_periods'].keys()):
+                    print()
+        
+        print("="*60)

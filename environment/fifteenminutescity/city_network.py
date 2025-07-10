@@ -22,14 +22,13 @@ def load_city_network(place_name="Macau, China", mode="walk"):
     ox.settings.use_cache = True
     
     # Add minimal useful tags for slopes and speed limits
-    useful_tags = ['maxspeed', 'incline']
+    ox.settings.useful_tags_way = ['maxspeed', 'incline']
     
     graph = ox.graph_from_place(
         place_name,
         network_type=mode,
         simplify=True,  # Clean topological artifacts
         retain_all=True,  # Keep all edges
-        useful_tags_way=useful_tags
     )
     
     # Add elevation data for slope calculation
