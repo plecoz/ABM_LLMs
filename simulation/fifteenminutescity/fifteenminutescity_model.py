@@ -245,9 +245,17 @@ class FifteenMinuteCity(Model):
         }
         
         # Environmental context for simulation
-        self.temperature = 20.0  # Default temperature in Celsius
+        self.base_temperature = 30.0  # Base/average temperature in Celsius
+        self.temperature = 30.0  # Current temperature in Celsius, default value here, will be updated by the model in step()
         self.time_period = "daytime"  # Default time period
         self._auto_update_time_period()  # Set initial time period based on hour
+        
+        # Temperature modeling parameters
+        self.daily_temperature_amplitude = 6.0  # Daily temperature variation (±6°C from base)
+        self.daily_random_epsilon = 2.0  # Random daily variation amplitude
+        self.hourly_noise_std = 0.5  # Standard deviation for hourly noise
+        self.daily_random_offset = 0.0  # Random offset for the current day
+        self.last_temperature_update_hour = -1  # Track when temperature was last updated
         
         # --- Load demographic distribution data BEFORE creating residents ---
         # --- Load industry distribution data (education -> industry probabilities) ---
@@ -468,6 +476,7 @@ class FifteenMinuteCity(Model):
         
         # Update environmental context based on current time
         self._auto_update_time_period()
+        self._update_temperature()
 
         self.schedule.step()
 
@@ -1176,13 +1185,16 @@ class FifteenMinuteCity(Model):
     
     def set_temperature(self, temperature_celsius):
         """
-        Set the environmental temperature for the simulation.
+        Set the base environmental temperature for the simulation.
+        This becomes the center of the daily temperature variation.
         
         Args:
-            temperature_celsius (float): Temperature in Celsius
+            temperature_celsius (float): Base temperature in Celsius
         """
-        self.temperature = float(temperature_celsius)
-        self.logger.info(f"Environmental temperature set to {self.temperature}°C")
+        self.base_temperature = float(temperature_celsius)
+        # Also update current temperature immediately
+        self._update_temperature()
+        self.logger.info(f"Base environmental temperature set to {self.base_temperature}°C")
     
     def set_time_period(self, time_period):
         """
@@ -1218,6 +1230,60 @@ class FifteenMinuteCity(Model):
             self.time_period = "sunrise"
         else:  # 8-21
             self.time_period = "daytime"
+    
+    def _update_temperature(self):
+        """
+        Update temperature using a stochastic model based on daily cycles.
+        
+        Temperature model:
+        - Sinusoidal daily cycle peaking at 2:30 PM, minimum at 6:30 AM
+        - Base temperature as the daily average
+        - Random daily variation (epsilon) that changes each day
+        - Small hourly noise for realistic fluctuations
+        - Updates only when the hour changes
+        """
+        import math
+        import random
+        
+        current_hour = self.hour_of_day
+        
+        # Only update temperature when the hour changes
+        if current_hour == self.last_temperature_update_hour:
+            return
+        
+        # Check if it's a new day (reset daily random offset)
+        if current_hour == 0 or self.last_temperature_update_hour == -1:
+            # New day - generate new daily random offset
+            self.daily_random_offset = random.gauss(0, self.daily_random_epsilon)
+            self.logger.debug(f"New day: daily temperature offset = {self.daily_random_offset:.2f}°C")
+        
+        # Calculate time-based temperature using sinusoidal model
+        # Peak at 14.5 hours (2:30 PM), minimum at 6.5 hours (6:30 AM)
+        peak_hour = 14.5
+        hour_angle = 2 * math.pi * (current_hour - peak_hour) / 24
+        
+        # Cosine wave: +1 at peak, -1 at minimum
+        daily_variation = math.cos(hour_angle)
+        
+        # Calculate temperature components
+        base_temp = self.base_temperature
+        daily_cycle = self.daily_temperature_amplitude * daily_variation
+        daily_random = self.daily_random_offset
+        hourly_noise = random.gauss(0, self.hourly_noise_std)
+        
+        # Final temperature
+        self.temperature = base_temp + daily_cycle + daily_random + hourly_noise
+        
+        # Update tracking
+        self.last_temperature_update_hour = current_hour
+        
+        # Log temperature changes (optional, can be removed for performance)
+        if self.step_count % 60 == 0:  # Log every hour
+            self.logger.debug(
+                f"Hour {current_hour:02d}: T={self.temperature:.1f}°C "
+                f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "
+                f"daily_offset={daily_random:.1f}, noise={hourly_noise:.1f})"
+            )
     
     def get_environmental_context(self):
         """
@@ -1256,3 +1322,60 @@ class FifteenMinuteCity(Model):
             return "hot"
         else:
             return "very hot"
+    
+    def set_temperature_model_parameters(self, daily_amplitude=6.0, daily_epsilon=2.0, hourly_noise=0.5):
+        """
+        Configure the stochastic temperature model parameters.
+        
+        Args:
+            daily_amplitude (float): Daily temperature variation amplitude (±°C from base)
+            daily_epsilon (float): Random daily variation amplitude (standard deviation)
+            hourly_noise (float): Hourly random noise standard deviation
+        """
+        self.daily_temperature_amplitude = daily_amplitude
+        self.daily_random_epsilon = daily_epsilon
+        self.hourly_noise_std = hourly_noise
+        self.logger.info(f"Temperature model updated: amplitude=±{daily_amplitude}°C, "
+                        f"daily_variation=±{daily_epsilon}°C, hourly_noise=±{hourly_noise}°C")
+    
+    def get_temperature_info(self):
+        """
+        Get detailed information about current temperature and model parameters.
+        
+        Returns:
+            dict: Temperature information including current, base, and model parameters
+        """
+        return {
+            'current_temperature': self.temperature,
+            'base_temperature': self.base_temperature,
+            'daily_amplitude': self.daily_temperature_amplitude,
+            'daily_epsilon': self.daily_random_epsilon,
+            'hourly_noise_std': self.hourly_noise_std,
+            'daily_random_offset': self.daily_random_offset,
+            'current_hour': self.hour_of_day,
+            'weather_description': self._get_weather_description()
+        }
+    
+    def predict_temperature_for_hour(self, hour):
+        """
+        Predict the expected temperature for a given hour (without noise).
+        Useful for understanding the daily temperature pattern.
+        
+        Args:
+            hour (int): Hour of day (0-23)
+            
+        Returns:
+            float: Expected temperature for that hour
+        """
+        import math
+        
+        # Same calculation as _update_temperature but without noise
+        peak_hour = 14.5
+        hour_angle = 2 * math.pi * (hour - peak_hour) / 24
+        daily_variation = math.cos(hour_angle)
+        
+        expected_temp = (self.base_temperature + 
+                        self.daily_temperature_amplitude * daily_variation + 
+                        self.daily_random_offset)
+        
+        return expected_temp
