@@ -6,7 +6,7 @@ import os
 
 def load_city_network(place_name="Macau, China", mode="walk"):  
     """
-    Load Macau's walkable network using OSMnx.
+    Load city's walkable network using OSMnx with slope and speed limit data.
     
     Args:
         place_name: Name of the place to load network for
@@ -21,12 +21,26 @@ def load_city_network(place_name="Macau, China", mode="walk"):
     ox.settings.bidirectional_network_types = ['walk']
     ox.settings.use_cache = True
     
+    # Add minimal useful tags for slopes and speed limits
+    useful_tags = ['maxspeed', 'incline']
+    
     graph = ox.graph_from_place(
         place_name,
         network_type=mode,
         simplify=True,  # Clean topological artifacts
-        retain_all=True  # Keep all edges
+        retain_all=True,  # Keep all edges
+        useful_tags_way=useful_tags
     )
+    
+    # Add elevation data for slope calculation
+    try:
+        print("Fetching elevation data for slope calculation...")
+        graph = ox.elevation.add_node_elevations_raster(graph, raster_path=None, cpus=1)
+        graph = ox.elevation.add_edge_grades(graph)
+        print("✓ Added elevation and slope data")
+    except Exception as e:
+        print(f"⚠ Could not add elevation data: {e}")
+        print("  Will use OSM incline tags only")
     
     # Verify conversion
     print(f"Graph loaded with {len(graph.nodes())} nodes and {len(graph.edges())} edges")
@@ -131,3 +145,75 @@ def clip_graph_to_boundaries(graph, boundary_gdf):
         Clipped NetworkX graph
     """
     return ox.truncate.truncate_graph_polygon(graph, boundary_gdf.unary_union, retain_all=True)
+
+def get_slope_from_edge(edge_data):
+    """
+    Get slope percentage from edge data.
+    
+    Args:
+        edge_data: Edge attributes dictionary
+        
+    Returns:
+        Slope percentage or None
+    """
+    # Try elevation-based grade first
+    grade = edge_data.get('grade')
+    if grade is not None:
+        return round(grade, 1)
+    
+    # Try OSM incline tag
+    incline = edge_data.get('incline')
+    if incline:
+        incline_str = str(incline).lower().strip()
+        
+        # Handle percentage format
+        if '%' in incline_str:
+            import re
+            numbers = re.findall(r'-?\d+\.?\d*', incline_str)
+            if numbers:
+                return round(float(numbers[0]), 1)
+        
+        # Handle simple up/down
+        if incline_str == 'up':
+            return 5.0
+        elif incline_str == 'down':
+            return -5.0
+    
+    return None
+
+def get_speed_limit_from_edge(edge_data):
+    """
+    Get speed limit from edge data.
+    
+    Args:
+        edge_data: Edge attributes dictionary
+        
+    Returns:
+        Speed limit in km/h or None
+    """
+    maxspeed = edge_data.get('maxspeed')
+    if not maxspeed:
+        return None
+    
+    # Handle list/tuple
+    if isinstance(maxspeed, (list, tuple)):
+        maxspeed = maxspeed[0] if maxspeed else None
+    
+    if not maxspeed:
+        return None
+    
+    speed_str = str(maxspeed).lower().strip()
+    
+    # Extract number
+    import re
+    numbers = re.findall(r'\d+', speed_str)
+    if not numbers:
+        return None
+    
+    speed = int(numbers[0])
+    
+    # Convert mph to km/h
+    if 'mph' in speed_str:
+        speed = int(speed * 1.60934)
+    
+    return speed if 0 <= speed <= 200 else None

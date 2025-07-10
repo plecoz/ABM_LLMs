@@ -913,6 +913,8 @@ class Resident(BaseAgent):
             road_types = []
             surface_types = []
             max_speeds = []
+            slopes = []
+            speed_limits = []
             
             # Analyze each edge in the path
             for i in range(len(path_nodes) - 1):
@@ -967,6 +969,17 @@ class Resident(BaseAgent):
                     max_speed = str(max_speed)
                 
                 max_speeds.append(str(max_speed))
+                
+                # Extract slope and speed limit using helper functions
+                from environment.fifteenminutescity.city_network import get_slope_from_edge, get_speed_limit_from_edge
+                
+                slope = get_slope_from_edge(edge_data)
+                if slope is not None:
+                    slopes.append(slope)
+                
+                speed_limit = get_speed_limit_from_edge(edge_data)
+                if speed_limit is not None:
+                    speed_limits.append(speed_limit)
             
             # Calculate travel time
             travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
@@ -979,6 +992,10 @@ class Resident(BaseAgent):
                 road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
             
             dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
+            
+            # Process slope and speed limit data
+            avg_slope = sum(slopes) / len(slopes) if slopes else None
+            max_speed_limit = max(speed_limits) if speed_limits else None
             
             # Create simplified metadata for LLM - safely handle sets with proper string conversion
             try:
@@ -1003,7 +1020,9 @@ class Resident(BaseAgent):
                 'road_types': unique_road_types,
                 'surface_types': unique_surface_types,
                 'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
-                'total_segments': len(path_nodes) - 1
+                'total_segments': len(path_nodes) - 1,
+                'avg_slope': round(avg_slope, 1) if avg_slope is not None else None,
+                'max_speed_limit': max_speed_limit
             }
             
         except Exception as e:
@@ -1876,15 +1895,33 @@ class Resident(BaseAgent):
                     f"time period: {env_data['time_period']}. "
                 )
             
-            # Format path options for Concordia
+            # Format path options for Concordia with slope and speed limit info
             path_descriptions = []
             for i, path in enumerate(path_options):
-                path_desc = (
-                    f"Path {i+1}: {path['distance_meters']}m, "
-                    f"{path['travel_time_minutes']} min, "
-                    f"road type: {path['dominant_road_type']}, "
-                    f"{path['total_segments']} segments"
-                )
+                # Base description
+                desc_parts = [
+                    f"Path {i+1}: {path['distance_meters']}m",
+                    f"{path['travel_time_minutes']} min",
+                    f"road type: {path['dominant_road_type']}"
+                ]
+                
+                # Add slope information if available
+                if path.get('avg_slope') is not None:
+                    slope = path['avg_slope']
+                    if slope > 5:
+                        desc_parts.append(f"uphill {slope}%")
+                    elif slope < -5:
+                        desc_parts.append(f"downhill {abs(slope)}%")
+                    elif slope != 0:
+                        desc_parts.append(f"slope {slope}%")
+                    else:
+                        desc_parts.append("flat")
+                
+                # Add speed limit if available (indicates car traffic)
+                if path.get('max_speed_limit'):
+                    desc_parts.append(f"cars up to {path['max_speed_limit']}km/h")
+                
+                path_desc = ", ".join(desc_parts)
                 path_descriptions.append(path_desc)
             
             paths_text = "\n".join(path_descriptions)
@@ -1901,9 +1938,10 @@ class Resident(BaseAgent):
             
             # Step 3: Ask Concordia to make decision
             decision_prompt = (
-                "Choose the best path by responding with ONLY the path number (1, 2, 3, or 4). "
-                "Consider your needs, age, current weather/temperature, time of day, and path characteristics. "
-                "For example, consider comfort in different weather conditions or lighting during different times. "
+                "Choose the best path by responding with ONLY the path number (1, 2, or 3). "
+                "Consider your needs, age, current weather/temperature, time of day, slopes, and car traffic. "
+                "For example: steep uphill may be difficult for elderly, high car speeds may be dangerous, "
+                "weather conditions may affect slope difficulty. "
                 "Respond with just the number, nothing else."
             )
             
