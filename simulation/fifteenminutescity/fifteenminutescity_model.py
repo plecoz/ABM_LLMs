@@ -244,6 +244,11 @@ class FifteenMinuteCity(Model):
             'fallback_decisions': 0
         }
         
+        # Environmental context for simulation
+        self.temperature = 20.0  # Default temperature in Celsius
+        self.time_period = "daytime"  # Default time period
+        self._auto_update_time_period()  # Set initial time period based on hour
+        
         # --- Load demographic distribution data BEFORE creating residents ---
         # --- Load industry distribution data (education -> industry probabilities) ---
         industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
@@ -461,6 +466,8 @@ class FifteenMinuteCity(Model):
         if self.step_count > 1 and current_minute == 0 and self.hour_of_day == 0:
             self.logger.info(f"Day {self.day_count + 1}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
         
+        # Update environmental context based on current time
+        self._auto_update_time_period()
 
         self.schedule.step()
 
@@ -1166,3 +1173,86 @@ class FifteenMinuteCity(Model):
                 print("- Behavior is primarily efficiency-driven")
         
         print("="*60)
+    
+    def set_temperature(self, temperature_celsius):
+        """
+        Set the environmental temperature for the simulation.
+        
+        Args:
+            temperature_celsius (float): Temperature in Celsius
+        """
+        self.temperature = float(temperature_celsius)
+        self.logger.info(f"Environmental temperature set to {self.temperature}°C")
+    
+    def set_time_period(self, time_period):
+        """
+        Set the time period for the simulation.
+        
+        Args:
+            time_period (str): One of "night", "dawn", "sunrise", "daytime"
+        """
+        valid_periods = ["night", "dawn", "sunrise", "daytime"]
+        if time_period not in valid_periods:
+            raise ValueError(f"Invalid time period '{time_period}'. Must be one of: {valid_periods}")
+        
+        self.time_period = time_period
+        self.logger.info(f"Time period set to '{self.time_period}'")
+    
+    def _auto_update_time_period(self):
+        """
+        Automatically update time period based on current hour of day.
+        
+        Time periods:
+        - night: 22:00 - 05:59
+        - dawn: 06:00 - 06:59
+        - sunrise: 07:00 - 07:59
+        - daytime: 08:00 - 21:59
+        """
+        hour = self.hour_of_day
+        
+        if 22 <= hour <= 23 or 0 <= hour <= 5:
+            self.time_period = "night"
+        elif hour == 6:
+            self.time_period = "dawn"
+        elif hour == 7:
+            self.time_period = "sunrise"
+        else:  # 8-21
+            self.time_period = "daytime"
+    
+    def get_environmental_context(self):
+        """
+        Get current environmental context for use by agents.
+        
+        Returns:
+            dict: Environmental context including temperature and time period
+        """
+        return {
+            'temperature': self.temperature,
+            'time_period': self.time_period,
+            'hour': self.hour_of_day,
+            'weather_description': self._get_weather_description()
+        }
+    
+    def _get_weather_description(self):
+        """
+        Generate a simple weather description based on temperature.
+        
+        Returns:
+            str: Weather description
+        """
+        temp = self.temperature
+        
+        if temp < 0:
+            return "freezing"
+        elif temp < 10:
+            return "cold"
+        elif temp < 20:
+            return "cool"
+        elif temp < 25:
+            return "mild"
+        elif temp < 30:
+            return "warm"
+        elif temp < 35:
+            return "hot"
+        else:
+            return "very hot"

@@ -1867,6 +1867,15 @@ class Resident(BaseAgent):
             needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
             time_context = f"Time: {self.model.hour_of_day}:00" if hasattr(self.model, 'hour_of_day') else "Time: unknown"
             
+            # Get environmental context
+            env_context = ""
+            if hasattr(self.model, 'get_environmental_context'):
+                env_data = self.model.get_environmental_context()
+                env_context = (
+                    f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
+                    f"time period: {env_data['time_period']}. "
+                )
+            
             # Format path options for Concordia
             path_descriptions = []
             for i, path in enumerate(path_options):
@@ -1883,7 +1892,7 @@ class Resident(BaseAgent):
             # Create observation for Concordia
             observation = (
                 f"Agent {self.unique_id} needs to choose a path from node {from_node} to {to_node}. "
-                f"Current needs: {needs_summary}. {time_context}. Age: {self.age}. "
+                f"Current needs: {needs_summary}. {time_context}. {env_context}Age: {self.age}. "
                 f"Available paths:\n{paths_text}"
             )
             
@@ -1893,7 +1902,8 @@ class Resident(BaseAgent):
             # Step 3: Ask Concordia to make decision
             decision_prompt = (
                 "Choose the best path by responding with ONLY the path number (1, 2, 3, or 4). "
-                "Consider your needs, age, and path characteristics. "
+                "Consider your needs, age, current weather/temperature, time of day, and path characteristics. "
+                "For example, consider comfort in different weather conditions or lighting during different times. "
                 "Respond with just the number, nothing else."
             )
             
@@ -2036,30 +2046,6 @@ class Resident(BaseAgent):
             
         # Compare the actual node lists
         return path1 == path2
-
-    def _calculate_time_for_path(self, path_data):
-        """
-        Calculate travel time for a specific path.
-        
-        Args:
-            path_data: Path dictionary with characteristics
-            
-        Returns:
-            Travel time in minutes
-        """
-        return self._calculate_time_for_path_nodes(path_data['path_nodes'])
-
-
-
-    def set_activity_preferences(self, preferences):
-        """
-        Update the agent's activity preferences.
-        
-        Args:
-            preferences: Dictionary of activity types and their weights
-        """
-        self.attributes['activity_preferences'] = preferences
-    
 
     
     def generate_needs(self, method=None):
@@ -2478,8 +2464,19 @@ class Resident(BaseAgent):
 
         # -------- 2) 构造 observation --------
         needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
+        
+        # Get environmental context
+        env_context = ""
+        if hasattr(self.model, 'get_environmental_context'):
+            env_data = self.model.get_environmental_context()
+            env_context = (
+                f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
+                f"time period: {env_data['time_period']}. "
+            )
+        
         observation = (
             "Current needs => " + needs_summary + ". "
+            + env_context +
             "Accessible POIs (first 20) => " + json.dumps(accessible_info) + "."
         )
 
@@ -2488,8 +2485,10 @@ class Resident(BaseAgent):
             self.brain.observe(observation)
             reply = self.brain.decide(
                 (
-                    "Decide your next movement. Respond STRICTLY in JSON with keys: "
+                    "Decide your next movement considering current environmental conditions. "
+                    "Respond STRICTLY in JSON with keys: "
                     "'action' (move|home|stay) and, if action=='move', 'target_poi_id' (integer). "
+                    "Consider weather, temperature, and time of day in your decision. "
                     "Do NOT output anything except the JSON object."
                 )
             )
