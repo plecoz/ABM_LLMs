@@ -21,7 +21,7 @@ import os  # NEW
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
-from simulation.fifteenminutescity.llm_interaction_layer_fifteenminutescity import FifteenMinuteCityLLMLayer
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -193,10 +193,10 @@ class FifteenMinuteCity(Model):
         if self.llm_enabled:
             self.logger.info("Initializing LLM components for persona-driven behavior")
             self.persona_memory_manager = PersonaMemoryManager()
-            self.llm_interaction_layer = FifteenMinuteCityLLMLayer()
+            
         else:
             self.persona_memory_manager = None
-            self.llm_interaction_layer = None
+            
         
         # Create a mapping of nodes to parishes if parishes data is available
         self.node_to_parish = {}
