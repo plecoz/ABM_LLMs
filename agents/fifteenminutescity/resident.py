@@ -560,6 +560,98 @@ class Resident(BaseAgent):
 
 
 
+    @staticmethod
+    def _sample_from_distribution(distribution):
+        """
+        Sample a value from a probability distribution.
+        
+        Args:
+            distribution: Dictionary mapping values to probabilities
+            
+        Returns:
+            A sampled value from the distribution
+        """
+        if not distribution:
+            return None
+            
+        items = list(distribution.keys())
+        probabilities = list(distribution.values())
+        
+        # Normalize probabilities if they don't sum to 1
+        prob_sum = sum(probabilities)
+        if prob_sum != 1.0 and prob_sum > 0:
+            probabilities = [p / prob_sum for p in probabilities]
+        
+        return random.choices(items, probabilities)[0]
+
+    @staticmethod
+    def _normalise_string(s):
+        """Normalize a string by removing spaces, dashes, and converting to lowercase."""
+        if not s:
+            return ""
+        # Remove spaces, dashes, and other common punctuation
+        normalized = re.sub(r'[\s\-_.,;:()]+', '', s.lower())
+        return normalized
+
+    @staticmethod
+    def _convert_income_bracket_to_value(income_bracket):
+        """Convert income bracket string to actual income value."""
+        if not income_bracket:
+            return None
+        
+        # Handle Macau income bracket formats (uses spaces as thousands separators)
+        bracket = income_bracket.strip()
+        
+        # Handle "< X XXX" format
+        if bracket.startswith("< "):
+            max_val = int(bracket[2:].replace(" ", ""))
+            return random.randint(1000, max_val)
+        
+        # Handle "≧X XXX" format (greater than or equal to)
+        elif bracket.startswith("≧"):
+            min_val = int(bracket[1:].replace(" ", ""))
+            return random.randint(min_val, min_val + 50000)  # Add reasonable upper bound
+        
+        # Handle "X XXX - Y YYY" format
+        elif " - " in bracket:
+            parts = bracket.split(" - ")
+            if len(parts) == 2:
+                min_val = int(parts[0].replace(" ", ""))
+                max_val = int(parts[1].replace(" ", ""))
+                return random.randint(min_val, max_val)
+        
+        # Handle "Unpaid family worker" or other special cases
+        elif "unpaid" in bracket.lower():
+            return 0
+        
+        # Legacy handling for comma-separated formats (keep for backward compatibility)
+        elif "," in bracket:
+            if "10,000" in bracket and "19,999" in bracket:
+                return random.randint(10000, 19999)
+            elif "20,000" in bracket and "29,999" in bracket:
+                return random.randint(20000, 29999)
+            elif "30,000" in bracket and "39,999" in bracket:
+                return random.randint(30000, 39999)
+            elif "40,000" in bracket and "49,999" in bracket:
+                return random.randint(40000, 49999)
+            elif "50,000" in bracket and "59,999" in bracket:
+                return random.randint(50000, 59999)
+            elif "60,000" in bracket and "69,999" in bracket:
+                return random.randint(60000, 69999)
+            elif "70,000" in bracket and "79,999" in bracket:
+                return random.randint(70000, 79999)
+            elif "80,000" in bracket and "89,999" in bracket:
+                return random.randint(80000, 89999)
+            elif "90,000" in bracket and "99,999" in bracket:
+                return random.randint(90000, 99999)
+            elif "100,000" in bracket:
+                return random.randint(100000, 200000)
+        
+        # Default fallback
+        return 50000
+
+
+
         # ---------------------------------------------------
         # Concordia Brain (LLM) integration
         # ---------------------------------------------------
@@ -700,6 +792,267 @@ class Resident(BaseAgent):
         
         # If all retries failed, fall back to standard calculation
         return self._calculate_standard_travel_time(from_node, to_node)
+
+    def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
+        """
+        Generate 4 shortest path options between two nodes.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            max_paths: Maximum number of paths to generate (default: 4)
+        
+        Returns:
+            List of path dictionaries with OSM metadata for LLM scoring
+        """
+        try:
+            # Generate k-shortest paths using NetworkX
+            paths = self._get_k_shortest_paths(from_node, to_node, max_paths)
+            
+            # Extract OSM metadata for each path
+            path_options = []
+            
+            for i, path_nodes in enumerate(paths):
+                if path_nodes:  # Ensure path exists
+                    path_data = self._extract_path_metadata(path_nodes, i + 1)
+                    if path_data:
+                        path_options.append(path_data)
+            return path_options
+            
+        except Exception as e:
+            self.logger.error(f"Error generating path options: {e}")
+            return []
+
+    def _get_k_shortest_paths(self, from_node, to_node, k):
+        """
+        Get k shortest paths using simple approach.
+        
+        Args:
+            from_node: Starting node ID
+            to_node: Destination node ID
+            k: Number of paths to find
+            
+        Returns:
+            List of path node lists
+        """
+        try:
+            import itertools
+            
+            paths = []
+            graph = self.model.graph.copy()
+            
+            # Get the shortest path first
+            try:
+                shortest_path = nx.shortest_path(graph, from_node, to_node, weight='length')
+                paths.append(shortest_path)
+            except nx.NetworkXNoPath:
+                return []
+            
+            # Try to find alternative paths by temporarily removing edges
+            for attempt in range(k - 1):
+                if len(paths) >= k:
+                    break
+                
+                # Create a copy of the graph and remove some edges from previous paths
+                temp_graph = graph.copy()
+                
+                # Remove some edges from existing paths to force alternatives
+                for existing_path in paths:
+                    # Ensure existing_path is actually a list of nodes
+                    if not isinstance(existing_path, (list, tuple)) or len(existing_path) <= 2:
+                        continue
+                    
+                    # Remove middle edges to force different routes
+                    edges_to_remove = []
+                    try:
+                        for i in range(1, min(3, len(existing_path) - 1)):  # Remove 1-2 middle edges
+                            if i < len(existing_path) - 1:
+                                node1, node2 = existing_path[i], existing_path[i + 1]
+                                # Ensure nodes are valid
+                                if node1 is not None and node2 is not None:
+                                    edges_to_remove.append((node1, node2))
+                        
+                        for edge in edges_to_remove:
+                            if temp_graph.has_edge(edge[0], edge[1]):
+                                temp_graph.remove_edge(edge[0], edge[1])
+                    except (IndexError, TypeError) as e:
+                        self.logger.warning(f"Error processing path for edge removal: {e}")
+                        continue
+                
+                # Try to find a path in the modified graph
+                try:
+                    alt_path = nx.shortest_path(temp_graph, from_node, to_node, weight='length')
+                    # Check if this path is sufficiently different
+                    if not any(self._paths_are_same(alt_path, existing) for existing in paths):
+                        paths.append(alt_path)
+                except nx.NetworkXNoPath:
+                    continue
+            
+            return paths
+            
+        except Exception as e:
+            self.logger.error(f"Error in k-shortest paths: {e}")
+            return []
+
+    def _extract_path_metadata(self, path_nodes, path_number):
+        """
+        Extract OSM metadata from a path for LLM scoring.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            path_number: Path identifier number
+            
+        Returns:
+            Dictionary with path metadata
+        """
+        try:
+            graph = self.model.graph
+            
+            # Calculate basic metrics
+            path_length = 0
+            road_types = []
+            surface_types = []
+            max_speeds = []
+            
+            # Analyze each edge in the path
+            for i in range(len(path_nodes) - 1):
+                node1, node2 = path_nodes[i], path_nodes[i + 1]
+                
+                # Get edge data - handle both single edge and multi-edge cases
+                edge_data = graph.get_edge_data(node1, node2)
+                if edge_data is None:
+                    continue
+                
+                # Handle MultiGraph case where edge_data might be a dict of dicts
+                if isinstance(edge_data, dict) and not any(key in edge_data for key in ['length', 'highway']):
+                    # This is likely a MultiGraph with multiple edges, take the first one
+                    edge_data = list(edge_data.values())[0] if edge_data else {}
+                
+                # Extract length
+                edge_length = edge_data.get('length', 0)
+                path_length += edge_length
+                
+                # Extract road type (highway tag) - handle complex data types
+                highway_type = edge_data.get('highway', 'unclassified')
+                
+                if isinstance(highway_type, (list, tuple)):
+                    highway_type = highway_type[0] if highway_type else 'unclassified'
+                elif isinstance(highway_type, dict):
+                    highway_type = 'complex_type'  # Handle complex highway data
+                elif not isinstance(highway_type, str):
+                    highway_type = str(highway_type)
+                
+                road_types.append(str(highway_type))
+                
+                # Extract surface type if available - handle complex data types
+                surface = edge_data.get('surface', 'unknown')
+                
+                if isinstance(surface, (list, tuple)):
+                    surface = surface[0] if surface else 'unknown'
+                elif isinstance(surface, dict):
+                    surface = 'complex_surface'  # Handle complex surface data
+                elif not isinstance(surface, str):
+                    surface = str(surface)
+                
+                surface_types.append(str(surface))
+                
+                # Extract max speed if available - handle complex data types
+                max_speed = edge_data.get('maxspeed', 'unknown')
+                
+                if isinstance(max_speed, (list, tuple)):
+                    max_speed = max_speed[0] if max_speed else 'unknown'
+                elif isinstance(max_speed, dict):
+                    max_speed = 'complex_speed'  # Handle complex speed data
+                elif not isinstance(max_speed, str):
+                    max_speed = str(max_speed)
+                
+                max_speeds.append(str(max_speed))
+            
+            # Calculate travel time
+            travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
+            
+            # Determine dominant road types
+            road_type_counts = {}
+            for road_type in road_types:
+                if not isinstance(road_type, str):
+                    road_type = str(road_type)
+                road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
+            
+            dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
+            
+            # Create simplified metadata for LLM - safely handle sets with proper string conversion
+            try:
+                unique_road_types = list(set(road_types))
+            except TypeError:
+                # Fallback if any road_types are unhashable
+                unique_road_types = list(dict.fromkeys(road_types))  # Remove duplicates preserving order
+            
+            try:
+                unique_surface_types = list(set([s for s in surface_types if s != 'unknown']))
+            except TypeError:
+                # Fallback if any surface_types are unhashable
+                filtered_surfaces = [s for s in surface_types if s != 'unknown']
+                unique_surface_types = list(dict.fromkeys(filtered_surfaces))
+            
+            return {
+                'path_id': path_number,
+                'path_nodes': path_nodes,
+                'distance_meters': round(path_length, 0),
+                'travel_time_minutes': round(travel_time_minutes, 1),
+                'dominant_road_type': dominant_road_type,
+                'road_types': unique_road_types,
+                'surface_types': unique_surface_types,
+                'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
+                'total_segments': len(path_nodes) - 1
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error extracting path metadata: {e}")
+            return None
+
+
+    def _calculate_time_for_path_nodes(self, path_nodes):
+        """
+        Calculate travel time for a list of path nodes.
+        
+        Args:
+            path_nodes: List of node IDs in the path
+            
+        Returns:
+            Travel time in minutes
+        """
+        total_distance = 0
+        
+        for i in range(len(path_nodes) - 1):
+            # Handle both simple graphs and MultiGraphs properly
+            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1])
+            
+            if edge_data is None:
+                # No edge found, use default distance
+                edge_length = 100  # Default 100m if no data
+            elif isinstance(edge_data, dict):
+                # Check if this is a MultiGraph (dict of dicts) or simple graph (single dict)
+                if any(key in edge_data for key in ['length', 'highway', 'osmid']):
+                    # Simple graph - edge_data is the actual edge attributes
+                    edge_length = edge_data.get('length', 100)
+                else:
+                    # MultiGraph - edge_data is a dict of edge keys, take the first one
+                    first_edge_key = list(edge_data.keys())[0] if edge_data else 0
+                    actual_edge_data = edge_data.get(first_edge_key, {})
+                    edge_length = actual_edge_data.get('length', 100)
+            else:
+                # Unexpected data type
+                edge_length = 100
+            
+            total_distance += edge_length
+        
+        # Use agent's step size to calculate time
+        is_elderly = self.age >= 65
+        step_size = 60.0 if is_elderly else 80.0
+        print(f"DEBUG: path time calculated!")
+        
+        return max(1, math.ceil(total_distance / step_size))
+
 
     def start_travel(self, target_node, target_geometry):
         """
@@ -1467,222 +1820,7 @@ class Resident(BaseAgent):
         # Removed debug print
         return target
 
-    def _get_multiple_path_options(self, from_node, to_node, max_paths=4):
-        """
-        Generate 4 shortest path options between two nodes.
-        
-        Args:
-            from_node: Starting node ID
-            to_node: Destination node ID
-            max_paths: Maximum number of paths to generate (default: 4)
-        
-        Returns:
-            List of path dictionaries with OSM metadata for LLM scoring
-        """
-        try:
-            # Generate k-shortest paths using NetworkX
-            paths = self._get_k_shortest_paths(from_node, to_node, max_paths)
-            
-            # Extract OSM metadata for each path
-            path_options = []
-            
-            for i, path_nodes in enumerate(paths):
-                if path_nodes:  # Ensure path exists
-                    path_data = self._extract_path_metadata(path_nodes, i + 1)
-                    if path_data:
-                        path_options.append(path_data)
-            return path_options
-            
-        except Exception as e:
-            self.logger.error(f"Error generating path options: {e}")
-            return []
 
-    def _get_k_shortest_paths(self, from_node, to_node, k):
-        """
-        Get k shortest paths using simple approach.
-        
-        Args:
-            from_node: Starting node ID
-            to_node: Destination node ID
-            k: Number of paths to find
-            
-        Returns:
-            List of path node lists
-        """
-        try:
-            import itertools
-            
-            paths = []
-            graph = self.model.graph.copy()
-            
-            # Get the shortest path first
-            try:
-                shortest_path = nx.shortest_path(graph, from_node, to_node, weight='length')
-                paths.append(shortest_path)
-            except nx.NetworkXNoPath:
-                return []
-            
-            # Try to find alternative paths by temporarily removing edges
-            for attempt in range(k - 1):
-                if len(paths) >= k:
-                    break
-                
-                # Create a copy of the graph and remove some edges from previous paths
-                temp_graph = graph.copy()
-                
-                # Remove some edges from existing paths to force alternatives
-                for existing_path in paths:
-                    # Ensure existing_path is actually a list of nodes
-                    if not isinstance(existing_path, (list, tuple)) or len(existing_path) <= 2:
-                        continue
-                    
-                    # Remove middle edges to force different routes
-                    edges_to_remove = []
-                    try:
-                        for i in range(1, min(3, len(existing_path) - 1)):  # Remove 1-2 middle edges
-                            if i < len(existing_path) - 1:
-                                node1, node2 = existing_path[i], existing_path[i + 1]
-                                # Ensure nodes are valid
-                                if node1 is not None and node2 is not None:
-                                    edges_to_remove.append((node1, node2))
-                        
-                        for edge in edges_to_remove:
-                            if temp_graph.has_edge(edge[0], edge[1]):
-                                temp_graph.remove_edge(edge[0], edge[1])
-                    except (IndexError, TypeError) as e:
-                        self.logger.warning(f"Error processing path for edge removal: {e}")
-                        continue
-                
-                # Try to find a path in the modified graph
-                try:
-                    alt_path = nx.shortest_path(temp_graph, from_node, to_node, weight='length')
-                    # Check if this path is sufficiently different
-                    if not any(self._paths_are_same(alt_path, existing) for existing in paths):
-                        paths.append(alt_path)
-                except nx.NetworkXNoPath:
-                    continue
-            
-            return paths
-            
-        except Exception as e:
-            self.logger.error(f"Error in k-shortest paths: {e}")
-            return []
-
-    def _extract_path_metadata(self, path_nodes, path_number):
-        """
-        Extract OSM metadata from a path for LLM scoring.
-        
-        Args:
-            path_nodes: List of node IDs in the path
-            path_number: Path identifier number
-            
-        Returns:
-            Dictionary with path metadata
-        """
-        try:
-            graph = self.model.graph
-            
-            # Calculate basic metrics
-            path_length = 0
-            road_types = []
-            surface_types = []
-            max_speeds = []
-            
-            # Analyze each edge in the path
-            for i in range(len(path_nodes) - 1):
-                node1, node2 = path_nodes[i], path_nodes[i + 1]
-                
-                # Get edge data - handle both single edge and multi-edge cases
-                edge_data = graph.get_edge_data(node1, node2)
-                if edge_data is None:
-                    continue
-                
-                # Handle MultiGraph case where edge_data might be a dict of dicts
-                if isinstance(edge_data, dict) and not any(key in edge_data for key in ['length', 'highway']):
-                    # This is likely a MultiGraph with multiple edges, take the first one
-                    edge_data = list(edge_data.values())[0] if edge_data else {}
-                
-                # Extract length
-                edge_length = edge_data.get('length', 0)
-                path_length += edge_length
-                
-                # Extract road type (highway tag) - handle complex data types
-                highway_type = edge_data.get('highway', 'unclassified')
-                
-                if isinstance(highway_type, (list, tuple)):
-                    highway_type = highway_type[0] if highway_type else 'unclassified'
-                elif isinstance(highway_type, dict):
-                    highway_type = 'complex_type'  # Handle complex highway data
-                elif not isinstance(highway_type, str):
-                    highway_type = str(highway_type)
-                
-                road_types.append(str(highway_type))
-                
-                # Extract surface type if available - handle complex data types
-                surface = edge_data.get('surface', 'unknown')
-                
-                if isinstance(surface, (list, tuple)):
-                    surface = surface[0] if surface else 'unknown'
-                elif isinstance(surface, dict):
-                    surface = 'complex_surface'  # Handle complex surface data
-                elif not isinstance(surface, str):
-                    surface = str(surface)
-                
-                surface_types.append(str(surface))
-                
-                # Extract max speed if available - handle complex data types
-                max_speed = edge_data.get('maxspeed', 'unknown')
-                
-                if isinstance(max_speed, (list, tuple)):
-                    max_speed = max_speed[0] if max_speed else 'unknown'
-                elif isinstance(max_speed, dict):
-                    max_speed = 'complex_speed'  # Handle complex speed data
-                elif not isinstance(max_speed, str):
-                    max_speed = str(max_speed)
-                
-                max_speeds.append(str(max_speed))
-            
-            # Calculate travel time
-            travel_time_minutes = self._calculate_time_for_path_nodes(path_nodes)
-            
-            # Determine dominant road types
-            road_type_counts = {}
-            for road_type in road_types:
-                if not isinstance(road_type, str):
-                    road_type = str(road_type)
-                road_type_counts[road_type] = road_type_counts.get(road_type, 0) + 1
-            
-            dominant_road_type = max(road_type_counts, key=road_type_counts.get) if road_type_counts else 'unknown'
-            
-            # Create simplified metadata for LLM - safely handle sets with proper string conversion
-            try:
-                unique_road_types = list(set(road_types))
-            except TypeError:
-                # Fallback if any road_types are unhashable
-                unique_road_types = list(dict.fromkeys(road_types))  # Remove duplicates preserving order
-            
-            try:
-                unique_surface_types = list(set([s for s in surface_types if s != 'unknown']))
-            except TypeError:
-                # Fallback if any surface_types are unhashable
-                filtered_surfaces = [s for s in surface_types if s != 'unknown']
-                unique_surface_types = list(dict.fromkeys(filtered_surfaces))
-            
-            return {
-                'path_id': path_number,
-                'path_nodes': path_nodes,
-                'distance_meters': round(path_length, 0),
-                'travel_time_minutes': round(travel_time_minutes, 1),
-                'dominant_road_type': dominant_road_type,
-                'road_types': unique_road_types,
-                'surface_types': unique_surface_types,
-                'has_speed_limits': any(speed != 'unknown' for speed in max_speeds),
-                'total_segments': len(path_nodes) - 1
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Error extracting path metadata: {e}")
-            return None
 
     def _select_path_with_llm(self, path_options, from_node, to_node):
         """
@@ -1911,47 +2049,7 @@ class Resident(BaseAgent):
         """
         return self._calculate_time_for_path_nodes(path_data['path_nodes'])
 
-    def _calculate_time_for_path_nodes(self, path_nodes):
-        """
-        Calculate travel time for a list of path nodes.
-        
-        Args:
-            path_nodes: List of node IDs in the path
-            
-        Returns:
-            Travel time in minutes
-        """
-        total_distance = 0
-        
-        for i in range(len(path_nodes) - 1):
-            # Handle both simple graphs and MultiGraphs properly
-            edge_data = self.model.graph.get_edge_data(path_nodes[i], path_nodes[i + 1])
-            
-            if edge_data is None:
-                # No edge found, use default distance
-                edge_length = 100  # Default 100m if no data
-            elif isinstance(edge_data, dict):
-                # Check if this is a MultiGraph (dict of dicts) or simple graph (single dict)
-                if any(key in edge_data for key in ['length', 'highway', 'osmid']):
-                    # Simple graph - edge_data is the actual edge attributes
-                    edge_length = edge_data.get('length', 100)
-                else:
-                    # MultiGraph - edge_data is a dict of edge keys, take the first one
-                    first_edge_key = list(edge_data.keys())[0] if edge_data else 0
-                    actual_edge_data = edge_data.get(first_edge_key, {})
-                    edge_length = actual_edge_data.get('length', 100)
-            else:
-                # Unexpected data type
-                edge_length = 100
-            
-            total_distance += edge_length
-        
-        # Use agent's step size to calculate time
-        is_elderly = self.age >= 65
-        step_size = 60.0 if is_elderly else 80.0
-        print(f"DEBUG: path time calculated!")
-        
-        return max(1, math.ceil(total_distance / step_size))
+
 
     def set_activity_preferences(self, preferences):
         """
@@ -2337,95 +2435,7 @@ class Resident(BaseAgent):
 
 
 
-    @staticmethod
-    def _sample_from_distribution(distribution):
-        """
-        Sample a value from a probability distribution.
-        
-        Args:
-            distribution: Dictionary mapping values to probabilities
-            
-        Returns:
-            A sampled value from the distribution
-        """
-        if not distribution:
-            return None
-            
-        items = list(distribution.keys())
-        probabilities = list(distribution.values())
-        
-        # Normalize probabilities if they don't sum to 1
-        prob_sum = sum(probabilities)
-        if prob_sum != 1.0 and prob_sum > 0:
-            probabilities = [p / prob_sum for p in probabilities]
-        
-        return random.choices(items, probabilities)[0]
 
-    @staticmethod
-    def _normalise_string(s):
-        """Normalize a string by removing spaces, dashes, and converting to lowercase."""
-        if not s:
-            return ""
-        # Remove spaces, dashes, and other common punctuation
-        normalized = re.sub(r'[\s\-_.,;:()]+', '', s.lower())
-        return normalized
-
-    @staticmethod
-    def _convert_income_bracket_to_value(income_bracket):
-        """Convert income bracket string to actual income value."""
-        if not income_bracket:
-            return None
-        
-        # Handle Macau income bracket formats (uses spaces as thousands separators)
-        bracket = income_bracket.strip()
-        
-        # Handle "< X XXX" format
-        if bracket.startswith("< "):
-            max_val = int(bracket[2:].replace(" ", ""))
-            return random.randint(1000, max_val)
-        
-        # Handle "≧X XXX" format (greater than or equal to)
-        elif bracket.startswith("≧"):
-            min_val = int(bracket[1:].replace(" ", ""))
-            return random.randint(min_val, min_val + 50000)  # Add reasonable upper bound
-        
-        # Handle "X XXX - Y YYY" format
-        elif " - " in bracket:
-            parts = bracket.split(" - ")
-            if len(parts) == 2:
-                min_val = int(parts[0].replace(" ", ""))
-                max_val = int(parts[1].replace(" ", ""))
-                return random.randint(min_val, max_val)
-        
-        # Handle "Unpaid family worker" or other special cases
-        elif "unpaid" in bracket.lower():
-            return 0
-        
-        # Legacy handling for comma-separated formats (keep for backward compatibility)
-        elif "," in bracket:
-            if "10,000" in bracket and "19,999" in bracket:
-                return random.randint(10000, 19999)
-            elif "20,000" in bracket and "29,999" in bracket:
-                return random.randint(20000, 29999)
-            elif "30,000" in bracket and "39,999" in bracket:
-                return random.randint(30000, 39999)
-            elif "40,000" in bracket and "49,999" in bracket:
-                return random.randint(40000, 49999)
-            elif "50,000" in bracket and "59,999" in bracket:
-                return random.randint(50000, 59999)
-            elif "60,000" in bracket and "69,999" in bracket:
-                return random.randint(60000, 69999)
-            elif "70,000" in bracket and "79,999" in bracket:
-                return random.randint(70000, 79999)
-            elif "80,000" in bracket and "89,999" in bracket:
-                return random.randint(80000, 89999)
-            elif "90,000" in bracket and "99,999" in bracket:
-                return random.randint(90000, 99999)
-            elif "100,000" in bracket:
-                return random.randint(100000, 200000)
-        
-        # Default fallback
-        return 50000
 
     def _choose_concordia_based_target(self):
         """Use the embedded Concordia brain to select a movement target.
