@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
-from simulation.llm_interaction_layer import EpisodicMemory
+
 import re
 from brains.concordia_brain import ConcordiaBrain
 
@@ -1284,31 +1284,7 @@ class Resident(BaseAgent):
         # Removed debug print
         return self._choose_need_based_target()
     
-    def _get_episodic_memories(self):
-        """
-        Get episodic memories for LLM decision making.
-        
-        Returns:
-            List of EpisodicMemory objects
-        """
-        memories = []
-        
-        # Convert recent POI visits to episodic memories
-        if hasattr(self, 'memory') and 'visited_pois' in self.memory:
-            recent_visits = self.memory['visited_pois'][-5:]  # Last 5 visits
-            
-            for visit in recent_visits:
-                memory = EpisodicMemory(
-                    timestamp=visit.get('step', 0),
-                    location=str(visit.get('poi_id', 'unknown')),
-                    action=f"visited_{visit.get('poi_type', 'unknown')}",
-                    outcome="completed",
-                    satisfaction_gained=0.7,  # Default satisfaction
-                    other_agents_involved=[]
-                )
-                memories.append(memory)
-        
-        return memories
+
     
     def _parse_llm_decision(self, decision):
         """
@@ -1890,14 +1866,23 @@ class Resident(BaseAgent):
             needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
             time_context = f"Time: {self.model.hour_of_day}:00" if hasattr(self.model, 'hour_of_day') else "Time: unknown"
             
-            # Get environmental context
+            # Get environmental context with temperature recommendations
             env_context = ""
+            temp_context = ""
             if hasattr(self.model, 'get_environmental_context'):
                 env_data = self.model.get_environmental_context()
                 env_context = (
                     f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
                     f"time period: {env_data['time_period']}. "
                 )
+                
+                # Add temperature context for path selection
+                if env_data.get('temperature_recommendations'):
+                    recommendations = env_data['temperature_recommendations']
+                    temp_context = (
+                        f"TEMPERATURE ADVISORY: {recommendations['health_warning']}. "
+                        f"Movement advice: {recommendations['movement']}. "
+                    )
             
             # Format path options for Concordia with slope and speed limit info
             path_descriptions = []
@@ -1933,21 +1918,34 @@ class Resident(BaseAgent):
             # Create observation for Concordia
             observation = (
                 f"Agent {self.unique_id} needs to choose a path from node {from_node} to {to_node}. "
-                f"Current needs: {needs_summary}. {time_context}. {env_context}Age: {self.age}. "
+                f"Current needs: {needs_summary}. {time_context}. {env_context}{temp_context}Age: {self.age}. "
                 f"Available paths:\n{paths_text}"
             )
             
             # Step 2: Give observation to Concordia brain
             self.brain.observe(observation)
             
-            # Step 3: Ask Concordia to make decision
+            # Step 3: Ask Concordia to make decision with temperature awareness
             decision_prompt = (
                 "Choose the best path by responding with ONLY the path number (1, 2, or 3). "
                 "Consider your needs, age, current weather/temperature, time of day, slopes, and car traffic. "
                 "For example: steep uphill may be difficult for elderly, high car speeds may be dangerous, "
                 "weather conditions may affect slope difficulty. "
-                "Respond with just the number, nothing else."
             )
+            
+            # Add temperature-specific path selection advice
+            if env_data.get('temperature_recommendations'):
+                recommendations = env_data['temperature_recommendations']
+                temp_advice = (
+                    f"TEMPERATURE CONSIDERATIONS: Current temperature is {env_data['temperature']:.1f}°C. "
+                    f"Health warning: {recommendations['health_warning']}. "
+                    f"Movement advice: {recommendations['movement']}. "
+                    f"Consider shorter routes if temperature is high to minimize heat exposure. "
+                    f"Avoid steep uphill paths in extreme heat. "
+                )
+                decision_prompt += temp_advice
+            
+            decision_prompt += "Respond with just the number, nothing else."
             
             response = self.brain.decide(decision_prompt)
             
@@ -2507,33 +2505,59 @@ class Resident(BaseAgent):
         # -------- 2) 构造 observation --------
         needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
         
-        # Get environmental context
+        # Get environmental context with temperature recommendations
         env_context = ""
+        temp_recommendations = ""
         if hasattr(self.model, 'get_environmental_context'):
             env_data = self.model.get_environmental_context()
             env_context = (
                 f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
                 f"time period: {env_data['time_period']}. "
             )
+            
+            # Add temperature-based behavioral recommendations
+            if env_data.get('temperature_recommendations'):
+                recommendations = env_data['temperature_recommendations']
+                temp_recommendations = (
+                    f"TEMPERATURE ADVISORY: {recommendations['health_warning']}. "
+                    f"Movement: {recommendations['movement']}. "
+                    f"Activity level: {recommendations['activity_level']}. "
+                    f"Preferred locations: {recommendations['preferred_locations']}. "
+                    f"Time preferences: {recommendations['time_preferences']}. "
+                )
         
         observation = (
             "Current needs => " + needs_summary + ". "
-            + env_context +
+            + env_context + temp_recommendations +
             "Accessible POIs (first 20) => " + json.dumps(accessible_info) + "."
         )
 
         # -------- 3) 与 LLM 交互 --------
         try:
             self.brain.observe(observation)
-            reply = self.brain.decide(
-                (
-                    "Decide your next movement considering current environmental conditions. "
-                    "Respond STRICTLY in JSON with keys: "
-                    "'action' (move|home|stay) and, if action=='move', 'target_poi_id' (integer). "
-                    "Consider weather, temperature, and time of day in your decision. "
-                    "Do NOT output anything except the JSON object."
-                )
+            # Enhanced decision prompt with temperature recommendations
+            base_prompt = (
+                "Decide your next movement considering current environmental conditions. "
+                "Respond STRICTLY in JSON with keys: "
+                "'action' (move|home|stay) and, if action=='move', 'target_poi_id' (integer). "
+                "Consider weather, temperature, and time of day in your decision. "
             )
+            
+            # Add temperature-specific decision guidance
+            if env_data.get('temperature_recommendations'):
+                recommendations = env_data['temperature_recommendations']
+                temp_guidance = (
+                    f"IMPORTANT: Current temperature is {env_data['temperature']:.1f}°C. "
+                    f"Health warning: {recommendations['health_warning']}. "
+                    f"Movement advice: {recommendations['movement']}. "
+                    f"Preferred locations: {recommendations['preferred_locations']}. "
+                    f"Consider these factors in your decision. "
+                )
+                base_prompt += temp_guidance
+            
+            base_prompt += "Do NOT output anything except the JSON object."
+            
+            reply = self.brain.decide(base_prompt)
         except Exception as _e:
             self.logger.error(f"Concordia brain error: {_e}")
             return self._choose_need_based_target()

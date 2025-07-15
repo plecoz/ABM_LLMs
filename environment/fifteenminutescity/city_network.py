@@ -32,14 +32,8 @@ def load_city_network(place_name="Macau, China", mode="walk"):
     )
     
     # Add elevation data for slope calculation
-    try:
-        print("Fetching elevation data for slope calculation...")
-        graph = ox.elevation.add_node_elevations_raster(graph, raster_path=None, cpus=1)
-        graph = ox.elevation.add_edge_grades(graph)
-        print("✓ Added elevation and slope data")
-    except Exception as e:
-        print(f"⚠ Could not add elevation data: {e}")
-        print("  Will use OSM incline tags only")
+    print("No elevation raster or API available; will use OSM incline tags only")
+    # Do NOT call add_node_elevations_raster or add_edge_grades
     
     # Verify conversion and check data coverage
     print(f"Graph loaded with {len(graph.nodes())} nodes and {len(graph.edges())} edges")

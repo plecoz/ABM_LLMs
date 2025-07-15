@@ -509,6 +509,14 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Display path selection analysis
         if hasattr(model, 'display_path_selection_summary'):
             model.display_path_selection_summary()
+        
+        # Display temperature statistics
+        if hasattr(model, 'display_temperature_statistics'):
+            model.display_temperature_statistics()
+        
+        # Display heatwave statistics (removed - functionality not implemented)
+        # if hasattr(model, 'display_heatwave_statistics'):
+        #     model.display_heatwave_statistics()
     else:
         # Run simulation with visualization
         if interactive:
@@ -553,6 +561,14 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Display path selection analysis for visualization mode too
         if hasattr(model, 'display_path_selection_summary'):
             model.display_path_selection_summary()
+        
+        # Display temperature statistics for visualization mode too
+        if hasattr(model, 'display_temperature_statistics'):
+            model.display_temperature_statistics()
+        
+        # Display heatwave statistics for visualization mode too (removed - functionality not implemented)
+        # if hasattr(model, 'display_heatwave_statistics'):
+        #     model.display_heatwave_statistics()
     
     # Save JSON report if requested (works for both modes)
     if save_json_report:
@@ -568,8 +584,8 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
     parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=5, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
-    parser.add_argument('--threshold', type=int, default=100, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
+    parser.add_argument('--steps', type=int, default=1, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
     
@@ -578,8 +594,8 @@ if __name__ == "__main__":
     #--parishes "Taipa" "Coloane" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
-    parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='llms', help='Method for generating resident needs (default: random)')
-    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random', 'llms'], default='llms', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) or llms (agents move to POIs based on LLM instructions) (default: need-based)')
+    parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
+    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random', 'llms'], default='random', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) or llms (agents move to POIs based on LLM instructions) (default: need-based)')
     
     # Save/Load arguments for faster testing
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
