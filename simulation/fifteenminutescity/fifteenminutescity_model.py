@@ -1318,14 +1318,21 @@ class FifteenMinuteCity(Model):
         Get current environmental context for use by agents.
         
         Returns:
-            dict: Environmental context including temperature and time period
+            dict: Environmental context including temperature, time period, and behavioral recommendations
         """
-        return {
+        context = {
             'temperature': self.temperature,
             'time_period': self.time_period,
             'hour': self.hour_of_day,
             'weather_description': self._get_weather_description()
         }
+        
+        # Add temperature-based recommendations for agent behavior
+        recommendations = self._get_temperature_recommendations()
+        if recommendations:
+            context['temperature_recommendations'] = recommendations
+        
+        return context
     
     def _get_weather_description(self):
         """
@@ -1350,6 +1357,56 @@ class FifteenMinuteCity(Model):
             return "hot"
         else:
             return "very hot"
+    
+    def _get_temperature_recommendations(self):
+        """
+        Get behavioral recommendations based on current temperature.
+        
+        Returns:
+            dict: Recommendations for different aspects of behavior, or None if no special recommendations
+        """
+        temp = self.temperature
+        
+        # Default recommendations (normal conditions)
+        recommendations = {
+            'movement': 'normal',
+            'activity_level': 'normal',
+            'preferred_locations': 'any',
+            'time_preferences': 'any',
+            'health_warning': 'none'
+        }
+        
+        # Temperature-based recommendations
+        if temp > 40:  # Extreme heat
+            recommendations.update({
+                'movement': 'minimize outdoor travel',
+                'activity_level': 'reduce physical activity',
+                'preferred_locations': 'air-conditioned indoor spaces',
+                'time_preferences': 'avoid 10am-6pm',
+                'health_warning': 'heat exhaustion risk'
+            })
+        elif temp > 37:  # Dangerous heat
+            recommendations.update({
+                'movement': 'avoid unnecessary trips',
+                'activity_level': 'light activity only',
+                'preferred_locations': 'indoor or shaded areas',
+                'time_preferences': 'early morning or evening',
+                'health_warning': 'heat stress possible'
+            })
+        elif temp > 33:  # Hot conditions
+            recommendations.update({
+                'movement': 'prefer shorter trips',
+                'activity_level': 'moderate activity',
+                'preferred_locations': 'cool indoor spaces',
+                'time_preferences': 'avoid midday heat',
+                'health_warning': 'stay hydrated'
+            })
+        
+        # Only return recommendations if they're not normal conditions
+        if recommendations['movement'] != 'normal':
+            return recommendations
+        
+        return None
     
     def set_temperature_model_parameters(self, daily_amplitude=6.0, daily_epsilon=2.0, hourly_noise=0.5):
         """
