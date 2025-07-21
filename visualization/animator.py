@@ -5,7 +5,7 @@ from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 from matplotlib import patheffects
 import osmnx as ox
 from .base_plot import BaseMap  # Relative import from same package
-from .agent_plot import AgentPlotter
+
 from .interactive_matplotlib import InteractiveEnhancer, Enhanced3DBuildings
 import numpy as np
 import geopandas as gpd

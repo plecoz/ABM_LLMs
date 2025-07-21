@@ -584,7 +584,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
     parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=1, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--steps', type=int, default=1000, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
