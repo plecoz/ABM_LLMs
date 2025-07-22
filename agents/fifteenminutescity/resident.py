@@ -67,6 +67,23 @@ class Action:
             self.context = {}
 
 class Resident(BaseAgent):
+    """
+    Resident agent representing a person living in the fifteen-minute city.
+    
+    This class is organized into the following modules:
+    1. Initialization and Agent Properties
+    2. Path Selection and Travel
+    3. Movement and Target Selection  
+    4. Needs Management
+    5. Action System
+    6. Memory and State Management
+    7. Main Step Logic
+    """
+    
+    # =====================================================================
+    # 1. INITIALIZATION AND AGENT PROPERTIES MODULE
+    # =====================================================================
+    
     def __init__(self, model, unique_id, geometry, home_node, accessible_nodes, **kwargs):
         """
         Initialize a resident agent.
@@ -248,7 +265,16 @@ class Resident(BaseAgent):
             'concordia_decisions': 0,  # Times Concordia brain made the decision
             'fallback_decisions': 0   # Times fallback was used
         }
+        
+        # Social interaction attributes
+        self.social_propensity = random.uniform(0.3, 0.8)  # Individual social tendency
+        self.contacts = set()  # Set of agent IDs for social connections
+        self.interaction_history = []  # List of interaction records
 
+    # =====================================================================
+    # AGENT PROPERTY GENERATION METHODS
+    # =====================================================================
+    
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
                                  city=None, industry_distribution=None, occupation_distribution=None, 
@@ -654,6 +680,10 @@ class Resident(BaseAgent):
         # Concordia Brain (LLM) integration
         # ---------------------------------------------------
 
+    # =====================================================================
+    # 2. PATH SELECTION AND TRAVEL MODULE
+    # =====================================================================
+    
     def calculate_travel_time(self, from_node, to_node):
         """
         Calculate the travel time between two nodes based on age-class-specific step sizes.
@@ -1111,6 +1141,10 @@ class Resident(BaseAgent):
         
         return True
 
+    # =====================================================================
+    # 3. MOVEMENT AND TARGET SELECTION MODULE
+    # =====================================================================
+    
     def move_to_poi(self, poi_id):
         """
         Move to a specific POI by its unique ID.
@@ -1143,6 +1177,10 @@ class Resident(BaseAgent):
         # Start traveling to the POI
         return self.start_travel(target_poi.node_id, target_poi.geometry)
 
+    # =====================================================================
+    # 4. NEEDS MANAGEMENT MODULE
+    # =====================================================================
+    
     def get_need_to_poi_mapping(self):
         """
         Map needs to POI types that can satisfy them.
@@ -1501,7 +1539,7 @@ class Resident(BaseAgent):
                 else:
                     # Removed debug print
                     pass
-                # If target_poi_type is None, resident stays put this step
+                                 # If target_poi_type is None, resident stays put this step
             
             # Record needs snapshot periodically (every 15 minutes)
             if self.model.step_count % 15 == 0:
@@ -1516,38 +1554,10 @@ class Resident(BaseAgent):
             import traceback
             traceback.print_exc()
 
-    def record_needs_snapshot(self):
-        """
-        Record a snapshot of the current needs for historical tracking and analysis.
-        This is called periodically (every 15 minutes) to track how needs evolve over time.
-        """
-        snapshot = {
-            'step': self.model.step_count,
-            'time_info': self.model.get_current_time(),
-            'needs': self.current_needs.copy(),
-            'location': {
-                'current_node': self.current_node,
-                'parish': self.parish,
-                'traveling': self.traveling,
-                'performing_action': self.performing_action
-            }
-        }
-        
-        # Add current action info if performing an action
-        if self.performing_action and self.current_action:
-            snapshot['current_action'] = {
-                'action_type': self.current_action.action_type.value,
-                'poi_type': self.current_action.poi_type,
-                'time_remaining': self.action_time_remaining
-            }
-        
-        # Store in memory for historical tracking
-        self.memory['historical_needs'].append(snapshot)
-        
-        # Optional: Log high-need situations for debugging
-        high_needs = {need: value for need, value in self.current_needs.items() if value >= 80}
-        if high_needs:
-            self.logger.debug(f"Agent {self.unique_id} has high needs: {high_needs}")
+
+
+        # ===============================================Action module===============================================
+
 
     def _select_action_at_poi(self, poi_agent, waiting_time):
         """
@@ -1767,55 +1777,7 @@ class Resident(BaseAgent):
                 other_agent.contacts.add(self.unique_id)
                 self.logger.info(f"New social connection formed between {self.unique_id} and {other_agent.unique_id}")
 
-    def _make_random_movement_decision(self):
-        """
-        Make a random movement decision.
-        Uses the existing random movement logic but with step-level decision making.
-        
-        Returns:
-            POI ID to move to, 'home' to go home, or None to stay put
-        """
-        # Simple probability check for random movement
-        if random.random() > 0.7:  # 70% chance to stay put for random movement
-            if self.model.step_count % 60 == 0:  # Debug every hour
-                print(f"DEBUG Random Movement - Resident {self.unique_id}: Staying put")
-            return None
-        
-        # Use existing random target selection
-        target = self._choose_random_target()
-        if target is None and self.current_node != self.home_node:
-            # No suitable POI available and not at home - force going home
-            if self.model.step_count % 60 == 0:  # Debug every hour
-                print(f"DEBUG Random Movement - Resident {self.unique_id}: No POI available, going home")
-            return 'home'
-        return target
 
-    def _make_need_based_movement_decision(self):
-        """
-        Make a need-based movement decision.
-        This is where we can later add sophisticated need hierarchy and POI attractiveness.
-        
-        Returns:
-            POI ID to move to, 'home' to go home, or None to stay put
-        """
-        # Update current needs
-        
-        
-        return None
-
-    def _make_llm_movement_decision(self):
-        """Make an LLM-based movement decision."""
-        # Removed debug print
-        
-        # Check if we have a brain
-        if not hasattr(self, 'brain') or self.brain is None:
-            # Removed debug print
-            return self._make_need_based_movement_decision()
-        
-        # Removed debug print
-        target = self._choose_llm_based_target()
-        # Removed debug print
-        return target
 
 
 
@@ -2624,3 +2586,215 @@ class Resident(BaseAgent):
         # 未识别 action，回退
         self.logger.warning(f"Unknown action from LLM: {decision}")
         return self._choose_need_based_target()
+    
+    # MOVEMENT DECISION WRAPPERS
+    def _make_random_movement_decision(self):
+        """
+        Make a random movement decision.
+        Uses the existing random movement logic but with step-level decision making.
+        
+        Returns:
+            POI ID to move to, 'home' to go home, or None to stay put
+        """
+        # Simple probability check for random movement
+        if random.random() > 0.7:  # 70% chance to stay put for random movement
+            if self.model.step_count % 60 == 0:  # Debug every hour
+                print(f"DEBUG Random Movement - Resident {self.unique_id}: Staying put")
+            return None
+        
+        # Use existing random target selection
+        target = self._choose_random_target()
+        if target is None and self.current_node != self.home_node:
+            # No suitable POI available and not at home - force going home
+            if self.model.step_count % 60 == 0:  # Debug every hour
+                print(f"DEBUG Random Movement - Resident {self.unique_id}: No POI available, going home")
+            return 'home'
+        return target
+
+    def _make_need_based_movement_decision(self):
+        """
+        Make a need-based movement decision.
+        This is where we can later add sophisticated need hierarchy and POI attractiveness.
+        
+        Returns:
+            POI ID to move to, 'home' to go home, or None to stay put
+        """
+        # Update current needs
+        
+        
+        return None
+
+    def _make_llm_movement_decision(self):
+        """Make an LLM-based movement decision."""
+        # Removed debug print
+        
+        # Check if we have a brain
+        if not hasattr(self, 'brain') or self.brain is None:
+            # Removed debug print
+            return self._make_need_based_movement_decision()
+        
+        # Removed debug print
+        target = self._choose_llm_based_target()
+        # Removed debug print
+        return target
+
+    # =====================================================================
+    # 4. NEEDS MANAGEMENT MODULE
+    # =====================================================================
+    
+    def _satisfy_needs_at_poi(self, poi_type):
+        """
+        Satisfy needs when visiting a POI of a specific type.
+        
+        Args:
+            poi_type: The type of POI being visited
+        """
+        need_mapping = self.get_need_to_poi_mapping()
+        
+        # Find which needs this POI type can satisfy
+        for need_type, poi_types in need_mapping.items():
+            if poi_type in poi_types:
+                # Satisfy this need
+                satisfaction_amount = random.randint(20, 40)  # Random satisfaction between 20-40
+                self.satisfy_need_at_poi(need_type, satisfaction_amount)
+
+    # =====================================================================
+    # 6. MEMORY AND STATE MANAGEMENT MODULE
+    # =====================================================================
+    
+    def record_needs_snapshot(self):
+        """
+        Record a snapshot of the current needs for historical tracking and analysis.
+        This is called periodically (every 15 minutes) to track how needs evolve over time.
+        """
+        snapshot = {
+            'step': self.model.step_count,
+            'time_info': self.model.get_current_time(),
+            'needs': self.current_needs.copy(),
+            'location': {
+                'current_node': self.current_node,
+                'parish': self.parish,
+                'traveling': self.traveling,
+                'performing_action': self.performing_action
+            }
+        }
+        
+        # Add current action info if performing an action
+        if self.performing_action and self.current_action:
+            snapshot['current_action'] = {
+                'action_type': self.current_action.action_type.value,
+                'poi_type': self.current_action.poi_type,
+                'time_remaining': self.action_time_remaining
+            }
+        
+        # Store in memory for historical tracking
+        self.memory['historical_needs'].append(snapshot)
+        
+        # Optional: Log high-need situations for debugging
+        high_needs = {need: value for need, value in self.current_needs.items() if value >= 80}
+        if high_needs:
+            self.logger.debug(f"Agent {self.unique_id} has high needs: {high_needs}")
+
+    def get_memory(self):
+        """Return the resident's memory (income and visited POIs)."""
+        return self.memory
+    
+    def get_path_selection_stats(self):
+        """Return the resident's path selection statistics."""
+        return self.path_selection_stats.copy()
+    
+    def get_non_shortest_path_percentage(self):
+        """
+        Calculate the percentage of times this resident did not select the shortest path.
+        
+        Returns:
+            Dictionary with percentage and counts, or None if no multi-path decisions made
+        """
+        if self.path_selection_stats['total_multi_path_decisions'] == 0:
+            return None
+        
+        percentage = (self.path_selection_stats['shortest_path_not_selected'] / 
+                     self.path_selection_stats['total_multi_path_decisions']) * 100
+        
+        return {
+            'percentage': percentage,
+            'non_shortest_selected': self.path_selection_stats['shortest_path_not_selected'],
+            'total_multi_path_decisions': self.path_selection_stats['total_multi_path_decisions'],
+            'concordia_decisions': self.path_selection_stats['concordia_decisions'],
+            'fallback_decisions': self.path_selection_stats['fallback_decisions']
+        }
+
+    def get_parish_info(self):
+        """
+        Get information about the agent's parish.
+        
+        Returns:
+            Dictionary with parish details or None if no parish assigned
+        """
+        if not self.parish:
+            return None
+            
+        return {
+            "parish_name": self.parish,
+            "home_location": (self.geometry.x, self.geometry.y),
+            "demographic_info": {
+                "age": self.age,
+                "age_class": self.attributes['age_class'],
+                "gender": self.attributes['gender'],
+                "income": self.attributes['income'],
+                "education": self.attributes['education'],
+                "employment_status": self.employment_status,
+                "household_type": self.household_type
+            }
+        }
+
+    def _update_emotional_state_from_poi_visit(self, poi_type, poi_agent):
+        """
+        Update emotional state based on a POI visit.
+        
+        Args:
+            poi_type: The type of POI visited
+            poi_agent: The POI agent visited
+        """
+        try:
+            # Determine satisfaction based on POI type and waiting time
+            base_satisfaction = 0.7  # Default satisfaction
+            
+            # Adjust satisfaction based on POI type
+            poi_satisfaction_map = {
+                'restaurant': 0.8,
+                'cafe': 0.7,
+                'park': 0.8,
+                'hospital': 0.6,  # Lower satisfaction for healthcare visits
+                'shop': 0.7,
+                'supermarket': 0.6,
+                'library': 0.8,
+                'cinema': 0.9,
+                'gym': 0.8,
+                'school': 0.7
+            }
+            
+            base_satisfaction = poi_satisfaction_map.get(poi_type, 0.7)
+            
+            # Adjust satisfaction based on waiting time
+            if poi_agent and hasattr(poi_agent, 'get_waiting_time'):
+                waiting_time = poi_agent.get_waiting_time()
+                if waiting_time > 30:  # Long wait reduces satisfaction
+                    base_satisfaction *= 0.7
+                elif waiting_time > 15:  # Moderate wait slightly reduces satisfaction
+                    base_satisfaction *= 0.9
+            
+            # Create experience for emotional state update
+            experience = {
+                'type': 'healthcare_visit' if poi_type in ['hospital', 'clinic', 'pharmacy'] else 'service_interaction',
+                'outcome': 'positive' if base_satisfaction > 0.6 else 'neutral',
+                'satisfaction': base_satisfaction,
+                'details': f"Visited {poi_type}"
+            }
+            
+            # Update emotional state through persona memory manager
+            self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
+            
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"Error updating emotional state from POI visit: {e}")
