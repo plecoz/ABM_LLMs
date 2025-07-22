@@ -1,5 +1,4 @@
 from mesa_geo.geoagent import GeoAgent
-from shapely.geometry import Point
 import logging
 import random
 

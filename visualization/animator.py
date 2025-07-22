@@ -1,17 +1,12 @@
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+from matplotlib.patches import FancyArrowPatch
 from matplotlib import patheffects
 import osmnx as ox
-from .base_plot import BaseMap  # Relative import from same package
-
 from .interactive_matplotlib import InteractiveEnhancer, Enhanced3DBuildings
 import numpy as np
-import geopandas as gpd
-import os
 import networkx as nx
-from matplotlib_scalebar.scalebar import ScaleBar
+
 
 
 class SimulationAnimator:

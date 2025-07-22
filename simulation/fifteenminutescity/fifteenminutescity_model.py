@@ -1,4 +1,3 @@
-import mesa
 from mesa import Model
 from mesa.space import NetworkGrid
 import random
@@ -10,14 +9,11 @@ from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 import json
 import logging
-import uuid
 import numpy as np
-import pandas as pd
 from mesa_geo import GeoSpace
 from mesa.datacollection import DataCollector
-import geopandas as gpd
 from outputs import OutputController
-import os  # NEW
+import os  
 
 # Add imports for LLM integration
 from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
@@ -1025,8 +1021,22 @@ class FifteenMinuteCity(Model):
         if not self.llm_enabled or not self.persona_memory_manager:
             return
         
+        # Add comprehensive debug printing for the first agent only
+
+        # print(f"\n🎭 PERSONA ASSIGNMENT TRACE FOR AGENT {resident.unique_id}")
+        # print("=" * 60)
+        # print(f"Agent Demographics:")
+        # print(f"  - Age: {getattr(resident, 'age', 'N/A')}")
+        # print(f"  - Age Class: {getattr(resident, 'age_class', 'N/A')}")
+        # print(f"  - Economic Status: {getattr(resident, 'economic_status', 'N/A')}")
+        # print(f"  - Household Type: {getattr(resident, 'household_type', 'N/A')}")
+        
         # Determine persona type based on resident characteristics
         persona_type = self._determine_persona_type(resident)
+        
+        
+        # print(f"\n🎯 STEP 1: Persona Type Determination")
+        # print(f"  -> Selected Persona Type: {persona_type.value}")
         
         # Create persona profile for the resident
         persona_template, emotional_state = self.persona_memory_manager.create_agent_persona(
@@ -1034,6 +1044,34 @@ class FifteenMinuteCity(Model):
             persona_type=persona_type,
             variation_factor=0.1  # Add some variation to make agents unique
         )
+        
+        
+        # print(f"\n🏗️  STEP 2: Persona Template Creation")
+        # print(f"  -> Template Name: {persona_template.name}")
+        # print(f"  -> Description: {persona_template.description}")
+        # print(f"  -> Core Values: {persona_template.core_values}")
+        # print(f"  -> Risk Tolerance: {persona_template.risk_tolerance}")
+        # print(f"  -> Key Beliefs:")
+        # for key, value in list(persona_template.beliefs.items())[:3]:
+        #     print(f"     - {key}: {value}")
+        # print(f"  -> Behavioral Tendencies (sample):")
+        # for key, value in list(persona_template.behavioral_tendencies.items())[:3]:
+        #     print(f"     - {key}: {value:.2f}")
+            
+        # print(f"\n🎭 STEP 3: Emotional State Initialization")
+        # print(f"  -> Agent ID: {emotional_state.agent_id}")
+        # print(f"  -> Stress Level: {emotional_state.stress_level:.2f}")
+        # print(f"  -> Confidence Level: {emotional_state.confidence_level:.2f}")
+        # print(f"  -> Trust in Healthcare: {emotional_state.trust_in_healthcare:.2f}")
+        # print(f"  -> Current Emotions:")
+        # for emotion, intensity in emotional_state.current_emotions.items():
+        #     print(f"     - {emotion.value}: {intensity:.2f}")
+            
+        # print(f"\n📝 STEP 4: Converting Persona Template to String")
+        # persona_str = str(persona_template)
+        # print(f"  -> String length: {len(persona_str)} characters")
+        # print(f"  -> First 200 characters: {persona_str[:200]}...")
+        # print(f"  -> Last 200 characters: ...{persona_str[-200:]}")
         
         # Store persona information in the resident
         resident.persona_type = persona_type
@@ -1043,6 +1081,30 @@ class FifteenMinuteCity(Model):
         # Sync persona with Concordia brain
         if getattr(resident, "brain", None) is not None:
             resident.brain.set_persona(persona_template)
+            
+            
+            # print(f"  -> Persona set successfully")
+            # print(f"  -> Testing brain with sample observation...")
+                
+            # Test the brain with a sample observation and decision
+            test_observation = "You are at home and need to decide what to do next. The weather is mild."
+            resident.brain.observe(test_observation)
+                
+            test_decision_prompt = "What would you like to do? Respond briefly with your choice."
+            test_response = resident.brain.decide(test_decision_prompt)
+                
+            # print(f"  -> Test Response: {test_response}")
+
+        
+        
+        # print(f"\n✅ PERSONA ASSIGNMENT COMPLETE FOR AGENT {resident.unique_id}")
+        # print("=" * 60)
+        # print(f"Final Agent State:")
+        # print(f"  - persona_type: {resident.persona_type.value}")
+        # print(f"  - persona_template: {type(resident.persona_template).__name__}")
+        # print(f"  - emotional_state: {type(resident.emotional_state).__name__}")
+        # print(f"  - brain available: {hasattr(resident, 'brain') and resident.brain is not None}")
+        # print("=" * 60)
         
         self.logger.debug(f"Assigned persona {persona_type.value} to resident {resident.unique_id}")
     

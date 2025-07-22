@@ -1,6 +1,4 @@
-from mesa.agent import Agent
 from mesa_geo.geoagent import GeoAgent
-from shapely.geometry import Point
 import logging
 
 class BaseAgent(GeoAgent):

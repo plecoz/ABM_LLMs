@@ -1,6 +1,4 @@
 import osmnx as ox
-import networkx as nx
-import geopandas as gpd
 import pickle
 import os
 

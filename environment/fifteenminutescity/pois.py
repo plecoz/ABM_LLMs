@@ -1,5 +1,4 @@
 import osmnx as ox
-import numpy as np
 from shapely.geometry import Point, Polygon
 import geopandas as gpd
 import pickle

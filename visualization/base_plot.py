@@ -1,5 +1,4 @@
 import osmnx as ox
-import matplotlib.pyplot as plt
 
 class BaseMap:
     def __init__(self, graph):

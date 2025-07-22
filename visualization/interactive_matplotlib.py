@@ -5,10 +5,8 @@ Adds zoom, pan, and better building visualization while keeping existing functio
 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib.widgets import Button, CheckButtons
+from matplotlib.widgets import CheckButtons
 import numpy as np
-import geopandas as gpd
-from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 import matplotlib.colors as mcolors
 from shapely.geometry import Point

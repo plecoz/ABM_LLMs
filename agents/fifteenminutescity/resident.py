@@ -1,10 +1,8 @@
-from mesa.agent import Agent
 from agents.base_person_agent import BaseAgent
 import random
 import networkx as nx
 import logging
 import math
-import json
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
@@ -2476,6 +2474,22 @@ class Resident(BaseAgent):
 
         import json
 
+        # Debug tracing for agent 0 only
+        
+        
+        
+        # print(f"\n🤖 CONCORDIA DECISION MAKING TRACE FOR AGENT {self.unique_id}")
+        # print("=" * 60)
+        # print(f"Agent Current State:")
+        # print(f"  - Current Node: {self.current_node}")
+        # print(f"  - Persona Type: {getattr(self, 'persona_type', 'N/A')}")
+        # print(f"  - Current Needs: {dict(self.current_needs)}")
+        # if hasattr(self, 'emotional_state'):
+        #     print(f"  - Stress Level: {self.emotional_state.stress_level:.2f}")
+        #     dominant_emotions = sorted(self.emotional_state.current_emotions.items(), 
+        #                                  key=lambda x: x[1], reverse=True)[:2]
+        #     print(f"  - Dominant Emotions: {[(e.value, round(v,2)) for e,v in dominant_emotions]}")
+
         # -------- 1) 准备可达 POI 列表 --------
         accessible_info = []
         try:
@@ -2532,6 +2546,11 @@ class Resident(BaseAgent):
             "Accessible POIs (first 20) => " + json.dumps(accessible_info) + "."
         )
 
+        
+        # print(f"\n📝 Observation sent to Concordia Brain:")
+        # print(f"  -> Length: {len(observation)} characters")
+        # print(f"  -> Content: {observation[:300]}...")
+
         # -------- 3) 与 LLM 交互 --------
         try:
             self.brain.observe(observation)
@@ -2557,7 +2576,17 @@ class Resident(BaseAgent):
             
             base_prompt += "Do NOT output anything except the JSON object."
             
+            
+            # print(f"\n💭 Decision prompt sent to brain:")
+            # print(f"  -> Prompt: {base_prompt[:200]}...")
+            # print(f"\n🎯 Asking brain to decide...")
+            
             reply = self.brain.decide(base_prompt)
+            
+            
+            # print(f"\n🤖 Brain Response:")
+            # print(f"  -> Raw reply: {reply}")
+                
         except Exception as _e:
             self.logger.error(f"Concordia brain error: {_e}")
             return self._choose_need_based_target()
@@ -2568,6 +2597,9 @@ class Resident(BaseAgent):
         # -------- 4) 解析 JSON --------
         try:
             decision = json.loads(reply)
+            
+            print(f"\n✅ Successfully parsed JSON decision:")
+            print(f"  -> Parsed decision: {decision}")
         except Exception as _e:
             self.logger.warning(f"LLM reply is not valid JSON: {reply} / {_e}")
             return self._choose_need_based_target()

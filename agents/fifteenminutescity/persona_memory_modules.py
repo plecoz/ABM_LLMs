@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
-"""
-Agent Persona & Memory Modules for ABM Healthcare Policy Simulation
 
-This module provides sophisticated persona management and memory systems for LLM-driven agents,
-enabling diverse, realistic behaviors across different stakeholder types in healthcare scenarios.
 
-Components:
-1. Persona Templates: Detailed agent archetypes with roles, goals, and behavioral patterns
-2. Knowledge & Data Bases: RAG-enabled information repositories for contextual decision-making
-3. Emotional & Motivational State Tracker: Dynamic affective and motivational modeling
-"""
-
-import json
 import logging
 import random
 from typing import Dict, List, Any, Optional, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
-import numpy as np
 
 
 class PersonaType(Enum):
