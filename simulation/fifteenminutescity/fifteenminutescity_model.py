@@ -86,6 +86,7 @@ class FifteenMinuteCity(Model):
                 - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
                 - movement_behavior: Agent movement behavior ('need-based' or 'random')
                 - threshold: Time threshold in minutes for accessibility (default: 15 for 15-minute city)
+                - base_temperature: Base temperature in Celsius (default: 25°C)
                 - seed: Random seed for reproducible results (default: 42)
         """
         # Get random seed from kwargs
@@ -108,6 +109,11 @@ class FifteenMinuteCity(Model):
         # Store accessibility threshold (in minutes)
         self.threshold = kwargs.get('threshold', 15)
         self.logger.info(f"Using accessibility threshold: {self.threshold} minutes")
+        
+        # Store base temperature (in Celsius)
+        self.base_temperature = kwargs.get('base_temperature', 25.0)
+        self.logger.info(f"Base temperature: {self.base_temperature}°C" + 
+                        (" - HEATWAVE CONDITIONS" if self.base_temperature >= 35 else ""))
         
         self.graph = graph
         self.pois = pois
@@ -240,9 +246,8 @@ class FifteenMinuteCity(Model):
             'fallback_decisions': 0
         }
         
-        # Environmental context for simulation
-        self.base_temperature = 30.0  # Base/average temperature in Celsius
-        self.temperature = 30.0  # Current temperature in Celsius, default value here, will be updated by the model in step()
+        # Initialize current temperature from base temperature
+        self.temperature = self.base_temperature  # Current temperature in Celsius, will be updated by the model in step()
         self.time_period = "daytime"  # Default time period
         self._auto_update_time_period()  # Set initial time period based on hour
         
@@ -566,6 +571,24 @@ class FifteenMinuteCity(Model):
             # print(f"DEBUG: Exception during economic status loading: {e}")
             self.logger.error(f"Error loading economic status distribution data: {e}")
             self.economic_status_distribution = {}
+
+    def _load_demographics(self, demographics_path):
+        """
+        Load demographic distribution data from a JSON file.
+        Expected format: {
+            "age_distribution": {...},
+            "gender_distribution": {...},
+            "income_distribution": {...},
+            "education_distribution": {...}
+        }
+        """
+        try:
+            with open(demographics_path, 'r') as f:
+                loaded_demographics = json.load(f)
+            self.demographics.update(loaded_demographics)
+            self.logger.info(f"Loaded demographics from {demographics_path}")
+        except Exception as e:
+            self.logger.error(f"Error loading demographics from {demographics_path}: {e}")
 
     def _normalise_string(self, s):  # NEW HELPER
         import re
