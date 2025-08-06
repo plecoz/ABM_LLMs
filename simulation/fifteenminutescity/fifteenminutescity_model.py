@@ -16,7 +16,7 @@ from outputs import OutputController
 import os  
 
 # Add imports for LLM integration
-from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager, PersonaType
+from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager
 
 
 # Set up logging
@@ -1031,18 +1031,15 @@ class FifteenMinuteCity(Model):
         # print(f"  - Economic Status: {getattr(resident, 'economic_status', 'N/A')}")
         # print(f"  - Household Type: {getattr(resident, 'household_type', 'N/A')}")
         
-        # Determine persona type based on resident characteristics
-        persona_type = self._determine_persona_type(resident)
-        
-        
-        # print(f"\n🎯 STEP 1: Persona Type Determination")
-        # print(f"  -> Selected Persona Type: {persona_type.value}")
-        
-        # Create persona profile for the resident
-        persona_template, emotional_state = self.persona_memory_manager.create_agent_persona(
+        # Create simple persona profile based on basic demographics
+        persona, emotional_state = self.persona_memory_manager.create_agent_persona(
             agent_id=str(resident.unique_id),
-            persona_type=persona_type,
-            variation_factor=0.1  # Add some variation to make agents unique
+            demographics={
+                'age': getattr(resident, 'age', 30),
+                'economic_status': getattr(resident, 'economic_status', 'employed'),
+                'household_type': getattr(resident, 'household_type', 'single'),
+                'parish': getattr(resident, 'parish', 'unknown')
+            }
         )
         
         
@@ -1073,14 +1070,15 @@ class FifteenMinuteCity(Model):
         # print(f"  -> First 200 characters: {persona_str[:200]}...")
         # print(f"  -> Last 200 characters: ...{persona_str[-200:]}")
         
-        # Store persona information in the resident
-        resident.persona_type = persona_type
-        resident.persona_template = persona_template
+        # Store simple persona information in the resident
+        resident.persona = persona
         resident.emotional_state = emotional_state
         
         # Sync persona with Concordia brain
         if getattr(resident, "brain", None) is not None:
-            resident.brain.set_persona(persona_template)
+            # Convert simple persona to string for the brain
+            persona_str = f"{persona.name}: {persona.description}"
+            resident.brain.set_persona(persona_str)
             
             
             # print(f"  -> Persona set successfully")
@@ -1106,44 +1104,9 @@ class FifteenMinuteCity(Model):
         # print(f"  - brain available: {hasattr(resident, 'brain') and resident.brain is not None}")
         # print("=" * 60)
         
-        self.logger.debug(f"Assigned persona {persona_type.value} to resident {resident.unique_id}")
+        self.logger.debug(f"Assigned dynamic persona to resident {resident.unique_id}")
     
-    def _determine_persona_type(self, resident):
-        """
-        Determine the appropriate persona type for a resident based on their characteristics.
-        
-        Args:
-            resident: The resident agent
-            
-        Returns:
-            PersonaType enum value
-        """
-        # Determine persona based on age and other characteristics
-        age = getattr(resident, 'age', 30)
-        economic_status = getattr(resident, 'economic_status', 'employed')
-        
-        # Age-based persona assignment with some randomness
-        if age >= 65:
-            return PersonaType.ELDERLY_RESIDENT
-        elif age < 25:
-            if economic_status == 'Inactive' and random.random() < 0.9:
-                return PersonaType.STUDENT
-            # NOTE: PersonaType.UNEMPLOYED 尚未实现，临时回退为 YOUNG_PROFESSIONAL
-            # TODO(agents-team): 实现 UNEMPLOYED persona 后恢复
-            return PersonaType.YOUNG_PROFESSIONAL
-        elif 25 <= age < 45:
-            # For middle-aged adults, consider family status and employment
-            household_type = getattr(resident, 'household_type', 'single')
-            if 'family' in household_type.lower() or 'parent' in household_type.lower():
-                return PersonaType.WORKING_PARENT
-            else:
-                return PersonaType.YOUNG_PROFESSIONAL
-        else:  # 45-64
-            # Could be working parent or professional
-            if random.random() < 0.6:  # 60% chance of being working parent
-                return PersonaType.WORKING_PARENT
-            else:
-                return PersonaType.YOUNG_PROFESSIONAL
+
 
     def _calculate_building_areas(self, buildings_gdf):
         """

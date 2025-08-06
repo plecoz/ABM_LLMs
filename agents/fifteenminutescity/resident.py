@@ -245,7 +245,7 @@ class Resident(BaseAgent):
         # ---------------------------------------------------
         # Concordia Brain (LLM) integration
         # ---------------------------------------------------
-        print(f"🧠 Agent {unique_id}: Initializing brain...")
+        print(f" Agent {unique_id}: Initializing brain...")
         
         # Initialize brain (Concordia integration)
         try:
@@ -699,7 +699,7 @@ class Resident(BaseAgent):
             Number of time steps needed for travel (each step is 1 minute)
         """
         # For LLM-enabled agents, use path selection instead of simple shortest path
-        if self.movement_behavior == 'llms' and hasattr(self.model, 'llm_interaction_layer'):
+        if self.movement_behavior == 'llms':
             return self._calculate_travel_time_with_path_selection(from_node, to_node)
         
         # Standard shortest path calculation for non-LLM agents
@@ -1541,9 +1541,7 @@ class Resident(BaseAgent):
                     pass
                                  # If target_poi_type is None, resident stays put this step
             
-            # Record needs snapshot periodically (every 15 minutes)
-            if self.model.step_count % 15 == 0:
-                self.record_needs_snapshot()
+
             
             # Removed debug print
             
@@ -2170,9 +2168,10 @@ class Resident(BaseAgent):
         Returns:
             Dictionary of base needs for the persona
         """
-        from .persona_memory_modules import PersonaType
+        # Removed PersonaType import - using dynamic persona generation now
         
-        persona_type = getattr(self, 'persona_type', None)
+        # Generate needs based on simple persona if available
+        persona = getattr(self, 'persona', None)
         
         # Default needs
         base_needs = {
@@ -2184,51 +2183,58 @@ class Resident(BaseAgent):
             "education": 15
         }
         
-        if persona_type == PersonaType.ELDERLY_RESIDENT:
-            base_needs.update({
-                "healthcare": 60,  # Higher healthcare needs
-                "social": 45,      # Higher social needs
-                "recreation": 25,  # Lower recreation needs
-                "shopping": 35,    # Moderate shopping needs
-                "hunger": 45,      # Regular hunger needs
-                "education": 10    # Lower education needs
-            })
-        elif persona_type == PersonaType.WORKING_PARENT:
-            base_needs.update({
-                "shopping": 50,    # Higher shopping needs (family)
-                "healthcare": 35,  # Moderate healthcare needs
-                "social": 30,      # Lower social needs (busy)
-                "recreation": 20,  # Lower recreation needs
-                "hunger": 50,      # Higher hunger needs
-                "education": 25    # Moderate education needs (children)
-            })
-        elif persona_type == PersonaType.YOUNG_PROFESSIONAL:
-            base_needs.update({
-                "recreation": 45,  # Higher recreation needs
-                "social": 40,      # Higher social needs
-                "shopping": 35,    # Moderate shopping needs
-                "healthcare": 25,  # Lower healthcare needs
-                "hunger": 40,      # Regular hunger needs
-                "education": 30    # Moderate education needs
-            })
-        elif persona_type == PersonaType.STUDENT:
-            base_needs.update({
-                "education": 55,   # Higher education needs
-                "social": 50,      # Higher social needs
-                "recreation": 40,  # Higher recreation needs
-                "shopping": 20,    # Lower shopping needs (budget)
-                "healthcare": 20,  # Lower healthcare needs
-                "hunger": 45       # Regular hunger needs
-            })
-        elif persona_type == PersonaType.CHRONIC_PATIENT:
-            base_needs.update({
-                "healthcare": 70,  # Very high healthcare needs
-                "social": 40,      # Moderate social needs (support)
-                "recreation": 25,  # Lower recreation needs
-                "shopping": 30,    # Moderate shopping needs
-                "hunger": 40,      # Regular hunger needs
-                "education": 20    # Lower education needs
-            })
+        if persona:
+            # Simple needs based on three basic characteristics
+            age = persona.age
+            household_type = persona.household_type  # 'single', 'family', 'elderly'
+            economic_status = persona.economic_status  # 'low', 'middle', 'high'
+            
+            # Age-based adjustments (simple and interpretable)
+            if household_type == 'elderly':
+                base_needs.update({
+                    "healthcare": 60,  # Higher healthcare needs
+                    "social": 45,      # Higher social needs
+                    "recreation": 25,  # Lower recreation needs
+                    "shopping": 35,    # Regular shopping needs
+                    "hunger": 45,      # Regular hunger needs
+                    "education": 10    # Lower education needs
+                })
+            elif household_type == 'family':
+                base_needs.update({
+                    "shopping": 50,    # Higher shopping needs (family)
+                    "healthcare": 35,  # Moderate healthcare needs
+                    "social": 30,      # Lower social needs (busy)
+                    "recreation": 20,  # Lower recreation needs
+                    "hunger": 50,      # Higher hunger needs
+                    "education": 25    # Moderate education needs (children)
+                })
+            else:  # 'single'
+                if age < 25:
+                    base_needs.update({
+                        "education": 50,   # Higher education needs
+                        "social": 50,      # Higher social needs
+                        "recreation": 40,  # Higher recreation needs
+                        "shopping": 25,    # Moderate shopping needs
+                        "healthcare": 20,  # Lower healthcare needs
+                        "hunger": 45       # Regular hunger needs
+                    })
+                else:  # Working adults
+                    base_needs.update({
+                        "recreation": 45,  # Higher recreation needs
+                        "social": 40,      # Higher social needs
+                        "shopping": 35,    # Moderate shopping needs
+                        "healthcare": 25,  # Lower healthcare needs
+                        "hunger": 40,      # Regular hunger needs
+                        "education": 30    # Moderate education needs
+                    })
+            
+            # Economic status adjustments (simple)
+            if economic_status == 'low':
+                base_needs["shopping"] = max(15, base_needs["shopping"] - 10)  # Reduced shopping
+                base_needs["healthcare"] = max(15, base_needs["healthcare"] - 5)  # Reduced healthcare
+            elif economic_status == 'high':
+                base_needs["recreation"] = min(60, base_needs["recreation"] + 10)  # More recreation
+                base_needs["healthcare"] = min(70, base_needs["healthcare"] + 10)  # Better healthcare
         
         return base_needs
     
@@ -2317,10 +2323,7 @@ class Resident(BaseAgent):
             }
         }
 
-    def get_memory(self):
-        """Return the resident's memory (income and visited POIs)."""
-        return self.memory
-    
+
     def get_path_selection_stats(self):
         """Return the resident's path selection statistics."""
         return self.path_selection_stats.copy()
@@ -2444,7 +2447,7 @@ class Resident(BaseAgent):
         # print("=" * 60)
         # print(f"Agent Current State:")
         # print(f"  - Current Node: {self.current_node}")
-        # print(f"  - Persona Type: {getattr(self, 'persona_type', 'N/A')}")
+        # print(f"  - Persona: {getattr(self, 'persona', None).name if hasattr(self, 'persona') and self.persona else 'N/A'}")
         # print(f"  - Current Needs: {dict(self.current_needs)}")
         # if hasattr(self, 'emotional_state'):
         #     print(f"  - Stress Level: {self.emotional_state.stress_level:.2f}")
@@ -2662,139 +2665,9 @@ class Resident(BaseAgent):
     # 6. MEMORY AND STATE MANAGEMENT MODULE
     # =====================================================================
     
-    def record_needs_snapshot(self):
-        """
-        Record a snapshot of the current needs for historical tracking and analysis.
-        This is called periodically (every 15 minutes) to track how needs evolve over time.
-        """
-        snapshot = {
-            'step': self.model.step_count,
-            'time_info': self.model.get_current_time(),
-            'needs': self.current_needs.copy(),
-            'location': {
-                'current_node': self.current_node,
-                'parish': self.parish,
-                'traveling': self.traveling,
-                'performing_action': self.performing_action
-            }
-        }
-        
-        # Add current action info if performing an action
-        if self.performing_action and self.current_action:
-            snapshot['current_action'] = {
-                'action_type': self.current_action.action_type.value,
-                'poi_type': self.current_action.poi_type,
-                'time_remaining': self.action_time_remaining
-            }
-        
-        # Store in memory for historical tracking
-        self.memory['historical_needs'].append(snapshot)
-        
-        # Optional: Log high-need situations for debugging
-        high_needs = {need: value for need, value in self.current_needs.items() if value >= 80}
-        if high_needs:
-            self.logger.debug(f"Agent {self.unique_id} has high needs: {high_needs}")
 
-    def get_memory(self):
-        """Return the resident's memory (income and visited POIs)."""
-        return self.memory
+
+
+
+
     
-    def get_path_selection_stats(self):
-        """Return the resident's path selection statistics."""
-        return self.path_selection_stats.copy()
-    
-    def get_non_shortest_path_percentage(self):
-        """
-        Calculate the percentage of times this resident did not select the shortest path.
-        
-        Returns:
-            Dictionary with percentage and counts, or None if no multi-path decisions made
-        """
-        if self.path_selection_stats['total_multi_path_decisions'] == 0:
-            return None
-        
-        percentage = (self.path_selection_stats['shortest_path_not_selected'] / 
-                     self.path_selection_stats['total_multi_path_decisions']) * 100
-        
-        return {
-            'percentage': percentage,
-            'non_shortest_selected': self.path_selection_stats['shortest_path_not_selected'],
-            'total_multi_path_decisions': self.path_selection_stats['total_multi_path_decisions'],
-            'concordia_decisions': self.path_selection_stats['concordia_decisions'],
-            'fallback_decisions': self.path_selection_stats['fallback_decisions']
-        }
-
-    def get_parish_info(self):
-        """
-        Get information about the agent's parish.
-        
-        Returns:
-            Dictionary with parish details or None if no parish assigned
-        """
-        if not self.parish:
-            return None
-            
-        return {
-            "parish_name": self.parish,
-            "home_location": (self.geometry.x, self.geometry.y),
-            "demographic_info": {
-                "age": self.age,
-                "age_class": self.attributes['age_class'],
-                "gender": self.attributes['gender'],
-                "income": self.attributes['income'],
-                "education": self.attributes['education'],
-                "employment_status": self.employment_status,
-                "household_type": self.household_type
-            }
-        }
-
-    def _update_emotional_state_from_poi_visit(self, poi_type, poi_agent):
-        """
-        Update emotional state based on a POI visit.
-        
-        Args:
-            poi_type: The type of POI visited
-            poi_agent: The POI agent visited
-        """
-        try:
-            # Determine satisfaction based on POI type and waiting time
-            base_satisfaction = 0.7  # Default satisfaction
-            
-            # Adjust satisfaction based on POI type
-            poi_satisfaction_map = {
-                'restaurant': 0.8,
-                'cafe': 0.7,
-                'park': 0.8,
-                'hospital': 0.6,  # Lower satisfaction for healthcare visits
-                'shop': 0.7,
-                'supermarket': 0.6,
-                'library': 0.8,
-                'cinema': 0.9,
-                'gym': 0.8,
-                'school': 0.7
-            }
-            
-            base_satisfaction = poi_satisfaction_map.get(poi_type, 0.7)
-            
-            # Adjust satisfaction based on waiting time
-            if poi_agent and hasattr(poi_agent, 'get_waiting_time'):
-                waiting_time = poi_agent.get_waiting_time()
-                if waiting_time > 30:  # Long wait reduces satisfaction
-                    base_satisfaction *= 0.7
-                elif waiting_time > 15:  # Moderate wait slightly reduces satisfaction
-                    base_satisfaction *= 0.9
-            
-            # Create experience for emotional state update
-            experience = {
-                'type': 'healthcare_visit' if poi_type in ['hospital', 'clinic', 'pharmacy'] else 'service_interaction',
-                'outcome': 'positive' if base_satisfaction > 0.6 else 'neutral',
-                'satisfaction': base_satisfaction,
-                'details': f"Visited {poi_type}"
-            }
-            
-            # Update emotional state through persona memory manager
-            self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
-            
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"Error updating emotional state from POI visit: {e}")
