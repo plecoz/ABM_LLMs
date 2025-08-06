@@ -1,21 +1,20 @@
-# 15-Minute City Agent-Based Model
+# 15-Minute City Agent-Based Model with LLM Integration
 
-This agent-based model (ABM) simulates urban life within the "15-minute city" concept, where residents can meet their daily needs within a short travel distance from home. The simulation is built using the Mesa framework and leverages real-world geographic data from OpenStreetMap. It is highly configurable and can be adapted to simulate different cities, starting with Macau and Hong Kong.
+This agent-based model (ABM) simulates urban life within the "15-minute city" concept, where residents can meet their daily needs within a short travel distance from home. The simulation is built using the Mesa framework and leverages real-world geographic data from OpenStreetMap. It features **LLM-powered agent decision-making** using GPT models through the Concordia framework for realistic, explainable behavior.
 
 ## Core Features
 
-- **Dynamic Agent Behavior**: Simulates resident agents with unique demographic profiles, needs, and daily behaviors.
-- **Realistic Environment**: Builds the simulation environment from real-world city street networks and Points of Interest (POIs) via OSMnx.
-- **Hierarchical Demographics (Macau)**: Generates agents based on a detailed, hierarchical demographic system: `Parish -> Age Class -> Gender -> Education`.
-- **Employment & Commuting**: Models employment status based on education level (for Macau) and simulates commuting behavior.
-- **Parish/District-Based Simulation**: Can run simulations for an entire city or focus on specific, user-selected parishes (Macau) or districts.
-- **Configurable Scenarios**: Supports different agent need generation models (`random`, `maslow`, etc.) and movement behaviors.
+- **LLM-Powered Agents**: Resident agents use Large Language Models (GPT-4.1-mini) for intelligent decision-making about where to go and what to do
+- **Simple, Explainable Personas**: Agents have clear demographic profiles (age, household type, economic status) that influence their behavior transparently
+- **Realistic Environment**: Builds the simulation environment from real-world city street networks and Points of Interest (POIs) via OSMnx
+- **Dynamic Path Selection**: LLM agents can choose between multiple routes based on their personality and preferences
+- **Parish/District-Based Simulation**: Can run simulations for an entire city or focus on specific, user-selected parishes (Macau) or districts
 - **Advanced Visualization**:
-    - Live animation of agent movements on the city map.
-    - Color-coded POI categories and parish boundaries.
-    - Dynamically adjusting scale bar and a north arrow for geographic context.
-- **Data Output**: Generates a detailed JSON report of the simulation run and a summary of agent travel metrics.
-- **Extensible & Modular**: Designed with a clear project structure to easily add new agent behaviors, cities, or data sources.
+    - Live animation of agent movements on the city map
+    - Color-coded POI categories and parish boundaries
+    - Dynamically adjusting scale bar and a north arrow for geographic context
+- **Data Output**: Generates detailed JSON reports of simulation runs and agent travel metrics
+- **Extensible & Modular**: Designed with a clear project structure to easily add new agent behaviors, cities, or data sources
 
 ---
 
@@ -23,240 +22,282 @@ This agent-based model (ABM) simulates urban life within the "15-minute city" co
 
 ```
 .
-├── agents/               # Agent class definitions
-│   ├── resident.py       # Defines the Resident agent's logic and properties
-│   └── poi.py            # Defines the Point of Interest (POI) agent
-├── data/                 # Shapefiles and demographic data
-│   ├── macau_shapefiles/ # Geographic data for Macau
-│   └── parish_demographic.json # Detailed demographic data for Macau parishes
-├── environment/          # Scripts for building the simulation world
-│   ├── city_network.py   # Handles fetching and loading the street network
-│   └── pois.py           # Handles fetching and filtering POIs
-├── simulation/           # Core simulation logic
-│   └── model.py          # The main Mesa model orchestrating the simulation
-├── visualization/        # Visualization and animation code
-│   └── animator.py       # Manages the Matplotlib animation
-├── main.py               # Main entry point to run the simulation
-└── README.md             # This file
+├── agents/                    # Agent class definitions
+│   ├── fifteenminutescity/
+│   │   ├── resident.py        # Main Resident agent with LLM integration
+│   │   ├── poi.py             # Point of Interest (POI) agent
+│   │   └── persona_memory_modules.py # Simple persona system
+├── brains/
+│   └── concordia_brain.py     # LLM brain wrapper for Concordia integration
+├── config/
+│   └── llm_config.py          # LLM configuration (model, API keys, etc.)
+├── data/                      # Shapefiles and demographic data
+│   ├── macau_shapefiles/      # Geographic data for Macau
+│   └── demographics_macau/    # Demographic distributions for agent generation
+├── environment/               # Scripts for building the simulation world
+│   ├── fifteenminutescity/
+│   │   ├── city_network.py    # Street network handling
+│   │   └── pois.py            # POI fetching and filtering
+├── simulation/                # Core simulation logic
+│   └── fifteenminutescity/
+│       └── fifteenminutescity_model.py # Main Mesa model with persona assignment
+├── visualization/             # Visualization and animation code
+│   └── animator.py            # Matplotlib animation manager
+├── main.py                    # Main entry point
+└── README.md                  # This file
 ```
 
 ---
 
-## Setup & Installation
+## LLM Integration Setup
 
-1.  **Clone the repository:**
-    ```bash
-    git clone <repository_url>
-    cd <repository_name>
-    ```
+### 1. Configure Your LLM Connection
 
-2.  **Install dependencies:**
-    It is recommended to use a virtual environment.
-    ```bash
-    pip install mesa geopandas osmnx matplotlib numpy pandas
-    ```
+Edit `config/llm_config.py`:
+
+```python
+# Model configuration
+PROVIDER = "custom_openai"  # For custom endpoints
+MODEL_NAME = "gpt-4o-mini"  # Or "gpt-4.1-mini", "gpt-3.5-turbo"
+API_KEY = "your-api-key-here"
+BASE_URL = "https://your-api-endpoint.com/v1"  # Optional: custom endpoint
+```
+
+### 2. Set Environment Variable (Recommended)
+
+```bash
+export OPENROUTER_API_KEY="your-api-key-here"
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install mesa geopandas osmnx matplotlib numpy pandas openai
+```
 
 ---
 
 ## How to Run the Simulation
 
-The simulation is run from the command line via `main.py`.
-
-### Basic Example
-
-This will run a default simulation for **Macau** with 100 residents for 100 steps.
+### Basic Example with LLM Agents
 
 ```bash
-python main.py --residents 100 --steps 100
+python main.py --residents 10 --steps 100 --movement-behavior llms
 ```
+
+This runs a simulation with 10 LLM-powered residents for 100 steps (minutes).
 
 ### Command-Line Arguments
 
-You can customize the simulation with the following arguments:
-
 | Argument | Description | Default | Example |
 | :--- | :--- | :--- | :--- |
-| `--residents` | Number of resident agents. | 100 | `--residents 500` |
-| `--steps` | Number of simulation steps to run. | 100 | `--steps 200` |
-| `--city` | Name of the city to simulate. Currently supports parishes data for Macau, Barcelona, and Hong Kong. | 'Macau, China' | `--city "Barcelona, Spain"` |
-| `--parishes` | A list of specific parishes to run the simulation in (for Macau). | (all) | `--parishes "Taipa" "Coloane"` |
-| `--demographics` | Path to the parish demographics JSON file. | `data/parish_demographic.json` | `--demographics path/to/my_data.json` |
-| `--save-json-report` | Save a detailed JSON report of the simulation. | (not set) | `--save-json-report` |
-| `--random-distribution` | Distribute residents randomly across all parishes, ignoring proportions. | (not set) | `--random-distribution` |
-| `--use-dummy-pois` | Use a small set of dummy POIs for faster testing. | (not set) | `--use-dummy-pois` |
-| `--list-parishes` | List all available parishes for the selected city and exit. | (not set) | `--list-parishes` |
-| `--save-network` | Save the downloaded city network to a file. | (not set) | `--save-network path/to/network.pkl` |
-| `--load-network` | Load a pre-saved city network from a file. | (not set) | `--load-network path/to/network.pkl` |
-| `--save-pois` | Save the downloaded POIs to a file. | (not set) | `--save-pois path/to/pois.pkl` |
-| `--load-pois` | Load pre-saved POIs from a file. | (not set) | `--load-pois path/to/pois.pkl` |
-| `--save-buildings` | Save downloaded residential buildings to a file. | (not set) | `--save-buildings path/to/buildings.pkl` |
-| `--load-buildings` | Load pre-saved residential buildings from a file. | (not set) | `--load-buildings path/to/buildings.pkl` |
+| `--residents` | Number of resident agents | 100 | `--residents 50` |
+| `--steps` | Number of simulation steps (minutes) | 100 | `--steps 200` |
+| `--movement-behavior` | Agent movement behavior | 'need-based' | `--movement-behavior llms` |
+| `--needs-selection` | How agents generate needs | 'random' | `--needs-selection llms` |
+| `--city` | City to simulate | 'Macau, China' | `--city "Barcelona, Spain"` |
+| `--parishes` | Specific parishes/districts | (all) | `--parishes "Taipa" "Coloane"` |
+| `--save-json-report` | Save detailed JSON report | (not set) | `--save-json-report` |
 
-### Running a Focused Simulation
+### Movement Behavior Options
 
-To run a simulation for only the "Taipa" and "Coloane" parishes in Macau with 500 residents and save a report:
+- **`need-based`**: Traditional rule-based agent behavior
+- **`llms`**: LLM-powered decision making for both target selection and path choice
+- **`random`**: Random movement for testing
+
+### LLM-Powered Simulation Example
 
 ```bash
-python main.py --residents 500 --steps 150 --parishes "Taipa" "Coloane" --save-json-report
+python main.py --residents 20 --steps 150 --movement-behavior llms --parishes "Taipa" --save-json-report
 ```
 
-To run a simulation for Barcelona's Ciutat Vella district:
+This creates 20 LLM agents in Taipa parish, runs for 150 minutes, and saves a detailed report.
 
-```bash
-python main.py --city "Barcelona, Spain" --parishes "Ciutat Vella" --residents 500 --steps 150
+---
+
+## Agent Persona System
+
+### Simple, Explainable Demographics
+
+Each agent has a clear, interpretable persona based on three key characteristics:
+
+```python
+# Example personas sent to LLM
+"Resident 72y: Age: 72, Household: elderly, Income: middle, Location: Taipa"
+"Resident 35y: Age: 35, Household: family, Income: high, Location: São Lourenço"  
+"Resident 22y: Age: 22, Household: single, Income: low, Location: Coloane"
 ```
 
-### Supported Cities with Parish/District Data
+### Persona Categories
 
-The simulation currently includes district/parish data for the following cities:
+- **Household Type**: `elderly`, `family`, `single`
+- **Economic Status**: `low`, `middle`, `high`
+- **Age**: Actual age number
+- **Location**: Parish/district name
+
+### How Personas Influence Behavior
+
+The LLM interprets these demographics naturally:
+
+- **Elderly agents** → Higher healthcare needs, prefer familiar routes
+- **Family agents** → More shopping trips, efficiency-focused decisions  
+- **Young singles** → More social/recreation activities, willing to try new routes
+- **Low income** → More cost-conscious, fewer recreational trips
+- **High income** → More varied activities, less concerned about distance
+
+---
+
+## Key Implementation Details
+
+### LLM Decision Making
+
+When `--movement-behavior llms` is used:
+
+1. **Target Selection**: LLM chooses where to go based on agent needs and persona
+2. **Path Selection**: If multiple routes exist, LLM chooses based on preferences
+3. **JSON Responses**: Agents return structured decisions like `{"action": "move", "target_poi_id": 147}`
+
+### Realistic Agent Placement
+
+- **Building-Based Homes**: Agents start in real residential buildings
+- **Access Time**: Walking time from building to street network is calculated
+- **Network-Based Movement**: All travel uses real street networks
+
+### Simulation Time Steps
+
+Each step = 1 minute of simulation time:
+1. **Needs Update**: Agent needs increase naturally
+2. **LLM Decision**: If idle, agent asks LLM what to do next
+3. **Movement**: Agent travels toward chosen destination
+4. **Activity**: Agent performs activities at POIs
+
+---
+
+## Explainable AI Features
+
+### Transparent Decision Factors
+
+- **Clear Demographics**: Easy to understand what influences each agent
+- **Simple Categories**: No hidden complexity or black-box personality generation
+- **Direct Causality**: Demographics → Needs → LLM Decision → Behavior
+
+### Debug and Analysis
+
+- **Decision Logging**: See exactly what the LLM decided and why
+- **Path Selection Analysis**: Track when agents choose non-optimal routes
+- **Persona Tracing**: Follow how demographics influence specific decisions
+
+### Research-Friendly
+
+- **Reproducible**: Same demographics produce consistent behavior patterns
+- **Interpretable**: Can explain any agent's behavior in simple terms
+- **Modifiable**: Easy to test how changing demographics affects outcomes
+
+---
+
+## Performance and Rate Limiting
+
+### API Usage
+
+- **Initialization**: 1 API call per agent (sets persona)
+- **Runtime**: 1 API call per decision (when agent chooses new destination)
+- **Path Selection**: Additional calls when multiple routes available
+
+### Optimization Tips
+
+1. **Use GPT-4o-mini**: Faster and higher rate limits than GPT-4
+2. **Fewer Agents**: Start with 10-20 agents to avoid rate limits
+3. **Shorter Simulations**: 100-200 steps for initial testing
+4. **Monitor Logs**: Watch for 429 (rate limit) errors
+
+---
+
+## Supported Cities
+
+The simulation works with any city via OpenStreetMap, with enhanced support for:
 
 1. **Macau, China** (Default)
-   - Includes all parishes: Santo Antonio, So Lzaro, So Loureno, S, Nossa Senhora de Ftima, Taipa, Coloane
-   - Includes detailed demographic data and proportional distribution
+   - Detailed parish boundaries and demographic data
+   - All parishes: Santo Antonio, São Lázaro, São Lourenço, Sé, Nossa Senhora de Fátima, Taipa, Coloane
 
 2. **Barcelona, Spain**
-   - Includes all districts with their administrative boundaries
-   - Use `--list-parishes` to see available districts
+   - District boundaries available
+   - Use `--list-parishes` to see districts
 
 3. **Hong Kong, China**
-   - Includes administrative district boundaries
-   - Use `--list-parishes` to see available districts
-
-For other cities, the simulation will run without parish/district visualization, but all other features (POIs, resident movement, etc.) will work normally.
+   - Administrative district support
+   - Use `--list-parishes` for available areas
 
 ---
 
-## Key Concepts & Implementation Details
+## Adding New Cities
 
-### Realistic Home Initialization & Access Time
+```bash
+# Basic simulation for any city
+python main.py --city "Tokyo, Japan" --movement-behavior llms
 
-To improve simulation realism, agents are no longer placed on abstract street corners.
+# With caching for repeated runs
+python main.py --city "Tokyo, Japan" --save-network data/tokyo_network.pkl --save-pois data/tokyo_pois.pkl
 
-1.  **Initialization in Buildings**: If residential building data is provided (using `--load-buildings`), each resident is initialized at the center of a real residential building within their assigned parish. This provides a far more accurate starting point for their daily activities.
-
-2.  **Access Time Penalty**: The model calculates the distance from the agent's building to the nearest point on the street network. This distance is converted into a time penalty (in minutes) based on the agent's walking speed. This "access time" is automatically added to any journey that starts from or ends at the agent's home, realistically modeling the time it takes to walk from a front door to the street.
-
-This dual approach ensures that both the agent's location and their travel times are more representative of a real urban environment.
-
-### Resident Agent
-
-The `Resident` agent is the core of the simulation. Each resident has a rich set of attributes that guide their behavior:
-
--   **Demographics**: `age`, `age_class`, `gender`, `education`, `income`, `parish`. These are generated from the hierarchical demographic data.
--   **Employment**: For Macau simulations, `employment_status` is probabilistically determined based on the agent's education level. This feature is disabled for other cities.
--   **Needs**: A simple needs system (`hunger`, `social`, `recreation`, etc.) drives the agent's decisions to visit POIs.
--   **Movement**: Agents travel along the real street network. Travel time is calculated in 1-minute steps (assuming an 80-meter walking distance per minute).
-
-### Point of Interest (POI) Agent
-
-POIs are static agents representing real-world locations.
-
--   **Categorization**: POIs are fetched from OpenStreetMap and categorized into:
-    -   `daily_living` (e.g., supermarkets, banks)
-    -   `healthcare` (e.g., hospitals, pharmacies)
-    -   `education` (e.g., schools, universities)
-    -   `entertainment` (e.g., parks, museums)
-    -   `transportation` (e.g., bus stops)
--   **Interaction**: Residents visit POIs to satisfy their needs.
-
-### The Simulation Loop: What Happens in a Step?
-
-Each step of the simulation represents **one minute** of time. When the model advances one step, the following events occur in sequence:
-
-1.  **Time Advancement**: The model's internal clock is updated (e.g., from 8:00 AM to 8:01 AM).
-2.  **Agent Activation (Random Order)**: The scheduler activates each agent (`Resident` and `POI`) one by one in a shuffled, random order to prevent artifacts from fixed activation patterns.
-3.  **Agent `step()` Execution**: Each agent performs its actions for the minute.
-    -   **For a `Resident` agent**:
-        1.  **Needs Increase**: Basic needs like hunger or recreation slightly increase.
-        2.  **Check Activity Status**: The agent checks if it is currently traveling or waiting at a POI.
-        3.  **If Traveling**: `travel_time_remaining` is decremented. If it reaches zero, the agent arrives at its destination.
-        4.  **If Waiting at a POI**: `waiting_time_remaining` is decremented.
-        5.  **If Idle (not traveling or waiting)**: The agent makes a decision.
-            - It evaluates its current needs to decide what to do next.
-            - It may choose to visit a POI to satisfy a need or decide to return home.
-            - Once a destination is chosen, it calculates the path and begins traveling.
-    -   **For a `POI` agent**:
-        1.  **Update Visitors**: It scans the simulation to see which residents are currently at its location.
-        2.  **Update Waiting Time**: It recalculates its internal waiting time based on the number of current visitors and the time of day (peak hours). *Note: This is an internal state; residents do not yet use this information for decision-making.*
-4.  **Data Collection**: The `DataCollector` records the state of the model and each agent at the end of the step for later analysis and for the final JSON report.
-
-This cycle repeats for the specified number of steps, creating a dynamic simulation of urban life.
+# Subsequent runs (much faster)
+python main.py --city "Tokyo, Japan" --load-network data/tokyo_network.pkl --load-pois data/tokyo_pois.pkl --movement-behavior llms
+```
 
 ---
 
-## How to Add a New City
+## Output and Analysis
 
-The simulation is designed to be city-agnostic. To add and simulate a new city (e.g., "Lisbon, Portugal"), follow these steps:
+### Live Visualization
+- Real-time agent movement on city map
+- Color-coded POIs and parish boundaries
+- Agent trails and current locations
 
-1.  **Use the `--city` argument**: The most crucial step is to specify the new city in the command line. OSMnx will automatically download the correct street network.
-    ```bash
-    python main.py --city "Lisbon, Portugal"
-    ```
+### Console Output
+- Agent decision summaries
+- Path selection statistics  
+- API usage and performance metrics
 
-2.  **(Optional but Recommended) Add Building Data**: To enable realistic agent placement, you can download and save the city's residential buildings.
-    -   Run the simulation once with `--save-buildings`.
-    -   `python main.py --city "Lisbon, Portugal" --save-buildings data/lisbon_buildings.pkl`
-    -   Use `--load-buildings` in all future runs.
-
-3.  **(Optional) Add a Districts Shapefile**: To visualize the city's districts or parishes and confine the simulation to specific areas, you need a geographic shapefile (e.g., `.gpkg`, `.shp`).
-    -   Place the shapefile in the `data/` directory (e.g., `data/lisbon_shapefiles/`).
-    -   In `main.py`, update the `CITY_PARISHES_PATHS` dictionary to point to your new file.
-
-4.  **(Optional) Add Demographic Data**: For high-fidelity simulations with realistic agent generation (like in Macau), you can create a demographic JSON file.
-    -   Create a file similar to `data/parish_demographic.json` with age, gender, and education distributions for the new city's districts.
-    -   Use the `--demographics` argument to point the simulation to your new file.
-    -   If no demographic file is provided, residents will be generated with default attributes and distributed randomly (either at building locations or on the network).
-
-5.  **(Recommended) Use Caching Arguments**: For new cities, downloading the network and POIs can be slow. Run the simulation once with `--save-network`, `--save-pois`, and `--save-buildings`, then use the `--load-*` arguments for all subsequent runs to speed up initialization significantly.
-    ```bash
-    # First run (downloads and saves everything)
-    python main.py --city "Lisbon, Portugal" --save-network data/lisbon_network.pkl --save-pois data/lisbon_pois.pkl --save-buildings data/lisbon_buildings.pkl
-
-    # Subsequent runs (loads from file)
-    python main.py --city "Lisbon, Portugal" --load-network data/lisbon_network.pkl --load-pois data/lisbon_pois.pkl --load-buildings data/lisbon_buildings.pkl
-    ```
+### JSON Reports
+```bash
+--save-json-report
+```
+Creates detailed reports with:
+- Complete agent state histories
+- Decision logs and reasoning
+- Path selection analysis
+- Performance metrics
 
 ---
 
-## Unimplemented Features & Future Work
+## Future Enhancements
 
-While the simulation is feature-rich, some attributes in the code are placeholders for future development. This means the variables exist on the agents, but the logic to fully use them is not yet implemented. Your contributions are welcome!
+### Short Term
+- **Multi-modal transport**: LLM agents choosing between walking/transit
+- **Social interactions**: Agents influencing each other's decisions
+- **Dynamic POI capacity**: Agents avoiding crowded locations
 
--   **POI Capacity and Waiting Times**:
-    -   The `poi.py` agent has `capacity` and `current_waiting_time` attributes.
-    -   **Current State**: POIs calculate a waiting time based on visitor count, but **residents do not yet consider this information** when deciding which POI to visit. They will travel to a POI regardless of how "full" it is or how long the wait is.
-    -   **Future Goal**: Implement logic for residents to query POI waiting times and choose less crowded options.
-
--   **Agent Energy**:
-    -   The `resident.py` agent has commented-out code for an `energy` mechanic.
-    -   **Current State**: This feature is **completely inactive**. Residents can travel indefinitely without needing to return home to rest.
-    -   **Future Goal**: Activate the energy system to require agents to return home, adding a layer of realism to their daily schedules.
-
--   **Dynamic Needs & Satisfaction**:
-    -   The `dynamic_needs` attribute in `resident.py` is a placeholder.
-    -   **Current State**: Needs increase at a constant, linear rate. Visiting a POI satisfies a fixed amount of a need.
-    -   **Future Goal**: Develop a more complex system where needs change based on activities, time of day, and social interactions.
-
--   **Advanced Social Networking**:
-    -   Agents have a `social_network` attribute and can identify nearby agents.
-    -   **Current State**: The logic for forming and leveraging these social networks for decision-making (e.g., visiting a POI together) is minimal.
-    -   **Future Goal**: Build out social behaviors, allowing agents to influence each other's decisions.
-
--   **Deeper Economic Model**:
-    -   Agents have `income` and `employment_status`.
-    -   **Current State**: These attributes are purely descriptive and do not affect agent behavior. There is no model for spending money or prices at POIs.
-    -   **Future Goal**: Implement an economic layer where agents have budgets and POIs have prices, influencing choices.
-
--   **Multi-Modal Transport**:
-    -   **Current State**: All agents currently walk at a speed determined by their age.
-    -   **Future Goal**: Add other transport modes like using public transit (by interacting with `transportation` POIs), or cycling.
+### Long Term  
+- **Economic modeling**: Budget constraints affecting LLM decisions
+- **Learning agents**: Agents that remember and adapt behavior
+- **Multi-agent coordination**: Group decision making
 
 ---
 
-## Simulation Output
+## Contributing
 
-The simulation provides output in three main ways:
+This simulation is designed for research into explainable AI in urban modeling. Contributions welcome for:
 
-1.  **Live Visualization**: A Matplotlib window shows the real-time movement of agents on the city map.
-2.  **Console Output**: At the end of the simulation, a summary of agent travel statistics (total trips, average distance, etc.) is printed to the console.
-3.  **JSON Report** (optional): If you use the `--save-json-report` flag, a `simulation_report.json` file is created, containing a complete snapshot of every agent's state at the end of the simulation, including their location history.
+- New LLM providers and models
+- Additional demographic factors
+- Enhanced decision logging and analysis
+- Performance optimizations
+
+---
+
+## Research Applications
+
+- **Urban Planning**: Test how different demographics respond to city changes
+- **Policy Analysis**: Model impact of new services or infrastructure  
+- **AI Explainability**: Study how simple demographics drive complex behavior
+- **Transportation**: Analyze route choice and travel patterns
+- **Social Simulation**: Understand community dynamics and interactions
