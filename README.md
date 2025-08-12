@@ -65,15 +65,15 @@ BASE_URL = "https://your-api-endpoint.com/v1"  # Optional: custom endpoint
 
 ### 2. Set Environment Variable (Recommended)
 
-```bash
+    ```bash
 export OPENROUTER_API_KEY="your-api-key-here"
-```
+    ```
 
 ### 3. Install Dependencies
 
-```bash
+    ```bash
 pip install mesa geopandas osmnx matplotlib numpy pandas openai
-```
+    ```
 
 ---
 
@@ -258,7 +258,7 @@ python main.py --city "Tokyo, Japan" --load-network data/tokyo_network.pkl --loa
 - API usage and performance metrics
 
 ### JSON Reports
-```bash
+    ```bash
 --save-json-report
 ```
 Creates detailed reports with:
