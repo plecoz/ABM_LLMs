@@ -1135,77 +1135,6 @@ class Resident(BaseAgent):
         # Start traveling to the POI
         return self.start_travel(target_poi.node_id, target_poi.geometry)
 
-    # =====================================================================
-    # 4. NEEDS MANAGEMENT MODULE
-    # =====================================================================
-
-    def get_need_to_poi_mapping(self):
-        """
-        Map needs to POI types that can satisfy them.
-        
-        Returns:
-            Dictionary mapping need types to lists of POI types
-        """
-        return {
-            "hunger": ["restaurant", "cafe", "fast_food", "food_court", "bar", "pub"],
-            "social": ["restaurant", "cafe", "bar", "pub", "community_centre", "place_of_worship", "park"],
-            "recreation": ["park", "cinema", "theatre", "sports_centre", "museum", "library", "tourist_attraction", "casino"],
-            "shopping": ["shop", "supermarket", "mall", "marketplace", "department_store"],
-            "healthcare": ["hospital", "clinic", "pharmacy", "dentist", "doctor"],
-            "education": ["school", "university", "college", "library", "training_centre"]
-        }
-
-    def find_highest_need(self):
-        """
-        Find the need with the highest value.
-        
-        Returns:
-            Tuple of (need_type, need_value) for the highest need
-        """
-        if not self.current_needs:
-            return None, 0
-        
-        highest_need = max(self.current_needs.items(), key=lambda x: x[1])
-        return highest_need
-
-    def find_poi_for_need(self, need_type):
-        """
-        Find available POI types that can satisfy a specific need.
-        
-        Args:
-            need_type: The type of need to satisfy
-            
-        Returns:
-            List of available POI types that can satisfy the need
-        """
-        need_mapping = self.get_need_to_poi_mapping()
-        possible_poi_types = need_mapping.get(need_type, [])
-        
-        # Filter to only POI types that actually exist in the model
-        available_poi_types = []
-        
-        # Check POI agents first
-        if hasattr(self.model, 'poi_agents') and self.model.poi_agents:
-            existing_poi_types = set(poi.poi_type for poi in self.model.poi_agents)
-            available_poi_types.extend([poi_type for poi_type in possible_poi_types if poi_type in existing_poi_types])
-        
-        # Fall back to POI dictionary if no POI agents
-        if not available_poi_types and hasattr(self.model, 'pois') and self.model.pois:
-            existing_poi_types = set(self.model.pois.keys())
-            available_poi_types.extend([poi_type for poi_type in possible_poi_types if poi_type in existing_poi_types])
-        
-        return available_poi_types
-
-    def satisfy_need_at_poi(self, need_type, satisfaction_amount=30):
-        """
-        Reduce a need when visiting a POI that satisfies it.
-        
-        Args:
-            need_type: The type of need being satisfied
-            satisfaction_amount: How much the need is reduced (default: 30)
-        """
-        if need_type in self.current_needs:
-            self.current_needs[need_type] = max(0, self.current_needs[need_type] - satisfaction_amount)
 
     def choose_movement_target(self):
         """Choose a movement target based on the configured movement behavior."""
@@ -1225,15 +1154,6 @@ class Resident(BaseAgent):
                 return 'home'
             return target
 
-    def _choose_need_based_target(self):
-        """
-        Choose movement target based on current needs.
-        
-        Returns:
-            POI type to move to, or None if no suitable POI found
-        """
-        
-        return None
 
     def _choose_random_target(self):
         """
@@ -1273,10 +1193,6 @@ class Resident(BaseAgent):
         else:
             print(f"Agent {self.unique_id}: No brain found"	)
             pass
-
-        # Concordia unavailable – fall back to need-based behaviour
-        # Removed debug print
-        return self._choose_need_based_target()
     
 
     
@@ -1332,34 +1248,6 @@ class Resident(BaseAgent):
         except Exception as e:
             self.logger.error(f"Error parsing LLM decision: {e}, decision: {decision}")
             return None
-
-    def _satisfy_needs_at_poi(self, poi_type):
-        """
-        Satisfy needs when visiting a POI of a specific type.
-        
-        Args:
-            poi_type: The type of POI being visited
-        """
-        need_mapping = self.get_need_to_poi_mapping()
-        
-        # Find which needs this POI type can satisfy
-        for need_type, poi_types in need_mapping.items():
-            if poi_type in poi_types:
-                # Satisfy this need
-                satisfaction_amount = random.randint(20, 40)  # Random satisfaction between 20-40
-                self.satisfy_need_at_poi(need_type, satisfaction_amount)
-
-    def increase_needs_over_time(self):
-        """
-        Gradually increase needs over time to simulate natural need accumulation.
-        With 1-minute time steps, needs increase more slowly.
-        """
-        # Only increase needs every 15 minutes (every 15 steps) to avoid too rapid changes
-        if self.model.step_count % 15 == 0:
-            for need_type in self.current_needs:
-                # Increase each need by a small random amount (1-3 points per 15 minutes)
-                increase = random.randint(1, 3)
-                self.current_needs[need_type] = min(100, self.current_needs[need_type] + increase)
 
     def step(self):
         """Simplified step method using action system"""
@@ -1460,9 +1348,6 @@ class Resident(BaseAgent):
             # No current action - decide what to do next
             self._decide_next_action()
             
-
-            
-                    # Removed debug print
                     
         except Exception as e:
                     # Removed debug print
@@ -1806,95 +1691,6 @@ class Resident(BaseAgent):
         self.current_action = None
         self.action_time_remaining = 0
 
-    def _get_poi_socialness_factor(self, poi_type: str) -> float:
-        """Get a factor representing how 'social' a POI type is."""
-        social_pois = {
-            # High socialness
-            "cafe": 1.5, "bar": 1.5, "pub": 1.5, "community_centre": 1.5, "park": 1.4,
-            # Medium socialness
-            "restaurant": 1.2, "library": 1.1, "gym": 1.1, "sports_centre": 1.1,
-            # Low socialness
-            "shop": 0.8, "supermarket": 0.7, "mall": 0.8,
-            # Very low socialness
-            "hospital": 0.5, "clinic": 0.5, "pharmacy": 0.4, "bank": 0.6
-        }
-        return social_pois.get(poi_type, 1.0) # Default to 1.0
-
-    def _check_for_social_interaction(self):
-        """Check for and execute social interactions with co-located agents."""
-        if not self.performing_action or not self.current_action.poi_id:
-            return
-
-        # Get the POI agent where the action is happening
-        poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
-        if not poi_agent or len(poi_agent.visitors) < 2:
-            return
-
-        # Don't check at every single step. Chance to check is proportional to social_propensity.
-        if random.random() > (self.social_propensity * 0.1): # e.g., 5% chance per step for 0.5 propensity
-            return
-
-        # Check for interactions with other visitors
-        for other_agent_id in poi_agent.visitors:
-            if other_agent_id == self.unique_id:
-                continue
-
-            other_agent = self.model.get_agent_by_id(other_agent_id)
-            if not other_agent or not isinstance(other_agent, Resident):
-                continue
-
-            # --- Calculate Interaction Score ---
-            # 1. Base score from POI socialness
-            interaction_score = self._get_poi_socialness_factor(poi_agent.poi_type)
-
-            # 2. Boost score if already in contacts
-            if other_agent_id in self.contacts:
-                interaction_score *= 5.0
-            
-            # 3. Boost score based on homophily (age similarity)
-            age_difference = abs(self.age - other_agent.age)
-            age_factor = max(0, 1 - (age_difference / 20)) # 1.0 if same age, 0.0 if 20+ years apart
-            interaction_score *= (1 + age_factor)
-
-            # 4. Factor in this agent's social propensity
-            interaction_score *= self.social_propensity
-
-            # --- Decide if Interaction Happens ---
-            # Interaction happens if score > random threshold (e.g., 1.5)
-            if interaction_score > (random.random() * 5 + 1.0): # Threshold between 1.0 and 6.0
-                self._execute_social_interaction(other_agent)
-                # Only one interaction per check to keep it simple
-                break
-    
-    def _execute_social_interaction(self, other_agent):
-        """Execute the outcomes of a social interaction."""
-        self.logger.info(f"Agent {self.unique_id} is interacting with {other_agent.unique_id}")
-
-        # Increment the model's interaction counter
-        # Each agent involved increments it by 0.5 to make 1 full interaction.
-        self.model.interactions_this_step += 0.5
-
-        # 1. Record the interaction
-        timestamp = self.model.step_count
-        interaction = {'type': 'social', 'with': other_agent.unique_id, 'timestamp': timestamp}
-        self.interaction_history.append(interaction)
-        other_agent.interaction_history.append({'type': 'social', 'with': self.unique_id, 'timestamp': timestamp})
-
-        # 2. Update social needs (decrease them)
-        satisfaction = random.randint(10, 25)
-        self.satisfy_need_at_poi('social', satisfaction)
-        other_agent.satisfy_need_at_poi('social', satisfaction)
-
-        # 3. Form a new connection if they are strangers
-        if other_agent.unique_id not in self.contacts:
-            if random.random() < 0.25: # 25% chance to form a lasting connection
-                self.contacts.add(other_agent.unique_id)
-                other_agent.contacts.add(self.unique_id)
-                self.logger.info(f"New social connection formed between {self.unique_id} and {other_agent.unique_id}")
-
-
-
-
 
     def _select_path_with_llm(self, path_options, from_node, to_node):
         """
@@ -2163,259 +1959,7 @@ class Resident(BaseAgent):
         return path1 == path2
 
     
-    def generate_needs(self, method=None):
-        """
-        Generate needs for the resident based on the specified method.
-        
-        Args:
-            method: The method to use for generating needs. If None, uses self.needs_selection.
-                   Options: 'random', 'maslow', 'capability', 'llms'
-                   
-        Returns:
-            Dictionary of generated needs
-        """
-        if method is None:
-            method = self.needs_selection
-        
-        if method == 'random':
-            return self._generate_needs_random()
-        elif method == 'maslow':
-            return self._generate_needs_maslow()
-        elif method == 'capability':
-            return self._generate_needs_capability()
-        elif method == 'llms':
-            return self._generate_needs_llms()
-        else:
-            # Default to random if unknown method
-            return self._generate_needs_random()
-    
-    def _generate_needs_random(self):
-        """
-        Generate needs randomly.
-        
-        Returns:
-            Dictionary of randomly generated needs
-        """
-        needs = {}
-        for need_type in self.dynamic_needs.keys():
-            # Generate random need level between 0 and 100
-            needs[need_type] = random.randint(0, 100)
-        
-        return needs
-    
-    def _generate_needs_maslow(self):
-        """
-        Generate needs based on Maslow's hierarchy of needs.
-        Prioritizes basic needs first, then higher-level needs.
-        
-        Returns:
-            Dictionary of needs based on Maslow's hierarchy
-        """
-        needs = {}
-
-        
-        return needs
-    
-    def _generate_needs_capability(self):
-        """
-        Generate needs based on capability approach (Sen/Nussbaum).
-        Focuses on what people are able to do and be.
-        
-        Returns:
-            Dictionary of needs based on capability approach
-        """
-        needs = {}
-
-        
-        return needs
-    
-    def _generate_needs_llms(self):
-        """
-        Generate needs using LLM-inspired approach.
-        Uses persona template and emotional state for more realistic need generation.
-        
-        Returns:
-            Dictionary of needs based on LLM-inspired reasoning
-        """
-        needs = {}
-        
-        # Initialize with base needs
-        for need_type in self.dynamic_needs.keys():
-            needs[need_type] = 0
-        
-        # Check if persona components are available
-        if not hasattr(self, 'persona_template') or not hasattr(self, 'emotional_state'):
-            # Fall back to random generation if persona not available
-            return self._generate_needs_random()
-        
-        try:
-            # Get persona-specific needs based on persona type
-            persona_needs = self._get_persona_based_needs()
-            
-            # Adjust needs based on emotional state
-            emotional_adjustments = self._get_emotional_need_adjustments()
-            
-            # Combine persona needs with emotional adjustments
-            for need_type in needs.keys():
-                base_need = persona_needs.get(need_type, 30)  # Default moderate need
-                emotional_modifier = emotional_adjustments.get(need_type, 1.0)
-                
-                # Apply emotional modifier
-                adjusted_need = base_need * emotional_modifier
-                
-                # Add some randomness for variability
-                random_factor = random.uniform(0.8, 1.2)
-                final_need = adjusted_need * random_factor
-                
-                # Clamp to valid range
-                needs[need_type] = max(0, min(100, int(final_need)))
-            
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"Error in LLM needs generation: {e}")
-            # Fall back to random generation
-            return self._generate_needs_random()
-        
-        return needs
-    
-    def _get_persona_based_needs(self):
-        """
-        Get base needs based on persona type.
-        
-        Returns:
-            Dictionary of base needs for the persona
-        """
-        # Removed PersonaType import - using dynamic persona generation now
-        
-        # Generate needs based on simple persona if available
-        persona = getattr(self, 'persona', None)
-        
-        # Default needs
-        base_needs = {
-            "hunger": 40,
-            "social": 35,
-            "recreation": 30,
-            "shopping": 25,
-            "healthcare": 20,
-            "education": 15
-        }
-        
-        if persona:
-            # Simple needs based on three basic characteristics
-            age = persona.age
-            household_type = persona.household_type  # 'single', 'family', 'elderly'
-            economic_status = persona.economic_status  # 'low', 'middle', 'high'
-            
-            # Age-based adjustments (simple and interpretable)
-            if household_type == 'elderly':
-            base_needs.update({
-                "healthcare": 60,  # Higher healthcare needs
-                "social": 45,      # Higher social needs
-                "recreation": 25,  # Lower recreation needs
-                    "shopping": 35,    # Regular shopping needs
-                "hunger": 45,      # Regular hunger needs
-                "education": 10    # Lower education needs
-            })
-            elif household_type == 'family':
-            base_needs.update({
-                "shopping": 50,    # Higher shopping needs (family)
-                "healthcare": 35,  # Moderate healthcare needs
-                "social": 30,      # Lower social needs (busy)
-                "recreation": 20,  # Lower recreation needs
-                "hunger": 50,      # Higher hunger needs
-                "education": 25    # Moderate education needs (children)
-            })
-            else:  # 'single'
-                if age < 25:
-            base_needs.update({
-                        "education": 50,   # Higher education needs
-                "social": 50,      # Higher social needs
-                "recreation": 40,  # Higher recreation needs
-                        "shopping": 25,    # Moderate shopping needs
-                "healthcare": 20,  # Lower healthcare needs
-                "hunger": 45       # Regular hunger needs
-            })
-                else:  # Working adults
-            base_needs.update({
-                        "recreation": 45,  # Higher recreation needs
-                        "social": 40,      # Higher social needs
-                        "shopping": 35,    # Moderate shopping needs
-                        "healthcare": 25,  # Lower healthcare needs
-                "hunger": 40,      # Regular hunger needs
-                        "education": 30    # Moderate education needs
-                    })
-            
-            # Economic status adjustments (simple)
-            if economic_status == 'low':
-                base_needs["shopping"] = max(15, base_needs["shopping"] - 10)  # Reduced shopping
-                base_needs["healthcare"] = max(15, base_needs["healthcare"] - 5)  # Reduced healthcare
-            elif economic_status == 'high':
-                base_needs["recreation"] = min(60, base_needs["recreation"] + 10)  # More recreation
-                base_needs["healthcare"] = min(70, base_needs["healthcare"] + 10)  # Better healthcare
-        
-        return base_needs
-    
-    def _get_emotional_need_adjustments(self):
-        """
-        Get need adjustments based on current emotional state.
-        
-        Returns:
-            Dictionary of multipliers for each need type
-        """
-        adjustments = {
-            "hunger": 1.0,
-            "social": 1.0,
-            "recreation": 1.0,
-            "shopping": 1.0,
-            "healthcare": 1.0,
-            "education": 1.0
-        }
-        
-        if not hasattr(self, 'emotional_state'):
-            return adjustments
-        
-        try:
-            # Get dominant emotion and stress level
-            emotions = self.emotional_state.current_emotions
-            stress_level = self.emotional_state.stress_level
-            
-            # Find dominant emotion
-            if emotions:
-                dominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
-                
-                # Adjust needs based on dominant emotion
-                from .persona_memory_modules import EmotionalState
-                
-                if dominant_emotion == EmotionalState.STRESSED:
-                    adjustments["recreation"] *= 1.3  # More recreation when stressed
-                    adjustments["social"] *= 0.8      # Less social when stressed
-                    adjustments["healthcare"] *= 1.2  # More healthcare when stressed
-                elif dominant_emotion == EmotionalState.ANXIOUS:
-                    adjustments["healthcare"] *= 1.4  # More healthcare when anxious
-                    adjustments["social"] *= 1.2      # More social support when anxious
-                elif dominant_emotion == EmotionalState.FRUSTRATED:
-                    adjustments["recreation"] *= 1.2  # More recreation when frustrated
-                    adjustments["shopping"] *= 1.1    # Slight increase in shopping (retail therapy)
-                elif dominant_emotion == EmotionalState.SATISFIED:
-                    adjustments["recreation"] *= 0.9  # Less urgent recreation when satisfied
-                    adjustments["social"] *= 1.1      # More social when satisfied
-                elif dominant_emotion == EmotionalState.WORRIED:
-                    adjustments["healthcare"] *= 1.3  # More healthcare when worried
-                    adjustments["social"] *= 1.2      # More social support when worried
-            
-            # Adjust based on stress level
-            if stress_level > 0.7:  # High stress
-                adjustments["recreation"] *= 1.2
-                adjustments["healthcare"] *= 1.1
-            elif stress_level < 0.3:  # Low stress
-                adjustments["recreation"] *= 0.9
-                
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"Error in emotional need adjustments: {e}")
-        
-        return adjustments
-            
+         
     def get_parish_info(self):
         """
         Get information about the agent's parish.
@@ -2486,62 +2030,6 @@ class Resident(BaseAgent):
         
         # Start traveling home
         return self.start_travel(self.home_node, home_geometry)
-
-    def _update_emotional_state_from_poi_visit(self, poi_type, poi_agent):
-        """
-        Update emotional state based on a POI visit.
-        
-        Args:
-            poi_type: The type of POI visited
-            poi_agent: The POI agent visited
-        """
-        try:
-            # Determine satisfaction based on POI type and waiting time
-            base_satisfaction = 0.7  # Default satisfaction
-            
-            # Adjust satisfaction based on POI type
-            poi_satisfaction_map = {
-                'restaurant': 0.8,
-                'cafe': 0.7,
-                'park': 0.8,
-                'hospital': 0.6,  # Lower satisfaction for healthcare visits
-                'shop': 0.7,
-                'supermarket': 0.6,
-                'library': 0.8,
-                'cinema': 0.9,
-                'gym': 0.8,
-                'school': 0.7
-            }
-            
-            base_satisfaction = poi_satisfaction_map.get(poi_type, 0.7)
-            
-            # Adjust satisfaction based on waiting time
-            if poi_agent and hasattr(poi_agent, 'get_waiting_time'):
-                waiting_time = poi_agent.get_waiting_time()
-                if waiting_time > 30:  # Long wait reduces satisfaction
-                    base_satisfaction *= 0.7
-                elif waiting_time > 15:  # Moderate wait slightly reduces satisfaction
-                    base_satisfaction *= 0.9
-            
-            # Create experience for emotional state update
-            experience = {
-                'type': 'healthcare_visit' if poi_type in ['hospital', 'clinic', 'pharmacy'] else 'service_interaction',
-                'outcome': 'positive' if base_satisfaction > 0.6 else 'neutral',
-                'satisfaction': base_satisfaction,
-                'details': f"Visited {poi_type}"
-            }
-            
-            # Update emotional state through persona memory manager
-            self.model.persona_memory_manager.update_agent_experience(str(self.unique_id), experience)
-            
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"Error updating emotional state from POI visit: {e}")
-
-
-
-
-
 
     def _choose_concordia_based_target(self):
         """Use the embedded Concordia brain to select a movement target.
@@ -2729,59 +2217,7 @@ class Resident(BaseAgent):
             if self.model.step_count % 60 == 0:  # Debug every hour
                 print(f"DEBUG Random Movement - Resident {self.unique_id}: No POI available, going home")
             return 'home'
-        return target
-
-    def _make_need_based_movement_decision(self):
-        """
-        Make a need-based movement decision.
-        This is where we can later add sophisticated need hierarchy and POI attractiveness.
-        
-        Returns:
-            POI ID to move to, 'home' to go home, or None to stay put
-        """
-        # Update current needs
-        
-        
-        return None
-
-    def _make_llm_movement_decision(self):
-        """Make an LLM-based movement decision."""
-        # Removed debug print
-        
-        # Check if we have a brain
-        if not hasattr(self, 'brain') or self.brain is None:
-            # Removed debug print
-            return self._make_need_based_movement_decision()
-        
-        # Removed debug print
-        target = self._choose_llm_based_target()
-        # Removed debug print
-        return target
-
-    # =====================================================================
-    # 4. NEEDS MANAGEMENT MODULE
-    # =====================================================================
-    
-    def _satisfy_needs_at_poi(self, poi_type):
-        """
-        Satisfy needs when visiting a POI of a specific type.
-        
-        Args:
-            poi_type: The type of POI being visited
-        """
-        need_mapping = self.get_need_to_poi_mapping()
-        
-        # Find which needs this POI type can satisfy
-        for need_type, poi_types in need_mapping.items():
-            if poi_type in poi_types:
-                # Satisfy this need
-                satisfaction_amount = random.randint(20, 40)  # Random satisfaction between 20-40
-                self.satisfy_need_at_poi(need_type, satisfaction_amount)
-
-    # =====================================================================
-    # 6. MEMORY AND STATE MANAGEMENT MODULE
-    # =====================================================================
-    
+        return target   
 
 
 
