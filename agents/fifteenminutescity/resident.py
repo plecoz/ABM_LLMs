@@ -6,65 +6,13 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
 from enum import Enum
+from datetime import datetime
+import copy
 
 import re
 from brains.concordia_brain import ConcordiaBrain
+from agents.action_system import Action, get_available_actions, EVERYDAY_ACTIONS
 
-class ActionType(Enum):
-    """Types of actions residents can perform"""
-    # Basic actions (always available)
-    WAITING = "waiting"
-    TRAVELING = "traveling"
-    SLEEPING = "sleeping"
-    
-    # POI-specific actions
-    EATING = "eating"
-    SHOPPING = "shopping"
-    WORKING = "working"
-    STUDYING = "studying"
-    EXERCISING = "exercising"
-    SOCIALIZING = "socializing"
-    HEALTHCARE = "healthcare"
-    ENTERTAINMENT = "entertainment"
-    WORSHIP = "worship"
-    BANKING = "banking"
-    
-    # Granular actions (for detailed simulations)
-    TALKING = "talking"
-    READING = "reading"
-    WATCHING_MOVIE = "watching_movie"
-    DOING_BUSINESS = "doing_business"
-    BROWSING = "browsing"
-    CONSULTING = "consulting"
-    PRAYING = "praying"
-    PLAYING = "playing"
-
-class ActionGranularity(Enum):
-    """Granularity levels for action simulation"""
-    SIMPLE = "simple"      # Just waiting times
-    BASIC = "basic"        # Basic action types (eating, shopping, etc.)
-    DETAILED = "detailed"  # Granular actions (talking, browsing, etc.)
-
-@dataclass
-class Action:
-    """Represents an action being performed by a resident"""
-    action_type: ActionType
-    duration: int  # Duration in time steps (minutes)
-    poi_type: Optional[str] = None
-    poi_id: Optional[int] = None
-    description: Optional[str] = None
-    needs_satisfied: Optional[Dict[str, int]] = None
-    social_interaction: bool = False
-    other_agents: Optional[List[int]] = None
-    context: Optional[Dict[str, Any]] = None
-    
-    def __post_init__(self):
-        if self.needs_satisfied is None:
-            self.needs_satisfied = {}
-        if self.other_agents is None:
-            self.other_agents = []
-        if self.context is None:
-            self.context = {}
 
 class Resident(BaseAgent):
     """
@@ -194,11 +142,21 @@ class Resident(BaseAgent):
         self.destination_node = None
         self.destination_geometry = None
         
-        # Action system (replaces simple waiting)
+        # Simple action system
         self.performing_action = False
-        self.current_action = None  # Current action being performed
+        self.current_action: Optional[Action] = None  # Current action being performed
         self.action_time_remaining = 0
-        self.action_history = []  # Track completed actions
+        self.action_memory = []  # List of (action_name, timestamp) tuples - complete history
+        self.is_employed = kwargs.get('economic_status', 'employed') == 'employed'
+        
+        # Energy and money
+        
+        self.daily_income = kwargs.get('daily_income', 200.0 if self.is_employed else 50.0)  # Daily income
+        self.money = self.daily_income  # Start with one day's income
+        self.last_paid_day = -1  # Track last day we received income
+        
+        # Health status
+        self.health_status = "sane"  # "sane", "sick", or "cured"
         
         # Path selection for LLM agents
         self.selected_travel_path = None  # Store the path selected by LLM
@@ -274,7 +232,7 @@ class Resident(BaseAgent):
     # =====================================================================
     # AGENT PROPERTY GENERATION METHODS
     # =====================================================================
-    
+
     @staticmethod
     def _generate_agent_properties(parish=None, demographics=None, parish_demographics=None, 
                                  city=None, industry_distribution=None, occupation_distribution=None, 
@@ -683,7 +641,7 @@ class Resident(BaseAgent):
     # =====================================================================
     # 2. PATH SELECTION AND TRAVEL MODULE
     # =====================================================================
-    
+
     def calculate_travel_time(self, from_node, to_node):
         """
         Calculate the travel time between two nodes based on age-class-specific step sizes.
@@ -1144,7 +1102,7 @@ class Resident(BaseAgent):
     # =====================================================================
     # 3. MOVEMENT AND TARGET SELECTION MODULE
     # =====================================================================
-    
+
     def move_to_poi(self, poi_id):
         """
         Move to a specific POI by its unique ID.
@@ -1180,7 +1138,7 @@ class Resident(BaseAgent):
     # =====================================================================
     # 4. NEEDS MANAGEMENT MODULE
     # =====================================================================
-    
+
     def get_need_to_poi_mapping(self):
         """
         Map needs to POI types that can satisfy them.
@@ -1404,16 +1362,18 @@ class Resident(BaseAgent):
                 self.current_needs[need_type] = min(100, self.current_needs[need_type] + increase)
 
     def step(self):
-        """Advance the agent one step"""
-        # Removed debug print
+        """Simplified step method using action system"""
         
         try:
             super().step()
-            # Removed debug print
             
-            # Increase needs over time
-            self.increase_needs_over_time()
-            # Removed debug print
+            # Check for daily income payment
+            current_day = getattr(self.model, 'day_count', 0)
+            if current_day > self.last_paid_day:
+                self.money += self.daily_income
+                self.last_paid_day = current_day
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"Received daily income: ${self.daily_income:.0f} (Total: ${self.money:.0f})")
             
             # Handle ongoing travel
             if self.traveling:
@@ -1487,72 +1447,229 @@ class Resident(BaseAgent):
                 # Removed debug print
                 return
             
-            # Handle ongoing actions at POIs
-            if self.performing_action:
-                # Removed debug print
-                self.action_time_remaining -= 1
+            # Handle ongoing action
+            if self.current_action:
+                self.current_action.remaining_minutes -= 1
                 
-                # While performing an action, check for social interactions
-                self._check_for_social_interaction()
-                
-                # Check if action is finished
-                if self.action_time_remaining <= 0:
-                    self._complete_current_action()
-                
-                # Still performing action, don't take any other movement actions
-                # Removed debug print
+                # Check if action is complete
+                if self.current_action.remaining_minutes <= 0:
+                    self._complete_action()
+                    self.current_action = None
                 return
             
-            # === MOVEMENT DECISION MAKING ===
-            # This is where all movement decisions are made based on the movement behavior
-            if not self.traveling:
-                # Removed debug print
-                target_poi = None
-                
-                if self.movement_behavior == 'random':
-                    # Removed debug print
-                    # Random movement - use existing simple logic
-                    target_poi = self._make_random_movement_decision()
-                    
-                elif self.movement_behavior == 'need-based':
-                    # Removed debug print
-                    # Need-based movement - use existing logic but centralized here
-                    target_poi = self._make_need_based_movement_decision()
-                    
-                elif self.movement_behavior == 'llms':
-                    # Removed debug print
-                    # LLM-based movement - placeholder for future sophisticated decision making
-                    target_poi = self._make_llm_movement_decision()
-                else:
-                    # Removed debug print
-                    target_poi = self._make_need_based_movement_decision()
-                
-                # Removed debug print
-                
-                # Execute the movement decision
-                if target_poi == 'home':
-                    # Removed debug print
-                    self.go_home()
-                elif target_poi:
-                    # Removed debug print
-                    self.move_to_poi(target_poi)
-                else:
-                    # Removed debug print
-                    pass
-                                 # If target_poi_type is None, resident stays put this step
+            # No current action - decide what to do next
+            self._decide_next_action()
             
 
             
-            # Removed debug print
-            
+                    # Removed debug print
+                    
         except Exception as e:
-            # Removed debug print
+                    # Removed debug print
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
             import traceback
             traceback.print_exc()
 
 
+
+    # =====================================================================
+    # ACTION SYSTEM METHODS
+    # =====================================================================
+    
+    def _decide_next_action(self):
+        """Decide the next action to take using the action system."""
+        
+        # Get current context
+        hour = self.model.hour_of_day
+        temperature = self.model.temperature if hasattr(self.model, 'temperature') else 25.0
+        
+        # Get available actions
+        available_actions = get_available_actions(
+            hour=hour,
+            is_employed=self.is_employed,
+            money=self.daily_income
+        )
+        
+        if not available_actions:
+            # No actions available - just rest
+            self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
+            return
+        
+        # Use LLM if available, otherwise use simple logic
+        if self.brain and self.movement_behavior == 'llms':
+            action_name = self._llm_decide_action(available_actions, temperature)
+                else:
+            action_name = self._simple_decide_action(available_actions, hour)
+        
+        # Start the selected action
+        if action_name and action_name in available_actions:
+            self._start_action(copy.deepcopy(available_actions[action_name]))
+        else:
+            # Fallback to rest
+            self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
+    
+    def _llm_decide_action(self, available_actions: Dict[str, Action], temperature: float) -> Optional[str]:
+        """Use LLM to decide next action."""
+        
+        # Build memory summary
+        memory_summary = "No recent actions"
+        if self.action_memory:
+            recent = self.action_memory[-5:]  # Last 5 actions
+            memory_summary = "Recent actions: " + ", ".join([f"{action} at {time}" for action, time in recent])
+        
+        # Create observation
+        observation = (
+            f"Current state: Money=${self.money:.0f}, Health={self.health_status}, "
+            f"Hour={self.model.hour_of_day}, Temperature={temperature:.1f}°C. "
+            f"{memory_summary}. "
+            f"Available actions: {list(available_actions.keys())}"
+        )
+        
+        # Ask LLM to decide
+        try:
+            self.brain.observe(observation)
+            
+            prompt = (
+                "Choose your next action considering your money, health status, time of day, "
+                f"and temperature ({temperature:.1f}°C). "
+                f"Available actions: {list(available_actions.keys())}. "
+                "Respond with ONLY the action name, nothing else."
+            )
+            
+            response = self.brain.decide(prompt)
+            
+            # Extract action name from response
+            if response:
+                # Clean the response
+                action_name = response.strip().lower().replace('"', '').replace("'", "")
+                
+                # Check if it's valid
+                if action_name in available_actions:
+                    if hasattr(self, 'logger'):
+                        self.logger.info(f"LLM chose action: {action_name}")
+                    return action_name
+            
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"LLM decision error: {e}")
+
+    
+    def _start_action(self, action: Action):
+        """Start executing an action."""
+        
+        self.current_action = action
+        self.current_action.start_time = datetime.now()
+        self.current_action.remaining_minutes = action.duration_minutes
+        
+        # Find appropriate POI for action location
+        target_poi = self._find_poi_for_action(action.location_type)
+        
+        if target_poi and action.location_type != "home":
+            self.current_action.target_poi_id = target_poi.unique_id
+            
+            # Move to POI if not already there
+            if target_poi.node_id != self.current_node:
+                self.move_to_poi(target_poi.unique_id)
+                
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"Starting action '{action.name}' at POI {target_poi.unique_id}")
+        else:
+            # Do action at current location (home or current node)
+            if action.location_type == "home" and self.current_node != self.home_node:
+                self.go_home()
+            
+            if hasattr(self, 'logger'):
+                self.logger.info(f"Starting action '{action.name}' at current location")
+    
+    def _complete_action(self):
+        """Complete the current action and update state."""
+        
+        if not self.current_action:
+            return
+        
+        # Update agent state
+        self.money += self.current_action.cost
+        
+        # Store in memory with timestamp
+        current_time = f"Day {self.model.day_count + 1} {self.model.hour_of_day:02d}:{self.model.step_count % 60:02d}"
+        self.action_memory.append((self.current_action.name, current_time))
+        
+        if hasattr(self, 'logger'):
+            self.logger.info(f"Completed action '{self.current_action.name}' "
+                           f"(Money: ${self.money:.0f})")
+    
+    def _find_poi_for_action(self, location_type: str) -> Optional[Any]:
+        """
+        Find an appropriate POI for the action location type.
+        Uses logical matching based on POI types.
+        """
+        
+        if location_type == "home":
+            return None  # Stay at home node
+        
+        if location_type == "workplace":
+            # Find office/workplace POIs, or use random node as fallback
+            if hasattr(self.model, 'poi_agents'):
+                for poi in self.model.poi_agents:
+                    poi_type = getattr(poi, 'poi_type', '').lower()
+                    if any(x in poi_type for x in ['office', 'workplace', 'business', 'company']):
+                        if poi.node_id in self.accessible_nodes:
+                            return poi
+            
+            # Fallback: use a random accessible node as workplace
+            if self.accessible_nodes:
+                work_node = random.choice(list(self.accessible_nodes.keys()))
+                # Create a simple POI-like object
+                class WorkplacePOI:
+                    def __init__(self, node_id):
+                        self.unique_id = f"workplace_{node_id}"
+                        self.node_id = node_id
+                return WorkplacePOI(work_node)
+        
+        # For other locations, find matching POI type
+        if hasattr(self.model, 'poi_agents'):
+            matching_pois = []
+            
+            for poi in self.model.poi_agents:
+                # Only consider accessible POIs
+                if poi.node_id not in self.accessible_nodes:
+                    continue
+                    
+                poi_type = getattr(poi, 'poi_type', '').lower()
+                
+                # Logical matching based on location type
+                if location_type == "restaurant":
+                    if any(x in poi_type for x in ['restaurant', 'cafe', 'food', 'diner', 'bistro']):
+                        matching_pois.append(poi)
+                        
+                elif location_type == "supermarket":
+                    if any(x in poi_type for x in ['supermarket', 'grocery', 'market', 'store']):
+                        matching_pois.append(poi)
+                        
+                elif location_type == "park":
+                    if any(x in poi_type for x in ['park', 'garden', 'square', 'green']):
+                        matching_pois.append(poi)
+                        
+                elif location_type == "cafe":
+                    if any(x in poi_type for x in ['cafe', 'coffee', 'tea', 'bakery']):
+                        matching_pois.append(poi)
+                        
+                elif location_type == "entertainment":
+                    if any(x in poi_type for x in ['cinema', 'theater', 'museum', 'entertainment', 'casino']):
+                        matching_pois.append(poi)
+            
+            if matching_pois:
+                # Choose closest POI if multiple matches
+                if len(matching_pois) > 1:
+                    # Try to find closest based on travel time
+                    best_poi = min(matching_pois, 
+                                 key=lambda p: self.accessible_nodes.get(p.node_id, float('inf')))
+                    return best_poi
+                else:
+                    return matching_pois[0]
+        
+        return None
 
         # ===============================================Action module===============================================
 
@@ -2191,40 +2308,40 @@ class Resident(BaseAgent):
             
             # Age-based adjustments (simple and interpretable)
             if household_type == 'elderly':
-                base_needs.update({
-                    "healthcare": 60,  # Higher healthcare needs
-                    "social": 45,      # Higher social needs
-                    "recreation": 25,  # Lower recreation needs
+            base_needs.update({
+                "healthcare": 60,  # Higher healthcare needs
+                "social": 45,      # Higher social needs
+                "recreation": 25,  # Lower recreation needs
                     "shopping": 35,    # Regular shopping needs
-                    "hunger": 45,      # Regular hunger needs
-                    "education": 10    # Lower education needs
-                })
+                "hunger": 45,      # Regular hunger needs
+                "education": 10    # Lower education needs
+            })
             elif household_type == 'family':
-                base_needs.update({
-                    "shopping": 50,    # Higher shopping needs (family)
-                    "healthcare": 35,  # Moderate healthcare needs
-                    "social": 30,      # Lower social needs (busy)
-                    "recreation": 20,  # Lower recreation needs
-                    "hunger": 50,      # Higher hunger needs
-                    "education": 25    # Moderate education needs (children)
-                })
+            base_needs.update({
+                "shopping": 50,    # Higher shopping needs (family)
+                "healthcare": 35,  # Moderate healthcare needs
+                "social": 30,      # Lower social needs (busy)
+                "recreation": 20,  # Lower recreation needs
+                "hunger": 50,      # Higher hunger needs
+                "education": 25    # Moderate education needs (children)
+            })
             else:  # 'single'
                 if age < 25:
-                    base_needs.update({
+            base_needs.update({
                         "education": 50,   # Higher education needs
-                        "social": 50,      # Higher social needs
-                        "recreation": 40,  # Higher recreation needs
+                "social": 50,      # Higher social needs
+                "recreation": 40,  # Higher recreation needs
                         "shopping": 25,    # Moderate shopping needs
-                        "healthcare": 20,  # Lower healthcare needs
-                        "hunger": 45       # Regular hunger needs
-                    })
+                "healthcare": 20,  # Lower healthcare needs
+                "hunger": 45       # Regular hunger needs
+            })
                 else:  # Working adults
-                    base_needs.update({
+            base_needs.update({
                         "recreation": 45,  # Higher recreation needs
                         "social": 40,      # Higher social needs
                         "shopping": 35,    # Moderate shopping needs
                         "healthcare": 25,  # Lower healthcare needs
-                        "hunger": 40,      # Regular hunger needs
+                "hunger": 40,      # Regular hunger needs
                         "education": 30    # Moderate education needs
                     })
             
@@ -2323,7 +2440,7 @@ class Resident(BaseAgent):
             }
         }
 
-
+    
     def get_path_selection_stats(self):
         """Return the resident's path selection statistics."""
         return self.path_selection_stats.copy()
@@ -2589,7 +2706,7 @@ class Resident(BaseAgent):
         # 未识别 action，回退
         self.logger.warning(f"Unknown action from LLM: {decision}")
         return self._choose_need_based_target()
-    
+
     # MOVEMENT DECISION WRAPPERS
     def _make_random_movement_decision(self):
         """
