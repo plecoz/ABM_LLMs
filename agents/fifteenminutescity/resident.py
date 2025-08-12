@@ -1252,6 +1252,9 @@ class Resident(BaseAgent):
     def step(self):
         """Simplified step method using action system"""
         
+        if hasattr(self, 'logger'):
+            self.logger.info(f"DEBUG: Step method called for Agent-{self.unique_id}, current_action: {self.current_action}")
+        
         try:
             super().step()
             
@@ -1307,17 +1310,8 @@ class Resident(BaseAgent):
                             poi_category = getattr(visited_poi_agent, 'category', 'other')
                             self.model.output_controller.track_poi_visit(poi_category, self.unique_id)
                         
-                        # Start waiting at POI if it has waiting time
-                        if hasattr(visited_poi_agent, 'get_waiting_time'):
-                            waiting_time = visited_poi_agent.get_waiting_time()
-                            if waiting_time > 0:
-                                # Determine action based on POI type and simulation settings
-                                action = self._select_action_at_poi(visited_poi_agent, waiting_time)
-                                self._start_action(action)
-                                
-                                # Track waiting time in output controller
-                                if hasattr(self.model, 'output_controller'):
-                                    self.model.output_controller.track_waiting_start(self.unique_id, poi_category, waiting_time)
+                        # Note: Action system handles actions separately from POI visits
+                        # Actions are decided in _decide_next_action() when no current action
                         
                         # Satisfy needs if we're using need-based movement
                         if self.movement_behavior == 'need-based':
@@ -1337,20 +1331,31 @@ class Resident(BaseAgent):
             
             # Handle ongoing action
             if self.current_action:
-                self.current_action.remaining_minutes -= 1
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"DEBUG: Found current_action: {self.current_action.name}")
+                self.action_time_remaining -= 1
+                
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"Action '{self.current_action.name}' - {self.action_time_remaining} minutes remaining")
                 
                 # Check if action is complete
-                if self.current_action.remaining_minutes <= 0:
+                if self.action_time_remaining <= 0:
+                    if hasattr(self, 'logger'):
+                        self.logger.info(f"Completing action '{self.current_action.name}'")
                     self._complete_action()
                     self.current_action = None
                 return
             
             # No current action - decide what to do next
+            if hasattr(self, 'logger'):
+                self.logger.info(f"DEBUG: No current action (current_action is {self.current_action}), deciding next action")
             self._decide_next_action()
+            if hasattr(self, 'logger'):
+                self.logger.info(f"DEBUG: About to return after _decide_next_action")
+            return  # Exit after deciding next action
             
-                    
         except Exception as e:
-                    # Removed debug print
+            # Removed debug print
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
             import traceback
@@ -1373,25 +1378,34 @@ class Resident(BaseAgent):
         available_actions = get_available_actions(
             hour=hour,
             is_employed=self.is_employed,
-            money=self.daily_income
+            money=self.money
         )
         
         if not available_actions:
             # No actions available - just rest
+            if hasattr(self, 'logger'):
+                self.logger.info(f"No actions available at hour {hour}, defaulting to rest")
             self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
             return
+        
+        if hasattr(self, 'logger'):
+            self.logger.info(f"Available actions at hour {hour}: {list(available_actions.keys())}")
         
         # Use LLM if available, otherwise use simple logic
         if self.brain and self.movement_behavior == 'llms':
             action_name = self._llm_decide_action(available_actions, temperature)
-                else:
-            action_name = self._simple_decide_action(available_actions, hour)
+        else:
+            print(f"No LLM brain found")
         
         # Start the selected action
         if action_name and action_name in available_actions:
+            if hasattr(self, 'logger'):
+                self.logger.info(f"DEBUG: About to start action: {action_name}")
             self._start_action(copy.deepcopy(available_actions[action_name]))
         else:
             # Fallback to rest
+            if hasattr(self, 'logger'):
+                self.logger.info(f"DEBUG: No valid action, falling back to rest")
             self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
     
     def _llm_decide_action(self, available_actions: Dict[str, Action], temperature: float) -> Optional[str]:
@@ -1443,9 +1457,14 @@ class Resident(BaseAgent):
     def _start_action(self, action: Action):
         """Start executing an action."""
         
+        if hasattr(self, 'logger'):
+            self.logger.info(f"DEBUG: _start_action called with action: {action.name}")
+        
         self.current_action = action
-        self.current_action.start_time = datetime.now()
-        self.current_action.remaining_minutes = action.duration_minutes
+        self.action_time_remaining = action.duration_minutes  # Use the correct attribute
+        
+        if hasattr(self, 'logger'):
+            self.logger.info(f"Started action '{action.name}' for {action.duration_minutes} minutes (current_action is now {self.current_action})")
         
         # Find appropriate POI for action location
         target_poi = self._find_poi_for_action(action.location_type)
@@ -1556,140 +1575,10 @@ class Resident(BaseAgent):
         
         return None
 
-        # ===============================================Action module===============================================
 
 
-    def _select_action_at_poi(self, poi_agent, waiting_time):
-        """
-        Select an appropriate action to perform at a POI based on the POI type and simulation granularity.
-        
-        Args:
-            poi_agent: The POI agent where the action will be performed
-            waiting_time: Duration in minutes for the action
-            
-        Returns:
-            Action object representing what the resident will do at the POI
-        """
-        poi_type = poi_agent.poi_type
-        
-        # Map POI types to appropriate actions based on granularity
-        if self.model.action_granularity == ActionGranularity.SIMPLE:
-            # Simple: just waiting
-            action_type = ActionType.WAITING
-            description = f"Waiting at {poi_type}"
-            
-        elif self.model.action_granularity == ActionGranularity.BASIC:
-            # Basic: map POI types to basic action types
-            poi_to_action = {
-                'restaurant': ActionType.EATING,
-                'cafe': ActionType.EATING,
-                'bar': ActionType.SOCIALIZING,
-                'pub': ActionType.SOCIALIZING,
-                'shop': ActionType.SHOPPING,
-                'supermarket': ActionType.SHOPPING,
-                'mall': ActionType.SHOPPING,
-                'hospital': ActionType.HEALTHCARE,
-                'clinic': ActionType.HEALTHCARE,
-                'pharmacy': ActionType.HEALTHCARE,
-                'library': ActionType.STUDYING,
-                'school': ActionType.STUDYING,
-                'university': ActionType.STUDYING,
-                'gym': ActionType.EXERCISING,
-                'sports_centre': ActionType.EXERCISING,
-                'park': ActionType.SOCIALIZING,
-                'cinema': ActionType.ENTERTAINMENT,
-                'theatre': ActionType.ENTERTAINMENT,
-                'bank': ActionType.BANKING,
-                'church': ActionType.WORSHIP,
-                'mosque': ActionType.WORSHIP,
-                'temple': ActionType.WORSHIP,
-                'community_centre': ActionType.SOCIALIZING
-            }
-            action_type = poi_to_action.get(poi_type, ActionType.WAITING)
-            description = f"{action_type.value.title()} at {poi_type}"
-            
-        else:  # DETAILED granularity
-            # Detailed: more specific actions based on POI type
-            poi_to_detailed_action = {
-                'restaurant': ActionType.EATING,
-                'cafe': ActionType.TALKING,
-                'bar': ActionType.SOCIALIZING,
-                'pub': ActionType.SOCIALIZING,
-                'shop': ActionType.BROWSING,
-                'supermarket': ActionType.SHOPPING,
-                'mall': ActionType.BROWSING,
-                'hospital': ActionType.CONSULTING,
-                'clinic': ActionType.CONSULTING,
-                'pharmacy': ActionType.DOING_BUSINESS,
-                'library': ActionType.READING,
-                'school': ActionType.STUDYING,
-                'university': ActionType.STUDYING,
-                'gym': ActionType.EXERCISING,
-                'sports_centre': ActionType.PLAYING,
-                'park': ActionType.SOCIALIZING,
-                'cinema': ActionType.WATCHING_MOVIE,
-                'theatre': ActionType.ENTERTAINMENT,
-                'bank': ActionType.DOING_BUSINESS,
-                'church': ActionType.PRAYING,
-                'mosque': ActionType.PRAYING,
-                'temple': ActionType.PRAYING,
-                'community_centre': ActionType.TALKING
-            }
-            action_type = poi_to_detailed_action.get(poi_type, ActionType.WAITING)
-            description = f"{action_type.value.title()} at {poi_type}"
-        
-        # Determine which needs this action might satisfy
-        needs_satisfied = {}
-        if action_type in [ActionType.EATING]:
-            needs_satisfied['food'] = random.randint(20, 40)
-        elif action_type in [ActionType.SOCIALIZING, ActionType.TALKING]:
-            needs_satisfied['social'] = random.randint(15, 30)
-        elif action_type in [ActionType.EXERCISING, ActionType.PLAYING]:
-            needs_satisfied['health'] = random.randint(10, 25)
-            needs_satisfied['recreation'] = random.randint(15, 30)
-        elif action_type in [ActionType.SHOPPING, ActionType.BROWSING]:
-            needs_satisfied['shopping'] = random.randint(20, 35)
-        elif action_type in [ActionType.HEALTHCARE, ActionType.CONSULTING]:
-            needs_satisfied['health'] = random.randint(25, 50)
-        elif action_type in [ActionType.ENTERTAINMENT, ActionType.WATCHING_MOVIE]:
-            needs_satisfied['recreation'] = random.randint(20, 40)
-        elif action_type in [ActionType.STUDYING, ActionType.READING]:
-            needs_satisfied['education'] = random.randint(15, 30)
-        elif action_type in [ActionType.WORSHIP, ActionType.PRAYING]:
-            needs_satisfied['spiritual'] = random.randint(20, 40)
-        elif action_type in [ActionType.BANKING, ActionType.DOING_BUSINESS]:
-            needs_satisfied['financial'] = random.randint(15, 25)
-        
-        # Create and return the action
-        return Action(
-            action_type=action_type,
-            duration=waiting_time,
-            poi_type=poi_type,
-            poi_id=poi_agent.unique_id,
-            description=description,
-            needs_satisfied=needs_satisfied,
-            social_interaction=(action_type in [ActionType.SOCIALIZING, ActionType.TALKING]),
-            context={'poi_category': getattr(poi_agent, 'category', poi_type)}
-        )
-
-    def _start_action(self, action: Action):
-        """Begin an action at a POI."""
-        self.performing_action = True
-        self.current_action = action
-        self.action_time_remaining = action.duration
-        self.action_history.append(action)
-
-    def _complete_current_action(self):
-        """Complete the current action and clean up."""
-        if self.current_action and self.current_action.poi_id:
-            # Find the POI agent to notify them of departure
-            poi_agent = self.model.get_agent_by_id(self.current_action.poi_id)
-            if poi_agent:
-                poi_agent.remove_visitor(self.unique_id)
-        
-        self.performing_action = False
-        self.current_action = None
-        self.action_time_remaining = 0
+    # This old _start_action method is no longer needed - removed to avoid conflicts
+    pass
 
 
     def _select_path_with_llm(self, path_options, from_node, to_node):

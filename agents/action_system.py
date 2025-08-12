@@ -10,7 +10,6 @@ class Action:
     location_type: str          # e.g., "home", "restaurant", "workplace", "shop"
     duration_minutes: int       # How long the action takes
     cost: float                # Financial cost of the action
-    energy_change: float        # How it affects energy (-1 to 1)
     description: str           # Human-readable description
     
     # Runtime fields
@@ -25,7 +24,6 @@ EVERYDAY_ACTIONS = {
         location_type="home",
         duration_minutes=480,  # 8 hours
         cost=0.0,
-        energy_change=1.0,  # Fully restores energy
         description="Sleep at home to restore energy"
     ),
     "eat_breakfast": Action(
@@ -33,23 +31,20 @@ EVERYDAY_ACTIONS = {
         location_type="home",
         duration_minutes=30,
         cost=5.0,
-        energy_change=0.2,
         description="Have breakfast at home"
     ),
     "eat_lunch": Action(
         name="eat_lunch",
         location_type="restaurant",
         duration_minutes=60,
-        cost=15.0,
-        energy_change=0.3,
+        cost=10.0,
         description="Have lunch at a restaurant"
     ),
     "eat_dinner": Action(
         name="eat_dinner",
         location_type="restaurant",
         duration_minutes=90,
-        cost=25.0,
-        energy_change=0.3,
+        cost=15.0,
         description="Have dinner at a restaurant"
     ),
     "buy_groceries": Action(
@@ -57,15 +52,13 @@ EVERYDAY_ACTIONS = {
         location_type="supermarket",
         duration_minutes=45,
         cost=50.0,
-        energy_change=-0.1,
         description="Shop for groceries"
     ),
     "shower": Action(
         name="shower",
         location_type="home",
         duration_minutes=15,
-        cost=0.5,
-        energy_change=0.1,
+        cost=0,
         description="Take a shower at home"
     ),
     "rest": Action(
@@ -73,7 +66,6 @@ EVERYDAY_ACTIONS = {
         location_type="home",
         duration_minutes=30,
         cost=0.0,
-        energy_change=0.2,
         description="Rest and relax at home"
     ),
     "exercise": Action(
@@ -81,7 +73,6 @@ EVERYDAY_ACTIONS = {
         location_type="park",
         duration_minutes=60,
         cost=0.0,
-        energy_change=-0.3,
         description="Exercise at the park"
     ),
     "socialize": Action(
@@ -89,7 +80,6 @@ EVERYDAY_ACTIONS = {
         location_type="cafe",
         duration_minutes=90,
         cost=10.0,
-        energy_change=-0.1,
         description="Meet friends at a cafe"
     ),
     "entertainment": Action(
@@ -97,20 +87,18 @@ EVERYDAY_ACTIONS = {
         location_type="entertainment",
         duration_minutes=120,
         cost=20.0,
-        energy_change=-0.1,
         description="Enjoy entertainment activities"
     ),
     "work": Action(
         name="work",
         location_type="workplace",
         duration_minutes=480,  # 8 hours
-        cost=-200.0,  # Negative cost = earning money
-        energy_change=-0.5,
+        cost=0,  # Money is managed in another module
         description="Work at the office"
     )
 }
 
-def get_available_actions(hour: int, is_employed: bool, energy: float, money: float) -> Dict[str, Action]:
+def get_available_actions(hour: int, is_employed: bool, money: float) -> Dict[str, Action]:
     """
     Get actions available based on current context.
     
@@ -130,7 +118,7 @@ def get_available_actions(hour: int, is_employed: bool, energy: float, money: fl
         available["work"] = EVERYDAY_ACTIONS["work"]
     
     # Sleep typically at night or when very tired
-    if hour >= 22 or hour < 6 or energy < 0.2:
+    if hour >= 22 or hour < 6 :
         available["sleep"] = EVERYDAY_ACTIONS["sleep"]
     
     # Meals at appropriate times
@@ -142,11 +130,11 @@ def get_available_actions(hour: int, is_employed: bool, energy: float, money: fl
         available["eat_dinner"] = EVERYDAY_ACTIONS["eat_dinner"]
     
     # Shopping during business hours
-    if 8 <= hour < 20 and money > 50:
+    if 10 <= hour < 22 and money > 50:
         available["buy_groceries"] = EVERYDAY_ACTIONS["buy_groceries"]
     
     # Exercise in morning or evening
-    if (6 <= hour < 9 or 17 <= hour < 20) and energy > 0.3:
+    if (6 <= hour < 9 or 17 <= hour < 20) :
         available["exercise"] = EVERYDAY_ACTIONS["exercise"]
     
     # Social and entertainment when not working
@@ -155,8 +143,8 @@ def get_available_actions(hour: int, is_employed: bool, energy: float, money: fl
         available["entertainment"] = EVERYDAY_ACTIONS["entertainment"]
     
     # Basic actions always available (with some constraints)
-    if energy > 0.1:
-        available["shower"] = EVERYDAY_ACTIONS["shower"]
+     
+    available["shower"] = EVERYDAY_ACTIONS["shower"]
     available["rest"] = EVERYDAY_ACTIONS["rest"]
     
     return available

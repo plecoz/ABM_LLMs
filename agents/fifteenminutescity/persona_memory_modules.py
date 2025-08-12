@@ -65,15 +65,6 @@ class SimplePersonaManager:
         )
 
 
-class SimpleEmotionalState:
-    """Minimal emotional state tracking."""
-    
-    def __init__(self, agent_id: str):
-        self.agent_id = agent_id
-        self.stress_level = 0.3  # Simple baseline
-        self.last_updated = datetime.now()
-
-
 class PersonaMemoryManager:
     """Simplified main interface for persona management."""
     
@@ -82,14 +73,26 @@ class PersonaMemoryManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("Simplified Persona Memory Manager initialized")
     
-    def create_agent_persona(self, agent_id: str, demographics: Dict[str, Any]) -> Tuple[SimplePersona, SimpleEmotionalState]:
+    def create_agent_persona(self, agent_id: str, demographics: Dict[str, Any]) -> Tuple[SimplePersona]:
         """Create a simple persona profile for an agent."""
         
         # Generate simple persona
         persona = self.persona_manager.create_persona(demographics)
         
-        # Initialize minimal emotional state
-        emotional_state = SimpleEmotionalState(agent_id)
         
         self.logger.debug(f"Created simple persona for agent {agent_id}: {persona.name}")
-        return persona, emotional_state 
+        return persona
+    
+    def update_agent_experience(self, agent_id: str, experience: Dict[str, Any]):
+        """
+        Simple placeholder for updating agent experience.
+        In a full implementation, this would update the agent's emotional state and memories.
+        
+        Args:
+            agent_id: The agent's unique identifier
+            experience: Dictionary containing experience details
+        """
+        # Simple logging for now - no actual state updates needed for simplified system
+        self.logger.debug(f"Agent {agent_id} had experience: {experience.get('type', 'unknown')} with outcome: {experience.get('outcome', 'unknown')}")
+        # In the simplified system, we don't need to do anything else
+        pass 

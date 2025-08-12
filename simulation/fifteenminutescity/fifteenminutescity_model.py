@@ -178,18 +178,6 @@ class FifteenMinuteCity(Model):
         # Get movement behavior setting
         self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
         
-        # Get action granularity setting (for POI activities)
-        self.action_granularity = kwargs.get('action_granularity', 'basic')
-        if isinstance(self.action_granularity, str):
-            # Convert string to enum
-            from agents.fifteenminutescity.resident import ActionGranularity
-            granularity_map = {
-                'simple': ActionGranularity.SIMPLE,
-                'basic': ActionGranularity.BASIC,
-                'detailed': ActionGranularity.DETAILED
-            }
-            self.action_granularity = granularity_map.get(self.action_granularity.lower(), ActionGranularity.BASIC)
-        
         # Initialize LLM components if needed
         self.llm_enabled = (self.needs_selection == 'llms' or self.movement_behavior == 'llms')
         if self.llm_enabled:
@@ -257,8 +245,6 @@ class FifteenMinuteCity(Model):
         print(f"  - Initial temperature: {self.temperature}°C")
         print(f"  - Initial time period: {self.time_period}")
         print(f"  - Initial hour: {self.hour_of_day}")
-        print(f"  - Weather description: {self._get_weather_description()}")
-        
         # Temperature modeling parameters
         self.daily_temperature_amplitude = 6.0  # Daily temperature variation (±6°C from base)
         self.daily_random_epsilon = 2.0  # Random daily variation amplitude
@@ -733,16 +719,6 @@ class FifteenMinuteCity(Model):
         
         return nearby_agents
 
-    def record_communication(self, message):
-        """
-        Record a communication between agents.
-        
-        Args:
-            message: The message object to record
-        """
-        # In a full implementation, this would store the message in a database or log
-        # For now, we'll just store it in the communications list
-        self.communications.append(message)
 
     def _create_residents_with_distribution(self, num_residents):
         """
@@ -1055,7 +1031,7 @@ class FifteenMinuteCity(Model):
         # print(f"  - Household Type: {getattr(resident, 'household_type', 'N/A')}")
         
         # Create simple persona profile based on basic demographics
-        persona, emotional_state = self.persona_memory_manager.create_agent_persona(
+        persona = self.persona_memory_manager.create_agent_persona(
             agent_id=str(resident.unique_id),
             demographics={
                 'age': getattr(resident, 'age', 30),
@@ -1065,37 +1041,8 @@ class FifteenMinuteCity(Model):
             }
         )
         
-        
-        # print(f"\n🏗️  STEP 2: Persona Template Creation")
-        # print(f"  -> Template Name: {persona_template.name}")
-        # print(f"  -> Description: {persona_template.description}")
-        # print(f"  -> Core Values: {persona_template.core_values}")
-        # print(f"  -> Risk Tolerance: {persona_template.risk_tolerance}")
-        # print(f"  -> Key Beliefs:")
-        # for key, value in list(persona_template.beliefs.items())[:3]:
-        #     print(f"     - {key}: {value}")
-        # print(f"  -> Behavioral Tendencies (sample):")
-        # for key, value in list(persona_template.behavioral_tendencies.items())[:3]:
-        #     print(f"     - {key}: {value:.2f}")
-            
-        # print(f"\n🎭 STEP 3: Emotional State Initialization")
-        # print(f"  -> Agent ID: {emotional_state.agent_id}")
-        # print(f"  -> Stress Level: {emotional_state.stress_level:.2f}")
-        # print(f"  -> Confidence Level: {emotional_state.confidence_level:.2f}")
-        # print(f"  -> Trust in Healthcare: {emotional_state.trust_in_healthcare:.2f}")
-        # print(f"  -> Current Emotions:")
-        # for emotion, intensity in emotional_state.current_emotions.items():
-        #     print(f"     - {emotion.value}: {intensity:.2f}")
-            
-        # print(f"\n📝 STEP 4: Converting Persona Template to String")
-        # persona_str = str(persona_template)
-        # print(f"  -> String length: {len(persona_str)} characters")
-        # print(f"  -> First 200 characters: {persona_str[:200]}...")
-        # print(f"  -> Last 200 characters: ...{persona_str[-200:]}")
-        
-        # Store simple persona information in the resident
+
         resident.persona = persona
-        resident.emotional_state = emotional_state
         
         # Sync persona with Concordia brain
         if getattr(resident, "brain", None) is not None:
@@ -1113,19 +1060,7 @@ class FifteenMinuteCity(Model):
                 
             test_decision_prompt = "What would you like to do? Respond briefly with your choice."
             test_response = resident.brain.decide(test_decision_prompt)
-                
-            # print(f"  -> Test Response: {test_response}")
 
-        
-        
-        # print(f"\n✅ PERSONA ASSIGNMENT COMPLETE FOR AGENT {resident.unique_id}")
-        # print("=" * 60)
-        # print(f"Final Agent State:")
-        # print(f"  - persona_type: {resident.persona_type.value}")
-        # print(f"  - persona_template: {type(resident.persona_template).__name__}")
-        # print(f"  - emotional_state: {type(resident.emotional_state).__name__}")
-        # print(f"  - brain available: {hasattr(resident, 'brain') and resident.brain is not None}")
-        # print("=" * 60)
         
         self.logger.debug(f"Assigned dynamic persona to resident {resident.unique_id}")
     
@@ -1352,7 +1287,7 @@ class FifteenMinuteCity(Model):
             print(f"DEBUG Temperature - Hour {current_hour:02d}: {self.temperature:.1f}°C "
                   f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "
                   f"daily_offset={daily_random:.1f}, noise={hourly_noise:.1f})")
-            print(f"DEBUG Time Period: '{self.time_period}' Weather: '{self._get_weather_description()}'")
+            print(f"DEBUG Time Period: '{self.time_period}' ")
             
             # Also log with logger for file output
             self.logger.debug(
@@ -1372,7 +1307,6 @@ class FifteenMinuteCity(Model):
             'temperature': self.temperature,
             'time_period': self.time_period,
             'hour': self.hour_of_day,
-            'weather_description': self._get_weather_description()
         }
         
         # Add temperature-based recommendations for agent behavior
@@ -1382,79 +1316,7 @@ class FifteenMinuteCity(Model):
         
         return context
     
-    def _get_weather_description(self):
-        """
-        Generate a simple weather description based on temperature.
-        
-        Returns:
-            str: Weather description
-        """
-        temp = self.temperature
-        
-        if temp < 0:
-            return "freezing"
-        elif temp < 10:
-            return "cold"
-        elif temp < 20:
-            return "cool"
-        elif temp < 25:
-            return "mild"
-        elif temp < 30:
-            return "warm"
-        elif temp < 35:
-            return "hot"
-        else:
-            return "very hot"
-    
-    def _get_temperature_recommendations(self):
-        """
-        Get behavioral recommendations based on current temperature.
-        
-        Returns:
-            dict: Recommendations for different aspects of behavior, or None if no special recommendations
-        """
-        temp = self.temperature
-        
-        # Default recommendations (normal conditions)
-        recommendations = {
-            'movement': 'normal',
-            'activity_level': 'normal',
-            'preferred_locations': 'any',
-            'time_preferences': 'any',
-            'health_warning': 'none'
-        }
-        
-        # Temperature-based recommendations
-        if temp > 40:  # Extreme heat
-            recommendations.update({
-                'movement': 'minimize outdoor travel',
-                'activity_level': 'reduce physical activity',
-                'preferred_locations': 'air-conditioned indoor spaces',
-                'time_preferences': 'avoid 10am-6pm',
-                'health_warning': 'heat exhaustion risk'
-            })
-        elif temp > 37:  # Dangerous heat
-            recommendations.update({
-                'movement': 'avoid unnecessary trips',
-                'activity_level': 'light activity only',
-                'preferred_locations': 'indoor or shaded areas',
-                'time_preferences': 'early morning or evening',
-                'health_warning': 'heat stress possible'
-            })
-        elif temp > 33:  # Hot conditions
-            recommendations.update({
-                'movement': 'prefer shorter trips',
-                'activity_level': 'moderate activity',
-                'preferred_locations': 'cool indoor spaces',
-                'time_preferences': 'avoid midday heat',
-                'health_warning': 'stay hydrated'
-            })
-        
-        # Only return recommendations if they're not normal conditions
-        if recommendations['movement'] != 'normal':
-            return recommendations
-        
-        return None
+
     
     def set_temperature_model_parameters(self, daily_amplitude=6.0, daily_epsilon=2.0, hourly_noise=0.5):
         """
@@ -1486,32 +1348,7 @@ class FifteenMinuteCity(Model):
             'hourly_noise_std': self.hourly_noise_std,
             'daily_random_offset': self.daily_random_offset,
             'current_hour': self.hour_of_day,
-            'weather_description': self._get_weather_description()
         }
-    
-    def predict_temperature_for_hour(self, hour):
-        """
-        Predict the expected temperature for a given hour (without noise).
-        Useful for understanding the daily temperature pattern.
-        
-        Args:
-            hour (int): Hour of day (0-23)
-            
-        Returns:
-            float: Expected temperature for that hour
-        """
-        import math
-        
-        # Same calculation as _update_temperature but without noise
-        peak_hour = 14.5
-        hour_angle = 2 * math.pi * (hour - peak_hour) / 24
-        daily_variation = math.cos(hour_angle)
-        
-        expected_temp = (self.base_temperature + 
-                        self.daily_temperature_amplitude * daily_variation + 
-                        self.daily_random_offset)
-        
-        return expected_temp
     
     def calculate_temperature_statistics(self):
         """
