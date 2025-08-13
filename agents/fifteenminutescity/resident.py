@@ -95,19 +95,10 @@ class Resident(BaseAgent):
         self.social_network = self.attributes['social_network']
 
         
-        
-        # Dynamic needs (placeholder - to be implemented later)
-        self.dynamic_needs = {
-            "hunger": 0,
-            "social": 0,
-            "recreation": 0,
-            "shopping": 0,
-            "healthcare": 0,
-            "education": 0
-        }
+
 
         # Current needs (will be updated each step)
-        self.current_needs = self.dynamic_needs.copy()
+        
         
         # Determine step size based on age for calculating travel times
         is_elderly = False
@@ -206,7 +197,11 @@ class Resident(BaseAgent):
         try:
             from brains.concordia_brain import ConcordiaBrain
             self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
+            print(f"✅ Agent {unique_id}: Brain initialized successfully")
         except Exception as e:
+            print(f"❌ Agent {unique_id}: Brain initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
             self.brain = None
 
         # Initialize last path calculation time to prevent rapid recalculation
@@ -1614,7 +1609,6 @@ class Resident(BaseAgent):
             
             # Check if we have a Concordia brain
             if not hasattr(self, 'brain') or self.brain is None:
-                print(f"DEBUG: Resident {self.unique_id} - No Concordia brain available, using fallback")
                 self.path_selection_stats['fallback_decisions'] += 1
                 selected_path_nodes = self._fallback_path_selection(path_options)
                 # Track if fallback didn't select shortest path
@@ -1625,8 +1619,7 @@ class Resident(BaseAgent):
                         self.path_selection_stats['shortest_path_not_selected'] += 1
                 return selected_path_nodes
             
-            # Step 1: Prepare observation for Concordia brain
-            needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
+
             time_context = f"Time: {self.model.hour_of_day}:00" if hasattr(self.model, 'hour_of_day') else "Time: unknown"
             
             # Get environmental context with temperature recommendations
@@ -1681,7 +1674,7 @@ class Resident(BaseAgent):
             # Create observation for Concordia
             observation = (
                 f"Agent {self.unique_id} needs to choose a path from node {from_node} to {to_node}. "
-                f"Current needs: {needs_summary}. {time_context}. {env_context}{temp_context}Age: {self.age}. "
+                f"Current needs:  {time_context}. {env_context}{temp_context}Age: {self.age}. "
                 f"Available paths:\n{paths_text}"
             )
             
@@ -1978,8 +1971,7 @@ class Resident(BaseAgent):
         # 只保留最近的 20 个（按 travel_time 升序）以避免 prompt 太长
         accessible_info = sorted(accessible_info, key=lambda x: (x["travel_time"] or 1e9))[:20]
 
-        # -------- 2) 构造 observation --------
-        needs_summary = ", ".join(f"{k}:{v}" for k, v in self.current_needs.items())
+
         
         # Get environmental context with temperature recommendations
         env_context = ""
@@ -2003,7 +1995,7 @@ class Resident(BaseAgent):
                 )
         
         observation = (
-            "Current needs => " + needs_summary + ". "
+            "Current needs => . "
             + env_context + temp_recommendations +
             "Accessible POIs (first 20) => " + json.dumps(accessible_info) + "."
         )

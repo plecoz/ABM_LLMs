@@ -95,7 +95,17 @@ EVERYDAY_ACTIONS = {
         duration_minutes=480,  # 8 hours
         cost=0,  # Money is managed in another module
         description="Work at the office"
+    ),
+
+        "visit_doctor": Action(
+        name="visit_doctor",
+        location_type="hospital",
+        duration_minutes=60,  
+        cost=10,  
+        description="Visit a doctor"
     )
+
+
 }
 
 def get_available_actions(hour: int, is_employed: bool, money: float) -> Dict[str, Action]:
