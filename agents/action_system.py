@@ -123,9 +123,11 @@ def get_available_actions(hour: int, is_employed: bool, money: float) -> Dict[st
     """
     available = {}
     
-    # Work is only available 9am-5pm for employed agents
+    # MANDATORY: Employed agents MUST work during business hours (9am-5pm)
     if is_employed and 9 <= hour < 17:
+        # During work hours, work is the ONLY available action for employed agents
         available["work"] = EVERYDAY_ACTIONS["work"]
+        return available  # Return immediately - no other actions available during work
     
     # Sleep typically at night or when very tired
     if hour >= 22 or hour < 6 :

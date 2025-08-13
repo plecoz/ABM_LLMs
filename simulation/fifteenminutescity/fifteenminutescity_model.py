@@ -41,8 +41,8 @@ class CustomRandomActivation:
         """Execute the step of all agents, one at a time, in random order"""
         random.shuffle(self.agents)
         # Print less frequently with 1-minute time steps - only every hour
-        if self.steps % 60 == 0:
-            print(f"Activating {len(self.agents)} agents at step {self.steps} (Hour {self.steps // 60})")
+        # if self.steps % 60 == 0:
+        #     print(f"Activating {len(self.agents)} agents at step {self.steps} (Hour {self.steps // 60})")
         for agent in self.agents:
             agent.step()
         self.steps += 1
@@ -233,6 +233,9 @@ class FifteenMinuteCity(Model):
             'concordia_decisions': 0,
             'fallback_decisions': 0
         }
+        
+        # Unmet demand tracking - tracks when agents want to access POI types that aren't available
+        self.unmet_demand_by_parish = {}  # parish -> {poi_type: count}
         
         # Initialize current temperature from base temperature
         self.temperature = self.base_temperature  # Current temperature in Celsius, will be updated by the model in step()
@@ -1006,18 +1009,7 @@ class FifteenMinuteCity(Model):
         """
         if not self.llm_enabled or not self.persona_memory_manager:
             return
-        
-        # Add comprehensive debug printing for the first agent only
 
-        # print(f"\n🎭 PERSONA ASSIGNMENT TRACE FOR AGENT {resident.unique_id}")
-        # print("=" * 60)
-        # print(f"Agent Demographics:")
-        # print(f"  - Age: {getattr(resident, 'age', 'N/A')}")
-        # print(f"  - Age Class: {getattr(resident, 'age_class', 'N/A')}")
-        # print(f"  - Economic Status: {getattr(resident, 'economic_status', 'N/A')}")
-        # print(f"  - Household Type: {getattr(resident, 'household_type', 'N/A')}")
-        
-        # Create simple persona profile based on basic demographics
         persona = self.persona_memory_manager.create_agent_persona(
             agent_id=str(resident.unique_id),
             demographics={
@@ -1166,6 +1158,66 @@ class FifteenMinuteCity(Model):
         
         print("="*60)
     
+    def track_unmet_demand(self, agent_parish: str, poi_type: str):
+        """
+        Track when an agent wants to access a POI type that isn't available within 15 minutes.
+        
+        Args:
+            agent_parish (str): The parish where the agent lives
+            poi_type (str): The type of POI that couldn't be accessed
+        """
+        if agent_parish not in self.unmet_demand_by_parish:
+            self.unmet_demand_by_parish[agent_parish] = {}
+        
+        if poi_type not in self.unmet_demand_by_parish[agent_parish]:
+            self.unmet_demand_by_parish[agent_parish][poi_type] = 0
+        
+        self.unmet_demand_by_parish[agent_parish][poi_type] += 1
+        
+        print(f"📊 UNMET DEMAND: Parish '{agent_parish}' needs more '{poi_type}' POIs (total requests: {self.unmet_demand_by_parish[agent_parish][poi_type]})")
+
+    def display_unmet_demand_summary(self):
+        """
+        Display a comprehensive summary of unmet demand by parish.
+        
+        Returns:
+            str: Formatted summary of unmet POI demand
+        """
+        if not self.unmet_demand_by_parish:
+            print("\nUNMET DEMAND ANALYSIS")
+            print("="*60)
+            print("No unmet demand recorded during this simulation.")
+            return
+        
+        print("\nUNMET DEMAND ANALYSIS")
+        print("="*60)
+        print("This shows POI types that agents wanted to access but couldn't find within 15 minutes.\n")
+        
+        total_unmet_requests = 0
+        
+        for parish, demands in self.unmet_demand_by_parish.items():
+            parish_total = sum(demands.values())
+            total_unmet_requests += parish_total
+            
+            print(f"📍 PARISH: {parish} (Total unmet requests: {parish_total})")
+            
+            # Sort POI types by demand (highest first)
+            sorted_demands = sorted(demands.items(), key=lambda x: x[1], reverse=True)
+            
+            for poi_type, count in sorted_demands:
+                percentage = (count / parish_total) * 100
+                print(f"   • {poi_type}: {count} requests ({percentage:.1f}%)")
+            
+            print()
+        
+        print(f"🏙️  TOTAL UNMET REQUESTS ACROSS ALL PARISHES: {total_unmet_requests}")
+        print("="*60)
+        print("💡 URBAN PLANNING INSIGHTS:")
+        print("   - High demand areas may need additional POIs of those types")
+        print("   - Consider improving transportation to existing POIs")
+        print("   - Focus development on most requested POI types per parish")
+        print("="*60)
+    
     def set_temperature(self, temperature_celsius):
         """
         Set the base environmental temperature for the simulation.
@@ -1296,11 +1348,7 @@ class FifteenMinuteCity(Model):
             'hour': self.hour_of_day,
         }
         
-        # Add temperature-based recommendations for agent behavior
-        recommendations = self._get_temperature_recommendations()
-        if recommendations:
-            context['temperature_recommendations'] = recommendations
-        
+
         return context
     
 

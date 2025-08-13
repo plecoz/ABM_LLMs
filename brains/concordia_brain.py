@@ -155,11 +155,82 @@ class ConcordiaBrain:
 
     # ---------------- public ----------------
     def observe(self, text: str):
+        # Log observations at specific steps for debugging
+        if hasattr(self, '_step_counter'):
+            # Use the same counter as decide() method
+            pass
+        else:
+            self._step_counter = 0
+            
+        # Log observations at steps 1 and 10 (only for action system, not persona test)
+        if hasattr(self, '_step_counter') and self._step_counter in [0, 9]:  # 0-based for observations (before decision)
+            print(f"\n🔍 OBSERVATION DEBUG - {self.agent.name} - Step {self._step_counter + 1}")
+            print("=" * 80)
+            print(f"OBSERVATION SENT TO BRAIN:")
+            print(text)
+            print("=" * 80)
+        
         self.agent.observe(text)
 
     def decide(self, prompt: str) -> str:
+        # Log prompts at specific steps for debugging
+        if hasattr(self, '_step_counter'):
+            self._step_counter += 1
+        else:
+            self._step_counter = 1
+            
+        # Log prompts at steps 1 and 10
+        if self._step_counter in [1, 10]:
+            print(f"\n🔍 DECISION DEBUG - {self.agent.name} - Step {self._step_counter}")
+            print("=" * 80)
+            print(f"DECISION PROMPT:")
+            print(prompt)
+            print("=" * 80)
+            
+            # Show what we can about the brain's state
+            try:
+                contexts = self.agent.get_all_context_components()
+                print(f" BRAIN STATE - {self.agent.name} - Step {self._step_counter}")
+                print("=" * 80)
+                print("BRAIN COMPONENTS:")
+                
+                # Show available components
+                for name, component in contexts.items():
+                    component_type = type(component).__name__
+                    print(f"- [{name.upper()}]: {component_type}")
+                    
+                    # Try to get some info about the component
+                    if hasattr(component, '_memory_bank') and hasattr(component._memory_bank, '__len__'):
+                        print(f"  └─ Memory entries: {len(component._memory_bank)}")
+                    elif hasattr(component, '_persona'):
+                        persona_preview = str(component._persona)[:100] + "..." if len(str(component._persona)) > 100 else str(component._persona)
+                        print(f"  └─ Persona: {persona_preview}")
+                    elif hasattr(component, '_history') and hasattr(component._history, '__len__'):
+                        print(f"  └─ History entries: {len(component._history)}")
+                
+                print("\n" + "-" * 40)
+                print(f"DECISION PROMPT: {prompt}")
+                print("=" * 80)
+                
+            except Exception as e:
+                print(f"🔍 BRAIN STATE - {self.agent.name} - Step {self._step_counter}")
+                print("=" * 80)
+                print(f"Error getting brain state: {e}")
+                print(f"DECISION PROMPT: {prompt}")
+                print("=" * 80)
+        
         spec = concordia_entity.ActionSpec(call_to_action=prompt, output_type=concordia_entity.OutputType.FREE)
-        return self.agent.act(spec).strip()
+        response = self.agent.act(spec)
+        
+        # Also log the response at steps 1 and 10
+        if self._step_counter in [1, 10]:
+            print(f"🔍 RESPONSE DEBUG - {self.agent.name} - Step {self._step_counter}")
+            print("=" * 80)
+            print(f"LLM RESPONSE:")
+            print(response)
+            print("=" * 80)
+        
+        return response.strip() if response else ""
 
     def set_persona(self, persona_text: str):
         persona_text = str(persona_text)
