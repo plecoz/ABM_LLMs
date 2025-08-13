@@ -1252,11 +1252,20 @@ class Resident(BaseAgent):
     def step(self):
         """Simplified step method using action system"""
         
+        import uuid
+        step_id = str(uuid.uuid4())[:8]
+        
+        # Store the initial state of current_action to avoid issues with it being modified during the step
+        has_ongoing_action = self.current_action is not None
+        
         if hasattr(self, 'logger'):
-            self.logger.info(f"DEBUG: Step method called for Agent-{self.unique_id}, current_action: {self.current_action}")
+            self.logger.info(f"DEBUG: Step method called for Agent-{self.unique_id}, step_id={step_id}, current_action: {self.current_action}, has_ongoing_action: {has_ongoing_action}, type: {type(self.current_action)}")
         
         try:
-            super().step()
+            # Don't call super().step() because it calls _decide_next_action()
+            # Instead, manually do what we need from the parent class
+            step_count = getattr(self.model, 'step_count', 0)
+            self.location_history.append((step_count, self.geometry))
             
             # Check for daily income payment
             current_day = getattr(self.model, 'day_count', 0)
@@ -1310,16 +1319,7 @@ class Resident(BaseAgent):
                             poi_category = getattr(visited_poi_agent, 'category', 'other')
                             self.model.output_controller.track_poi_visit(poi_category, self.unique_id)
                         
-                        # Note: Action system handles actions separately from POI visits
-                        # Actions are decided in _decide_next_action() when no current action
                         
-                        # Satisfy needs if we're using need-based movement
-                        if self.movement_behavior == 'need-based':
-                            self._satisfy_needs_at_poi(visited_poi_agent.poi_type)
-                        
-                        # Update emotional state if LLM behavior is enabled
-                        if hasattr(self, 'emotional_state') and hasattr(self.model, 'persona_memory_manager'):
-                            self._update_emotional_state_from_poi_visit(visited_poi_agent.poi_type, visited_poi_agent)
                     
                     # Reset travel attributes
                     self.destination_node = None
@@ -1330,9 +1330,10 @@ class Resident(BaseAgent):
                 return
             
             # Handle ongoing action
-            if self.current_action:
+            if has_ongoing_action:
                 if hasattr(self, 'logger'):
-                    self.logger.info(f"DEBUG: Found current_action: {self.current_action.name}")
+                    self.logger.info(f"DEBUG: Entering has_ongoing_action branch, step_id={step_id}")
+                    self.logger.info(f"DEBUG: Found current_action: {self.current_action.name}, step_id={step_id}")
                 self.action_time_remaining -= 1
                 
                 if hasattr(self, 'logger'):
@@ -1344,15 +1345,18 @@ class Resident(BaseAgent):
                         self.logger.info(f"Completing action '{self.current_action.name}'")
                     self._complete_action()
                     self.current_action = None
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"DEBUG: About to return from has_ongoing_action branch, step_id={step_id}")
                 return
-            
-            # No current action - decide what to do next
-            if hasattr(self, 'logger'):
-                self.logger.info(f"DEBUG: No current action (current_action is {self.current_action}), deciding next action")
-            self._decide_next_action()
-            if hasattr(self, 'logger'):
-                self.logger.info(f"DEBUG: About to return after _decide_next_action")
-            return  # Exit after deciding next action
+            else:
+                # No current action - decide what to do next
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"DEBUG: Entering else branch (no ongoing action), step_id={step_id}")
+                    self.logger.info(f"DEBUG: No current action (current_action is {self.current_action}), deciding next action, step_id={step_id}")
+                self._decide_next_action()
+                if hasattr(self, 'logger'):
+                    self.logger.info(f"DEBUG: About to return after _decide_next_action")
+                return  # Exit after deciding next action
             
         except Exception as e:
             # Removed debug print
@@ -1402,11 +1406,13 @@ class Resident(BaseAgent):
             if hasattr(self, 'logger'):
                 self.logger.info(f"DEBUG: About to start action: {action_name}")
             self._start_action(copy.deepcopy(available_actions[action_name]))
+            return  # Return immediately after starting action
         else:
             # Fallback to rest
             if hasattr(self, 'logger'):
                 self.logger.info(f"DEBUG: No valid action, falling back to rest")
             self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
+            return  # Return immediately after starting action
     
     def _llm_decide_action(self, available_actions: Dict[str, Action], temperature: float) -> Optional[str]:
         """Use LLM to decide next action."""
