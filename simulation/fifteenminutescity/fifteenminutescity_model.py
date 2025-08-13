@@ -835,20 +835,7 @@ class FifteenMinuteCity(Model):
                     economic_status_distribution=self.economic_status_distribution
                 )
                 
-                # TEMPORARY FEATURE: For Taipa parish, spawn 30% of residents at casinos
-                if parish_name == "Taipa" and self.pois.get('casino') and i < len(home_locations) * 0.3:
-                    # Find a random casino location
-                    casino_pois = self.pois['casino']
-                    if casino_pois:
-                        casino_node, _ = self.random.choice(casino_pois)
-                        casino_coords = self.graph.nodes[casino_node]
-                        point_geometry = Point(casino_coords['x'], casino_coords['y'])
-                        home_node = casino_node
-                        # TEMPORARY: Mark as tourist for special visualization
-                        agent_props['is_tourist'] = True
-                        # self.logger.info(f"Spawning Taipa resident {agent_id} at casino location as tourist")
-
-                # Determine step size and accessibility radius based on agent's age
+                
                 is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
                 step_size = 60.0 if is_elderly else 80.0
                 accessibility_radius = self.threshold * step_size

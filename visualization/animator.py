@@ -414,16 +414,15 @@ class SimulationAnimator:
         """
         for resident in self.model.residents:
             try:
-                # TEMPORARY FEATURE: Check if resident is a tourist (casino-spawned)
-                is_tourist = getattr(resident, 'is_tourist', False)
+
                 
                 if hasattr(resident, 'traveling') and resident.traveling:
                     # Get interpolated position for traveling agents
                     # Use progress to show position along the path within the current travel step
                     x, y = self._get_interpolated_position(resident, progress)
                     
-                    # TEMPORARY: Use violet color for tourists, blue for regular residents
-                    color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
+                    
+                    color = '#00BFFF'  
                     dot = self.ax.plot(x, y, 'o', color=color, markersize=4, markeredgecolor='black',
                                         markeredgewidth=0.5, alpha=0.8)[0]  
                 else:
@@ -431,17 +430,13 @@ class SimulationAnimator:
                     if hasattr(resident, 'current_node'):
                         x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
                         
-                        # TEMPORARY: Use violet color for tourists, blue for regular residents
-                        color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
+                        
+                        color =  '#00BFFF'  
                         dot = self.ax.plot(x, y, 'o', color=color, markersize=4,
                                            markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]
                     else:
                         # Use geometry if available
                         x, y = resident.geometry.x, resident.geometry.y
-                        
-                        # TEMPORARY: Use violet color for tourists, blue for regular residents
-                        color = '#8A2BE2' if is_tourist else '#00BFFF'  # Violet for tourists, blue for regular
-                        dot = self.ax.plot(x, y, 'o', color=color, markersize=3, alpha=0.7)[0]
                 
                 self.agent_dots.append(dot)
                 
@@ -540,12 +535,7 @@ class SimulationAnimator:
                       label='Residents')
         )
         
-        # TEMPORARY: Add tourists to legend
-        legend_elements.append(
-            plt.Line2D([0], [0], marker='o', color='w',
-                      markerfacecolor='#8A2BE2', markersize=8,
-                      label='Tourists')
-        )
+
         
         # Add environment elements to legend if they exist
         if self.residential_buildings is not None and not self.residential_buildings.empty:

@@ -93,9 +93,6 @@ class Resident(BaseAgent):
         self.needs_selection = self.attributes['needs_selection']
         self.movement_behavior = self.attributes['movement_behavior']
         self.social_network = self.attributes['social_network']
-        
-        # TEMPORARY: Add is_tourist as a direct attribute for easy access
-        self.is_tourist = kwargs.get('is_tourist', False)
 
         
         
