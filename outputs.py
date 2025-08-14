@@ -427,6 +427,21 @@ class OutputController:
             'travel': travel_summary,
             'health': health_summary,
             'unmet_demand_by_parish': unmet,
+            'healthcare_access': {
+                'per_resident': [
+                    {
+                        'agent_id': getattr(a, 'unique_id', None),
+                        'home_node': getattr(a, 'home_node', None),
+                        'parish': getattr(a, 'parish', None),
+                        'success': bool(getattr(a, 'healthcare_access_success', False))
+                    }
+                    for a in getattr(self.model, 'residents', [])
+                ],
+                'summary': {
+                    'num_success': sum(1 for a in getattr(self.model, 'residents', []) if getattr(a, 'healthcare_access_success', False)),
+                    'num_total': num_residents
+                }
+            }
         }
 
         # Determine output path
@@ -443,6 +458,49 @@ class OutputController:
             print(f"\nSummary report saved to: {out_path}")
         except Exception as e:
             self.logger.error(f"Failed to save summary report: {e}")
+
+    def save_healthcare_access_points(self, filepath: str):
+        """
+        Save a minimal JSON file for healthcare accessibility mapping.
+
+        Contents per resident:
+        - agent_id
+        - home_node
+        - x, y (node coordinates)
+        - success (bool) — True if resident completed visit_doctor or go_pharmacy at least once
+        """
+        records = []
+        graph = getattr(self.model, 'graph', None)
+
+        for a in getattr(self.model, 'residents', []):
+            node_id = getattr(a, 'home_node', None)
+            x = y = None
+            if graph is not None and node_id is not None and node_id in graph.nodes:
+                node_data = graph.nodes[node_id]
+                x = node_data.get('x')
+                y = node_data.get('y')
+            rec = {
+                'agent_id': getattr(a, 'unique_id', None),
+                'home_node': node_id,
+                'x': x,
+                'y': y,
+                'success': getattr(a, 'healthcare_access_success', None)
+            }
+            records.append(rec)
+
+        payload = {
+            'simulation_id': f"hc-{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            'city': getattr(self.model, 'city', None),
+            'points': records
+        }
+
+        try:
+            os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
+            with open(filepath, 'w') as f:
+                json.dump(payload, f, indent=2)
+            print(f"Healthcare access points saved to: {filepath}")
+        except Exception as e:
+            self.logger.error(f"Failed to save healthcare access points: {e}")
     
     def reset(self):
         """

@@ -123,6 +123,8 @@ class Resident(BaseAgent):
         self.action_time_remaining = 0
         self.action_memory = []  # List of (action_name, timestamp) tuples - complete history
         self.pending_action: Optional[Action] = None  # Action to start after arriving at POI
+        # Tracking for healthcare accessibility across runs
+        self.healthcare_access_success = None
         # Check employment status (case-insensitive)
         economic_status = kwargs.get('economic_status', 'unemployed')
         self.is_employed = str(economic_status).lower() == 'employed'
@@ -1325,6 +1327,10 @@ class Resident(BaseAgent):
         self.money += self.current_action.cost
         current_time = f"Day {self.model.day_count + 1} {self.model.hour_of_day:02d}:{self.model.step_count % 60:02d}"
         self.action_memory.append((self.current_action.name, current_time))
+        # Mark healthcare access success if applicable
+        if self.current_action.name in ("visit_doctor", "go_pharmacy"):
+            # Only set to True; leave None as-is until first success/failure evaluation
+            self.healthcare_access_success = True
 
     
     def _find_poi_for_action(self, location_type: str) -> Optional[Any]:
