@@ -8,7 +8,6 @@ from typing import Optional, Dict, Any, List
 from enum import Enum
 from datetime import datetime
 import copy
-
 import re
 from brains.concordia_brain import ConcordiaBrain
 from agents.action_system import Action, get_available_actions, EVERYDAY_ACTIONS
@@ -75,10 +74,6 @@ class Resident(BaseAgent):
             'parish': kwargs.get('parish', None),
             'family_id': kwargs.get('family_id', None),
             'social_network': kwargs.get('social_network', []),
-            
-            # Behavior and preferences
-            'needs_selection': kwargs.get('needs_selection', 'random'),
-            'movement_behavior': kwargs.get('movement_behavior', 'need-based'),
             'daily_schedule': kwargs.get('daily_schedule', {}),
             'personality_traits': kwargs.get('personality_traits', {}),
             'activity_preferences': kwargs.get('activity_preferences', {}),
@@ -90,16 +85,8 @@ class Resident(BaseAgent):
         # Convenience properties for frequently accessed attributes
         self.age = self.attributes['age']
         self.parish = self.attributes['parish']
-        self.needs_selection = self.attributes['needs_selection']
-        self.movement_behavior = self.attributes['movement_behavior']
-        self.social_network = self.attributes['social_network']
-        
         
 
-
-        # Current needs (will be updated each step)
-        
-        
         # Determine step size based on age for calculating travel times
         is_elderly = False
         if self.attributes['age_class']:
@@ -170,23 +157,7 @@ class Resident(BaseAgent):
         
         # Calculate daily income from monthly income (moved here to ensure it uses final income value)
         self.daily_income = self.attributes['income'] / 30
-        
-        # DEBUG: Print comprehensive resident characteristics
-        # print(f"DEBUG: Resident {unique_id} characteristics:")
-        # print(f"  - Age: {self.attributes['age']} (class: {self.attributes.get('age_class', 'N/A')})")
-        # print(f"  - Gender: {self.attributes.get('gender', 'N/A')}")
-        # print(f"  - Education: {self.attributes.get('education', 'N/A')}")
-        # print(f"  - Occupation: {self.attributes.get('occupation', 'N/A')}")
-        # print(f"  - Industry: {self.attributes.get('industry', 'N/A')}")
-        # print(f"  - Parish: {self.attributes.get('parish', 'N/A')}")
-        # print(f"  - Employment Status: {self.employment_status}")
-        # print(f"  - Household Type: {self.household_type}")
-        # print(f"  - Monthly Income: {self.attributes['income']}")
-        # print(f"  - Daily Income: {self.daily_income:.2f}")
-        # print(f"  - Movement Behavior: {self.movement_behavior}")
-        # print(f"  - Is Tourist: {self.is_tourist}")
-        # print(f"  - Home Node: {self.home_node}")
-        # print("---")
+
         
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
@@ -200,7 +171,7 @@ class Resident(BaseAgent):
             from brains.concordia_brain import ConcordiaBrain
             self.brain = ConcordiaBrain(name=f"Resident-{unique_id}")
         except Exception as e:
-            # print(f"❌ Agent {unique_id}: Brain initialization failed: {e}")
+
             self.brain = None
 
         # Initialize last path calculation time to prevent rapid recalculation
@@ -214,11 +185,6 @@ class Resident(BaseAgent):
             'concordia_decisions': 0,  # Times Concordia brain made the decision
             'fallback_decisions': 0   # Times fallback was used
         }
-        
-        # Social interaction attributes
-        self.social_propensity = random.uniform(0.3, 0.8)  # Individual social tendency
-        self.contacts = set()  # Set of agent IDs for social connections
-        self.interaction_history = []  # List of interaction records
 
     # =====================================================================
     # AGENT PROPERTY GENERATION METHODS
@@ -250,15 +216,7 @@ class Resident(BaseAgent):
         Returns:
             Dictionary of agent properties
         """
-        # print(f"DEBUG: _generate_agent_properties called with:")
-        # print(f"  - parish: {parish}")
-        # print(f"  - city: {city}")
-        # print(f"  - industry_distribution available: {industry_distribution is not None}")
-        # print(f"  - occupation_distribution available: {occupation_distribution is not None}")
-        # print(f"  - income_distribution available: {income_distribution is not None}")
-        # print(f"  - economic_status_distribution available: {economic_status_distribution is not None}")
-        
-        # Use parish-specific demographics if available
+
         if parish and parish_demographics and parish in parish_demographics:
             demographics = parish_demographics[parish]
             # print(f"DEBUG: Using parish-specific demographics for {parish}")
@@ -531,8 +489,6 @@ class Resident(BaseAgent):
 
         return props
 
-
-
     @staticmethod
     def _sample_from_distribution(distribution):
         """
@@ -623,8 +579,6 @@ class Resident(BaseAgent):
         # Default fallback
         return 50000
 
-
-
         # ---------------------------------------------------
         # Concordia Brain (LLM) integration
         # ---------------------------------------------------
@@ -632,27 +586,6 @@ class Resident(BaseAgent):
     # =====================================================================
     # 2. PATH SELECTION AND TRAVEL MODULE
     # =====================================================================
-
-    def calculate_travel_time(self, from_node, to_node):
-        """
-        Calculate the travel time between two nodes based on age-class-specific step sizes.
-        - Residents with age_class indicating 65+: 60-meter steps (1 minute at 3.6km/h)
-        - Younger residents: 80-meter steps (1 minute at 4.8km/h)
-        Always rounds up to ensure the agent doesn't move more than their step size per minute.
-        
-        Args:
-            from_node: Starting node ID
-            to_node: Destination node ID
-            
-        Returns:
-            Number of time steps needed for travel (each step is 1 minute)
-        """
-        # For LLM-enabled agents, use path selection instead of simple shortest path
-        if self.movement_behavior == 'llms':
-            return self._calculate_travel_time_with_path_selection(from_node, to_node)
-        
-        # Standard shortest path calculation for non-LLM agents
-        return self._calculate_standard_travel_time(from_node, to_node)
 
     def _calculate_standard_travel_time(self, from_node, to_node):
         """
@@ -812,9 +745,7 @@ class Resident(BaseAgent):
         Returns:
             List of path node lists
         """
-        try:
-            import itertools
-            
+        try: 
             paths = []
             graph = self.model.graph.copy()
             
@@ -1061,7 +992,7 @@ class Resident(BaseAgent):
         Returns:
             Boolean indicating if travel was successfully started
         """
-        travel_time = self.calculate_travel_time(self.current_node, target_node)
+        travel_time = self._calculate_travel_time_with_path_selection(self.current_node, target_node)
         
         if travel_time is None:
             return False
@@ -1095,15 +1026,6 @@ class Resident(BaseAgent):
     # =====================================================================
 
     def move_to_poi(self, poi_id):
-        """
-        Move to a specific POI by its unique ID.
-        
-        Args:
-            poi_id: The unique ID of the POI agent to move to
-            
-        Returns:
-            Boolean indicating if the move was successful
-        """
             
         # Find the POI agent with the specified ID
         target_poi = None
@@ -1127,23 +1049,14 @@ class Resident(BaseAgent):
         return self.start_travel(target_poi.node_id, target_poi.geometry)
 
 
-
-
     def step(self):
         """Simplified step method using action system"""
         
-        import uuid
-        step_id = str(uuid.uuid4())[:8]
         
         # Store the initial state of current_action to avoid issues with it being modified during the step
         has_ongoing_action = self.current_action is not None
-        
-        # if hasattr(self, 'logger'):
-        #     self.logger.info(f"DEBUG: Step method called for Agent-{self.unique_id}, step_id={step_id}, current_action: {self.current_action}, has_ongoing_action: {has_ongoing_action}, type: {type(self.current_action)}")
-        
         try:
-            # Don't call super().step() because it calls _decide_next_action()
-            # Instead, manually do what we need from the parent class
+
             step_count = getattr(self.model, 'step_count', 0)
             self.location_history.append((step_count, self.geometry))
             
@@ -1157,14 +1070,12 @@ class Resident(BaseAgent):
             
             # Handle ongoing travel
             if self.traveling:
-                # Removed debug print
-                # Track actual travel time in output controller
+
                 if hasattr(self.model, 'output_controller'):
                     self.model.output_controller.track_travel_step(self.unique_id)
                 
                 self.travel_time_remaining -= 1
-                
-                # Check if we've arrived
+
                 if self.travel_time_remaining <= 0:
                     # Removed debug print
                     self.traveling = False
@@ -1199,54 +1110,32 @@ class Resident(BaseAgent):
                             poi_category = getattr(visited_poi_agent, 'category', 'other')
                             self.model.output_controller.track_poi_visit(poi_category, self.unique_id)
                         
-                        
-                    
                     # Reset travel attributes
                     self.destination_node = None
                     self.destination_geometry = None
                     
                     # Start pending action if we have one
                     if self.pending_action:
-                        print(f"🎯 Arrived at destination! Starting pending action: {self.pending_action.name}")
+                        print(f"Arrived at destination! Starting pending action: {self.pending_action.name}")
                         self.current_action = self.pending_action
                         self.action_time_remaining = self.pending_action.duration_minutes
                         self.pending_action = None  # Clear pending action
                         
                         if hasattr(self, 'logger'):
                             self.logger.info(f"Started pending action '{self.current_action.name}' for {self.current_action.duration_minutes} minutes")
-                
-                # Still traveling, don't take any other movement actions
-                # Removed debug print
+
                 return
             
             # Handle ongoing action
-            if has_ongoing_action:
-                # if hasattr(self, 'logger'):
-                #     self.logger.info(f"DEBUG: Entering has_ongoing_action branch, step_id={step_id}")
-                #     self.logger.info(f"DEBUG: Found current_action: {self.current_action.name}, step_id={step_id}")
+            if has_ongoing_action:     
                 self.action_time_remaining -= 1
-                
-                # if hasattr(self, 'logger'):
-                #     self.logger.info(f"Action '{self.current_action.name}' - {self.action_time_remaining} minutes remaining")
-                
-                # Check if action is complete
                 if self.action_time_remaining <= 0:
-                    # if hasattr(self, 'logger'):
-                    #     self.logger.info(f"Completing action '{self.current_action.name}'")
                     self._complete_action()
                     self.current_action = None
-                # if hasattr(self, 'logger'):
-                #     self.logger.info(f"DEBUG: About to return from has_ongoing_action branch, step_id={step_id}")
                 return
             else:
-                # No current action - decide what to do next
-                # if hasattr(self, 'logger'):
-                #     self.logger.info(f"DEBUG: Entering else branch (no ongoing action), step_id={step_id}")
-                #     self.logger.info(f"DEBUG: No current action (current_action is {self.current_action}), deciding next action, step_id={step_id}")
                 self._decide_next_action()
-                # if hasattr(self, 'logger'):
-                #     self.logger.info(f"DEBUG: About to return after _decide_next_action")
-                return  # Exit after deciding next action
+                return  
             
         except Exception as e:
                 # Removed debug print
@@ -1254,8 +1143,6 @@ class Resident(BaseAgent):
                 self.logger.error(f"Error in resident step: {e}")
             import traceback
             traceback.print_exc()
-
-
 
     # =====================================================================
     # ACTION SYSTEM METHODS
@@ -1274,43 +1161,28 @@ class Resident(BaseAgent):
             is_employed=self.is_employed,
             money=self.money
         )
-        
-        # Remove excluded actions (ones that failed due to no POI)
         if excluded_actions:
             for excluded in excluded_actions:
                 available_actions.pop(excluded, None)
             print(f" Excluded failed actions: {excluded_actions}")
-        
         if not available_actions:
-            # No actions available - just rest
             if hasattr(self, 'logger'):
                 self.logger.info(f"No actions available at hour {hour}, defaulting to rest")
             self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
             return
-        
-        # if hasattr(self, 'logger'):
-        #     self.logger.info(f"Available actions at hour {hour}: {list(available_actions.keys())}")
-        
-        # Check if work is mandatory
+
         if self.is_employed and 9 <= hour < 17:
-            print(f"🏢 WORK MANDATORY: Agent {self.unique_id} (employed) must work at hour {hour}")
-        
-        # Use LLM if available, otherwise use simple logic
+            print(f"WORK MANDATORY: Agent {self.unique_id} (employed) must work at hour {hour}")
+
         action_name = None
-        if self.brain and self.movement_behavior == 'llms':
+        if self.brain :
             action_name = self._llm_decide_action(available_actions, temperature)
         else:
             # Fallback: choose first available action for non-LLM agents
             action_name = list(available_actions.keys())[0] if available_actions else None
-            print(f"🤖 Non-LLM agent chose: {action_name} (first available action)")
-        
-        # Start the selected action
+            print(f" agent chose without brain: {action_name} (first available action)")
         if action_name and action_name in available_actions:
-            # if hasattr(self, 'logger'):
-            #     self.logger.info(f"DEBUG: About to start action: {action_name}")
             success = self._start_action(copy.deepcopy(available_actions[action_name]))
-            
-            # If action failed (no POI), retry with excluded actions
             if not success and self.current_action is None:
                 print(f" Action '{action_name}' failed, retrying with different action...")
                 excluded_actions = excluded_actions or []
@@ -1318,40 +1190,30 @@ class Resident(BaseAgent):
                 self._decide_next_action(excluded_actions)
             return  # Return immediately after starting action
         else:
-            # Fallback to rest
-            # if hasattr(self, 'logger'):
-            #     self.logger.info(f"DEBUG: No valid action, falling back to rest")
             self._start_action(copy.deepcopy(EVERYDAY_ACTIONS["rest"]))
             return  # Return immediately after starting action
     
     def _llm_decide_action(self, available_actions: Dict[str, Action], temperature: float) -> Optional[str]:
-        """Use LLM to decide next action."""
         
         # Build memory summary
         memory_summary = "No recent actions"
         if self.action_memory:
             recent = self.action_memory[-5:]  # Last 5 actions
             memory_summary = "Recent actions: " + ", ".join([f"{action} at {time}" for action, time in recent])
-        
-        # Create observation
+
         observation = (
             f"Current state: Money=${self.money:.0f}, Health={self.health_status}, "
             f"Hour={self.model.hour_of_day}, Outside temperature={temperature:.1f}°C. "
             f"{memory_summary}. "
             f"Available actions: {list(available_actions.keys())}"
         )
-        
-        # Ask LLM to decide
+
         try:
             self.brain.observe(observation)
-            
-            # Format available actions with descriptions
             action_list = []
             for action_name, action in available_actions.items():
-                action_list.append(f"- {action_name}: {action.description}")
-            
-            actions_text = "\n".join(action_list)
-            
+                action_list.append(f"- {action_name}: {action.description}")            
+            actions_text = "\n".join(action_list)           
             prompt = (
                 f"You must choose ONE action from the list below, considering your current situation:\n"
                 f"Money: ${self.money:.0f}\n"
@@ -1367,21 +1229,16 @@ class Resident(BaseAgent):
             )
             
             response = self.brain.decide(prompt)
-            
-            # Parse the structured response
             if response:
                 print(f"LLM Full Response:\n{response}")
                 
-                # Extract action and reason using regex
-                import re
                 action_match = re.search(r'Action:\s*([^\n]+)', response, re.IGNORECASE)
                 reason_match = re.search(r'Reason:\s*([^\n]+)', response, re.IGNORECASE)
                 
                 if action_match:
                     action_name = action_match.group(1).strip().lower().replace('"', '').replace("'", "")
                     reason = reason_match.group(1).strip() if reason_match else "No reason provided"
-                    
-                    # Check if it's valid
+
                     if action_name in available_actions:
                         print(f"LLM chose: '{action_name}' | Reason: {reason}")
                         return action_name
@@ -1392,8 +1249,8 @@ class Resident(BaseAgent):
                                 print(f"LLM chose: '{available_action}' (matched from '{action_name}') | Reason: {reason}")
                                 return available_action
                         
-                        print(f"❌ LLM chose invalid action: '{action_name}' | Reason: {reason}")
-                        print(f"   Available actions: {list(available_actions.keys())}")
+                        print(f" LLM chose invalid action: '{action_name}' | Reason: {reason}")
+                        print(f" Available actions: {list(available_actions.keys())}")
                         return None
                 else:
                     # Fallback: try to find any action name in the response
@@ -1403,10 +1260,10 @@ class Resident(BaseAgent):
                             print(f"Found '{available_action}' in unstructured response: {response[:100]}...")
                             return available_action
                     
-                    print(f"❌ Could not parse action from response: {response[:100]}...")
+                    print(f" Could not parse action from response: {response[:100]}...")
                     return None
             else:
-                print(f"❌ LLM returned empty response")
+                print(f" LLM returned empty response")
                 return None
             
         except Exception as e:
@@ -1416,13 +1273,6 @@ class Resident(BaseAgent):
 
     def _start_action(self, action: Action):
         """Start executing an action."""
-        
-        # if hasattr(self, 'logger'):
-        #     self.logger.info(f"DEBUG: _start_action called with action: {action.name}")
-        
-        # Note: action timing will be set up later when action actually starts
-        
-        # Find appropriate POI for action location
         target_poi = self._find_poi_for_action(action.location_type)
         print(f" POI Search: action='{action.name}', location_type='{action.location_type}', found_poi={target_poi is not None}")
         
@@ -1432,28 +1282,24 @@ class Resident(BaseAgent):
             
             # Move to POI if not already there
             if target_poi.node_id != self.current_node:
-                print(f"🚶 Agent needs to travel to POI {target_poi.unique_id} first")
+                print(f"Agent needs to travel to POI {target_poi.unique_id} first")
                 # Store the action to start after arrival
                 self.pending_action = action
                 self.current_action = None  # No current action during travel
                 self.move_to_poi(target_poi.unique_id)
                 return True  # Travel started successfully
             else:
-                # Already at the POI, start action immediately
-                print(f" Agent already at POI, starting action immediately")
+                print(f"Agent already at POI, starting action immediately")
                 self.current_action = action
         elif action.location_type != "home":
-            # No POI found for this action - track unmet demand
             agent_parish = getattr(self, 'parish', 'unknown')
             self.model.track_unmet_demand(agent_parish, action.location_type)
-            
-            # Action failed due to no POI - set current_action to None so agent can retry
             self.current_action = None
             return False  # Return False to indicate failure
         else:
             # Do action at current location (home or current node)
             if action.location_type == "home" and self.current_node != self.home_node:
-                print(f"🏠 Agent needs to travel home first")
+                print(f"Agent needs to travel home first")
                 # Store the action to start after arriving home
                 self.pending_action = action
                 self.current_action = None  # No current action during travel
@@ -1463,11 +1309,7 @@ class Resident(BaseAgent):
                 # Already at the right location, start action immediately
                 print(f" Agent at correct location, starting action immediately")
                 self.current_action = action
-            
-            # if hasattr(self, 'logger'):
-            #     self.logger.info(f"Starting action '{action.name}' at current location")
-        
-        # If we have a current action, set the timer
+
         if self.current_action:
             self.action_time_remaining = self.current_action.duration_minutes
             if hasattr(self, 'logger'):
@@ -1480,24 +1322,13 @@ class Resident(BaseAgent):
         
         if not self.current_action:
             return
-
-        # Update agent state
         self.money += self.current_action.cost
-        
-        # Store in memory with timestamp
         current_time = f"Day {self.model.day_count + 1} {self.model.hour_of_day:02d}:{self.model.step_count % 60:02d}"
         self.action_memory.append((self.current_action.name, current_time))
-        
-        # if hasattr(self, 'logger'):
-        #     self.logger.info(f"Completed action '{self.current_action.name}' "
-        #                    f"(Money: ${self.money:.0f})")
+
     
     def _find_poi_for_action(self, location_type: str) -> Optional[Any]:
-        """
-        Find an appropriate POI for the action location type.
-        Uses logical matching based on POI types.
-        """
-        
+
         if location_type == "home":
             return None  # Stay at home node
         
@@ -1555,14 +1386,13 @@ class Resident(BaseAgent):
                         matching_pois.append(poi)
             
             # Debug logging for POI search
-            print(f"🔍 POI Search Debug for location_type='{location_type}':")
+            print(f" POI Search Debug for location_type='{location_type}':")
             print(f"   Available POI types: {set(all_poi_types)}")
             print(f"   Found {len(matching_pois)} matching POIs")
             
             if matching_pois:
                 # Choose closest POI if multiple matches
                 if len(matching_pois) > 1:
-                    # Try to find closest based on travel time
                     best_poi = min(matching_pois, 
                                  key=lambda p: self.accessible_nodes.get(p.node_id, float('inf')))
                     return best_poi
@@ -1571,9 +1401,6 @@ class Resident(BaseAgent):
         
         return None
 
-
-
-    # This old _start_action method is no longer needed - removed to avoid conflicts
     pass
 
 
@@ -1590,7 +1417,7 @@ class Resident(BaseAgent):
         Returns:
             Selected path nodes (list) or None if LLM fails
         """
-        if not self.model.llm_enabled or not path_options:
+        if  not path_options:
             # Fallback to shortest path when LLM disabled
             return self._fallback_path_selection(path_options)
         
@@ -1764,16 +1591,7 @@ class Resident(BaseAgent):
                 return self._fallback_path_selection(path_options)
 
     def _parse_concordia_path_response(self, response, num_paths):
-        """
-        Parse Concordia brain's response to extract path selection.
-        
-        Args:
-            response: Raw response from Concordia brain
-            num_paths: Number of available path options
-            
-        Returns:
-            Selected path index (0-based) or None if parsing fails
-        """
+
         try:
             # Clean the response
             response = response.strip()
@@ -1807,15 +1625,6 @@ class Resident(BaseAgent):
             return None
 
     def _fallback_path_selection(self, path_options):
-        """
-        Fallback path selection - choose shortest time.
-        
-        Args:
-            path_options: Available path options
-            
-        Returns:
-            Path nodes of shortest time path or None
-        """
         if not path_options:
             print(f"DEBUG: Resident {self.unique_id} - No path options available for fallback")
             return None
@@ -1825,31 +1634,15 @@ class Resident(BaseAgent):
         return shortest_path['path_nodes']
 
     def _paths_are_same(self, path1, path2):
-        """
-        Check if two paths are essentially the same.
-        
-        Args:
-            path1: First path (list of node IDs)
-            path2: Second path (list of node IDs)
-            
-        Returns:
-            Boolean indicating if paths are the same
-        """
+
         if not path1 or not path2:
             return False
             
         # Compare the actual node lists
         return path1 == path2
-
-    
-            
+           
     def get_parish_info(self):
-        """
-        Get information about the agent's parish.
-        
-        Returns:
-            Dictionary with parish details or None if no parish assigned
-        """
+
         if not self.parish:
             return None
             
@@ -1873,12 +1666,6 @@ class Resident(BaseAgent):
         return self.path_selection_stats.copy()
     
     def get_non_shortest_path_percentage(self):
-        """
-        Calculate the percentage of times this resident did not select the shortest path.
-        
-        Returns:
-            Dictionary with percentage and counts, or None if no multi-path decisions made
-        """
         if self.path_selection_stats['total_multi_path_decisions'] == 0:
             return None
         
@@ -1894,12 +1681,6 @@ class Resident(BaseAgent):
         }
 
     def go_home(self):
-        """
-        Move to the home node.
-        
-        Returns:
-            Boolean indicating if the move home was successful
-        """
         # If already at home or traveling, don't start a new journey
         if self.current_node == self.home_node or self.traveling:
             return False
@@ -1913,7 +1694,3 @@ class Resident(BaseAgent):
         
         # Start traveling home
         return self.start_travel(self.home_node, home_geometry)
-
-
-
-        

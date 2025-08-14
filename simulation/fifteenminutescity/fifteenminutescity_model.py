@@ -1,5 +1,7 @@
 from mesa import Model
-from mesa.space import NetworkGrid
+from mesa.space import NetworkGrid     
+import re
+import unicodedata
 import random
 from agents.fifteenminutescity.resident import Resident
 from agents.fifteenminutescity.poi import POI
@@ -8,6 +10,8 @@ import osmnx as ox
 from shapely.geometry import Point
 from shapely.geometry.base import BaseGeometry
 import json
+import math
+import random       
 import logging
 import numpy as np
 from mesa_geo import GeoSpace
@@ -83,7 +87,7 @@ class FifteenMinuteCity(Model):
                 - parish_demographics: Dictionary of parish-specific demographics
                 - parish_distribution: Dictionary mapping parishes to number of residents
                 - random_distribution: Whether to distribute residents randomly
-                - needs_selection: Method for generating resident needs ('random', 'maslow', 'capability', 'llms')
+                
                 - movement_behavior: Agent movement behavior ('need-based' or 'random')
                 - threshold: Time threshold in minutes for accessibility (default: 15 for 15-minute city)
                 - base_temperature: Base temperature in Celsius (default: 25°C)
@@ -121,7 +125,7 @@ class FifteenMinuteCity(Model):
         
         # Add a step counter and interaction counter
         self.step_count = 0
-        self.interactions_this_step = 0
+
         
         # Add time simulation
         self.hour_of_day = kwargs.get('start_hour', 8)  # Start at 8 AM by default
@@ -173,19 +177,16 @@ class FifteenMinuteCity(Model):
         self.random_distribution = kwargs.get('random_distribution', False)
         
         # Get needs selection method
-        self.needs_selection = kwargs.get('needs_selection', 'random')
+        
         
         # Get movement behavior setting
-        self.movement_behavior = kwargs.get('movement_behavior', 'need-based')
+        
         
         # Initialize LLM components if needed
-        self.llm_enabled = (self.needs_selection == 'llms' or self.movement_behavior == 'llms')
-        if self.llm_enabled:
-            self.logger.info("Initializing LLM components for persona-driven behavior")
-            self.persona_memory_manager = PersonaMemoryManager()
-            
-        else:
-            self.persona_memory_manager = None
+        
+        
+        self.logger.info("Initializing LLM components for persona-driven behavior")
+        self.persona_memory_manager = PersonaMemoryManager()
             
         
         # Create a mapping of nodes to parishes if parishes data is available
@@ -205,7 +206,6 @@ class FifteenMinuteCity(Model):
                 "Total Agents": lambda m: m.get_agent_count(),
                 "Person Agents": lambda m: m.get_agent_count(agent_type=Resident),
                 "POI Agents": lambda m: m.get_agent_count(agent_type=POI),
-                "Interactions": lambda m: m.interactions_this_step
             },
             agent_reporters={
                 "Position": lambda a: (a.geometry.x, a.geometry.y),
@@ -358,8 +358,6 @@ class FifteenMinuteCity(Model):
             print(f"  {category}: {count} POIs created")
         print(f"Total POIs created: {sum(poi_counts_by_category.values())}")
         print()
-
-        self._initialize_social_networks(kwargs.get('social_network_density', 0.1))
         self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
 
     def _map_nodes_to_parishes(self):
@@ -414,24 +412,11 @@ class FifteenMinuteCity(Model):
         return sum(1 for agent in self.all_agents if isinstance(agent, agent_type))
     
     def get_agents_by_parish(self, parish_name):
-        """
-        Get all agents in a specific parish.
-        
-        Args:
-            parish_name: Name of the parish to filter by
-            
-        Returns:
-            List of agents in the specified parish
-        """
+
         return [agent for agent in self.all_agents if getattr(agent, 'parish', None) == parish_name]
 
     def get_current_time(self):
-        """
-        Get the current simulation time in a readable format.
-        
-        Returns:
-            Dictionary with current time information
-        """
+
         minutes_elapsed = self.step_count
         total_hours = minutes_elapsed // 60
         current_minute = minutes_elapsed % 60
@@ -455,11 +440,6 @@ class FifteenMinuteCity(Model):
     def step(self):
         """Advance the model by one step"""
 
-        
-        # Reset per-step counters
-        self.interactions_this_step = 0
-        
-        # Increment step counter
         self.step_count += 1
         
         # Advance time (each step is 1 minute)
@@ -497,10 +477,8 @@ class FifteenMinuteCity(Model):
         This can include environmental changes, global events, etc.
         """
         # This is a placeholder. You can add model-wide dynamics here.
-        pass
-    
+        pass 
 
-    
     def _load_industry_distribution(self, industry_path):  # NEW METHOD
         """
         Load industry distribution probabilities from a JSON file.
@@ -584,15 +562,7 @@ class FifteenMinuteCity(Model):
         return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
 
     def _convert_income_bracket_to_value(self, income_bracket):
-        """
-        Convert income bracket string to actual income value.
-        
-        Args:
-            income_bracket: String like "20 000 - 29 999", "≧60 000", "< 3 500", etc.
-            
-        Returns:
-            Random income value within the bracket range
-        """
+
         if not income_bracket or income_bracket == "Unpaid family worker":
             return 0
         
@@ -616,10 +586,7 @@ class FifteenMinuteCity(Model):
         return None
 
     def print_demographic_statistics(self):
-        """
-        Print demographic statistics of all residents including percentages and counts.
-        Shows distribution of age_class, gender, education, occupation, and industry.
-        """
+
         print("\n" + "="*60)
         print("DEMOGRAPHIC STATISTICS")
         print("="*60)
@@ -685,21 +652,6 @@ class FifteenMinuteCity(Model):
         print("END DEMOGRAPHIC STATISTICS")
         print("="*60 + "\n")
 
-    def _initialize_social_networks(self, density=0.1):
-        """
-        Initialize social networks between resident agents.
-        
-        Args:
-            density: Probability of connection between any two agents
-        """
-        # For each agent, connect to others with probability 'density'
-        for agent in self.residents:
-            for other in self.residents:
-                # Don't connect to self and only process each pair once
-                if agent.unique_id != other.unique_id and self.random.random() < density:
-                    agent.add_to_social_network(other.unique_id)
-                    # Bidirectional connection
-                    other.add_to_social_network(agent.unique_id)
 
     def get_nearby_agents(self, agent, distance=1.0):
         """
@@ -849,16 +801,14 @@ class FifteenMinuteCity(Model):
                 
                 resident = Resident(
                     model=self, unique_id=agent_id, geometry=point_geometry,
-                    home_node=home_node, accessible_nodes=accessible_nodes,
-                    parish=parish, needs_selection=self.needs_selection,
-                    movement_behavior=self.movement_behavior, 
+                    home_node=home_node, accessible_nodes=accessible_nodes, 
                     access_distance=access_distance_meters,
                     **agent_props
                 )
                 
                 # Assign persona if LLM behavior is enabled
-                if self.llm_enabled:
-                    self._assign_persona_to_resident(resident)
+                
+                self._assign_persona_to_resident(resident)
                 
                 self.grid.place_agent(resident, home_node)
                 self.schedule.add(resident)
@@ -963,8 +913,8 @@ class FifteenMinuteCity(Model):
             )
             
             # Assign persona if LLM behavior is enabled
-            if self.llm_enabled:
-                self._assign_persona_to_resident(resident)
+            
+            self._assign_persona_to_resident(resident)
             
             self.grid.place_agent(resident, home_node)
             self.schedule.add(resident)
@@ -984,9 +934,7 @@ class FifteenMinuteCity(Model):
         """
         if not parish_name:
             return parish_name
-        
-        import re
-        import unicodedata
+
         
         # Remove Chinese characters (keep only Latin characters, numbers, spaces, and basic punctuation)
         cleaned = re.sub(r'[^\w\s\-\.\(\)]', '', parish_name, flags=re.ASCII)
@@ -1007,7 +955,7 @@ class FifteenMinuteCity(Model):
         Args:
             resident: The resident agent to assign a persona to
         """
-        if not self.llm_enabled or not self.persona_memory_manager:
+        if not self.persona_memory_manager:
             return
 
         persona = self.persona_memory_manager.create_agent_persona(
@@ -1020,7 +968,6 @@ class FifteenMinuteCity(Model):
             }
         )
         
-
         resident.persona = persona
         
         # Sync persona with Concordia brain
@@ -1028,33 +975,12 @@ class FifteenMinuteCity(Model):
             # Convert simple persona to string for the brain
             persona_str = f"{persona.name}: {persona.description}"
             resident.brain.set_persona(persona_str)
-            
-            
-            # print(f"  -> Persona set successfully")
-            # print(f"  -> Testing brain with sample observation...")
-                
-            # Test the brain with a sample observation and decision
-            test_observation = "You are at home and need to decide what to do next. The weather is mild."
-            resident.brain.observe(test_observation)
-                
-            test_decision_prompt = "What would you like to do? Respond briefly with your choice."
-            test_response = resident.brain.decide(test_decision_prompt)
-
-        
         self.logger.debug(f"Assigned dynamic persona to resident {resident.unique_id}")
     
 
 
     def _calculate_building_areas(self, buildings_gdf):
-        """
-        Calculate building areas using proper projected coordinates to avoid geographic CRS warnings.
-        
-        Args:
-            buildings_gdf: GeoDataFrame with building geometries
-            
-        Returns:
-            GeoDataFrame with 'area' column added using projected coordinates
-        """
+
         if buildings_gdf.empty:
             return buildings_gdf
         
@@ -1067,10 +993,6 @@ class FifteenMinuteCity(Model):
             # For other cities, we could use a more general approach like Web Mercator (EPSG:3857)
             if 'Macau' in self.city:
                 projected_crs = 'EPSG:32649'  # UTM Zone 49N for Macau
-            elif 'Barcelona' in self.city:
-                projected_crs = 'EPSG:32631'  # UTM Zone 31N for Barcelona
-            elif 'Hong Kong' in self.city:
-                projected_crs = 'EPSG:32650'  # UTM Zone 50N for Hong Kong
             else:
                 # Default to Web Mercator for other cities
                 projected_crs = 'EPSG:3857'
@@ -1088,12 +1010,7 @@ class FifteenMinuteCity(Model):
         return buildings_copy
     
     def aggregate_path_selection_stats(self):
-        """
-        Aggregate path selection statistics from all residents.
-        
-        Returns:
-            Dictionary with aggregated statistics
-        """
+
         # Reset aggregated stats
         self.path_selection_stats = {
             'total_multi_path_decisions': 0,
@@ -1174,7 +1091,7 @@ class FifteenMinuteCity(Model):
         
         self.unmet_demand_by_parish[agent_parish][poi_type] += 1
         
-        print(f"📊 UNMET DEMAND: Parish '{agent_parish}' needs more '{poi_type}' POIs (total requests: {self.unmet_demand_by_parish[agent_parish][poi_type]})")
+        print(f"UNMET DEMAND: Parish '{agent_parish}' needs more '{poi_type}' POIs (total requests: {self.unmet_demand_by_parish[agent_parish][poi_type]})")
 
     def display_unmet_demand_summary(self):
         """
@@ -1199,7 +1116,7 @@ class FifteenMinuteCity(Model):
             parish_total = sum(demands.values())
             total_unmet_requests += parish_total
             
-            print(f"📍 PARISH: {parish} (Total unmet requests: {parish_total})")
+            print(f" PARISH: {parish} (Total unmet requests: {parish_total})")
             
             # Sort POI types by demand (highest first)
             sorted_demands = sorted(demands.items(), key=lambda x: x[1], reverse=True)
@@ -1210,34 +1127,18 @@ class FifteenMinuteCity(Model):
             
             print()
         
-        print(f"🏙️  TOTAL UNMET REQUESTS ACROSS ALL PARISHES: {total_unmet_requests}")
-        print("="*60)
-        print("💡 URBAN PLANNING INSIGHTS:")
-        print("   - High demand areas may need additional POIs of those types")
-        print("   - Consider improving transportation to existing POIs")
-        print("   - Focus development on most requested POI types per parish")
+        print(f" TOTAL UNMET REQUESTS ACROSS ALL PARISHES: {total_unmet_requests}")
         print("="*60)
     
     def set_temperature(self, temperature_celsius):
-        """
-        Set the base environmental temperature for the simulation.
-        This becomes the center of the daily temperature variation.
-        
-        Args:
-            temperature_celsius (float): Base temperature in Celsius
-        """
+
         self.base_temperature = float(temperature_celsius)
         # Also update current temperature immediately
         self._update_temperature()
         self.logger.info(f"Base environmental temperature set to {self.base_temperature}°C")
     
     def set_time_period(self, time_period):
-        """
-        Set the time period for the simulation.
-        
-        Args:
-            time_period (str): One of "night", "dawn", "sunrise", "daytime"
-        """
+
         valid_periods = ["night", "dawn", "sunrise", "daytime"]
         if time_period not in valid_periods:
             raise ValueError(f"Invalid time period '{time_period}'. Must be one of: {valid_periods}")
@@ -1246,15 +1147,7 @@ class FifteenMinuteCity(Model):
         self.logger.info(f"Time period set to '{self.time_period}'")
     
     def _auto_update_time_period(self):
-        """
-        Automatically update time period based on current hour of day.
-        
-        Time periods:
-        - night: 22:00 - 05:59
-        - dawn: 06:00 - 06:59
-        - sunrise: 07:00 - 07:59
-        - daytime: 08:00 - 21:59
-        """
+
         hour = self.hour_of_day
         
         if 22 <= hour <= 23 or 0 <= hour <= 5:
@@ -1277,9 +1170,7 @@ class FifteenMinuteCity(Model):
         - Small hourly noise for realistic fluctuations
         - Updates only when the hour changes
         """
-        import math
-        import random
-        
+
         current_hour = self.hour_of_day
         
         # Only update temperature when the hour changes
@@ -1336,19 +1227,12 @@ class FifteenMinuteCity(Model):
             )
     
     def get_environmental_context(self):
-        """
-        Get current environmental context for use by agents.
-        
-        Returns:
-            dict: Environmental context including temperature, time period, and behavioral recommendations
-        """
+
         context = {
             'temperature': self.temperature,
             'time_period': self.time_period,
             'hour': self.hour_of_day,
         }
-        
-
         return context
     
 
