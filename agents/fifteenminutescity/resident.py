@@ -1591,7 +1591,7 @@ class Resident(BaseAgent):
         
         if not self.current_action:
             return
-        
+
         # Update agent state
         self.money += self.current_action.cost
         
@@ -1737,7 +1737,7 @@ class Resident(BaseAgent):
             if hasattr(self.model, 'get_environmental_context'):
                 env_data = self.model.get_environmental_context()
                 env_context = (
-                    f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
+                    f"Environment: {env_data['temperature']:.1f}°C, "
                     f"time period: {env_data['time_period']}. "
                 )
                 
@@ -2088,7 +2088,7 @@ class Resident(BaseAgent):
         if hasattr(self.model, 'get_environmental_context'):
             env_data = self.model.get_environmental_context()
             env_context = (
-                f"Environment: {env_data['weather_description']} ({env_data['temperature']}°C), "
+                f"Environment: {env_data['temperature']:.1f}°C, "
                 f"time period: {env_data['time_period']}. "
             )
             
