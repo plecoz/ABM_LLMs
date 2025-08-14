@@ -49,7 +49,7 @@ class SimplePersonaManager:
             household_simple = 'elderly'
         elif 'family' in household_type.lower() or 'parent' in household_type.lower():
             household_simple = 'family'
-            else:
+        else:
             household_simple = 'single'
         
         # Create simple demographic placeholder for LLM interpretation

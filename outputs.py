@@ -393,6 +393,20 @@ class OutputController:
             'total_travel_events': len(self.travel_events)
         }
 
+        # Health status summary (current state at end of simulation)
+        health_counts: Dict[str, int] = {}
+        for a in getattr(self.model, 'residents', []):
+            status = getattr(a, 'health_status', None) or 'unknown'
+            health_counts[status] = health_counts.get(status, 0) + 1
+        num_sick = health_counts.get('sick', 0)
+        percent_sick = (num_sick / num_residents * 100.0) if num_residents else 0.0
+        health_summary = {
+            'num_residents': num_residents,
+            'num_sick': num_sick,
+            'percent_sick': round(percent_sick, 2),
+            'by_status': health_counts,
+        }
+
         # Unmet demand (POIs that couldn't be accessed)
         unmet = getattr(self.model, 'unmet_demand_by_parish', {}) or {}
 
@@ -411,6 +425,7 @@ class OutputController:
                 'by_category': visits_by_category
             },
             'travel': travel_summary,
+            'health': health_summary,
             'unmet_demand_by_parish': unmet,
         }
 

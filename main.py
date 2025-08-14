@@ -315,7 +315,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False, interactive=False, save_buildings=None, load_buildings=None, base_temperature=25):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False, interactive=False, save_buildings=None, load_buildings=None, base_temperature=25, percent_sick=0.0):
     """
     Run the 15-minute city simulation.
     
@@ -480,6 +480,19 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         threshold=threshold,
         base_temperature=base_temperature
     )
+
+    # Initialize a percentage of residents as sick (for behavior studies)
+    try:
+        pct = max(0.0, min(100.0, float(percent_sick)))
+    except Exception:
+        pct = 0.0
+    if pct > 0 and len(model.residents) > 0:
+        num_sick = max(1, int(len(model.residents) * pct / 100.0))
+        # Use model's RNG for reproducibility
+        selected = model.random.sample(model.residents, k=min(num_sick, len(model.residents)))
+        for r in selected:
+            setattr(r, 'health_status', 'sick')
+        print(f"Initialized {len(selected)} sick residents out of {len(model.residents)} ({pct:.1f}%)")
     
     print("Starting simulation...")
     
@@ -594,6 +607,7 @@ if __name__ == "__main__":
     parser.add_argument('--steps', type=int, default=1440, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--base-temperature', type=float, default=30.0, help='Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave conditions)')
+    parser.add_argument('--percent-sick', type=float, default=100.0, help='Percentage of residents initialized as sick (0-100)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
@@ -657,5 +671,6 @@ if __name__ == "__main__":
         interactive=args.interactive,
         save_buildings=args.save_buildings,
         load_buildings=args.load_buildings,
-        base_temperature=args.base_temperature
+        base_temperature=args.base_temperature,
+        percent_sick=args.percent_sick
     )
