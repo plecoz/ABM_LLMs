@@ -10,6 +10,7 @@ from typing import Dict, List, Any
 import json
 import os
 from datetime import datetime
+import uuid
 
 
 class OutputController:
@@ -340,6 +341,93 @@ class OutputController:
             print(f"\nDetailed report saved to: {filepath}")
         except Exception as e:
             self.logger.error(f"Failed to save report: {e}")
+
+    def save_summary_report(self, filepath: str = None):
+        """
+        Save a concise JSON summary of the simulation.
+
+        The summary includes:
+        - simulation_id
+        - city
+        - total_steps and current time string
+        - number of residents
+        - list of parishes present among residents
+        - temperature info (base/current and model params)
+        - POI visit totals (by category and overall)
+        - total travel time (and average per agent)
+        - unmet demand by parish (POIs that couldn't be accessed)
+
+        Args:
+            filepath: Target path. If provided and ends with .json, a sibling
+                      file with suffix _summary.json will be written.
+                      If None, writes to summary_report_<timestamp>.json
+        """
+        # Build simulation id
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        simulation_id = f"sim-{timestamp}-{uuid.uuid4().hex[:8]}"
+
+        # Core counts
+        num_residents = len(getattr(self.model, 'residents', []))
+
+        # Parishes present among residents
+        parishes = sorted({getattr(a, 'parish', None) for a in getattr(self.model, 'residents', []) if getattr(a, 'parish', None)})
+
+        # Temperature info
+        temp_info = {}
+        if hasattr(self.model, 'get_temperature_info'):
+            temp_info = self.model.get_temperature_info()
+        # add time period and hour for context
+        temp_info.update({
+            'time_period': getattr(self.model, 'time_period', None),
+            'hour': getattr(self.model, 'hour_of_day', None)
+        })
+
+        # POI visits
+        visits_by_category = self.get_poi_visits_by_category()
+        total_poi_visits = sum(visits_by_category.values()) if visits_by_category else 0
+
+        # Travel stats
+        travel_summary = {
+            'total_travel_time_minutes': self.total_travel_time,
+            'average_travel_time_per_agent': round(self.get_average_travel_time_per_agent(), 2),
+            'total_travel_events': len(self.travel_events)
+        }
+
+        # Unmet demand (POIs that couldn't be accessed)
+        unmet = getattr(self.model, 'unmet_demand_by_parish', {}) or {}
+
+        # Compose summary
+        summary = {
+            'simulation_id': simulation_id,
+            'city': getattr(self.model, 'city', None),
+            'total_steps': getattr(self.model, 'step_count', 0),
+            'current_time_string': (self.model.get_current_time().get('time_string')
+                                     if hasattr(self.model, 'get_current_time') else None),
+            'num_residents': num_residents,
+            'parishes': parishes,
+            'temperature': temp_info,
+            'poi_visits': {
+                'total': total_poi_visits,
+                'by_category': visits_by_category
+            },
+            'travel': travel_summary,
+            'unmet_demand_by_parish': unmet,
+        }
+
+        # Determine output path
+        if filepath:
+            base, ext = os.path.splitext(filepath)
+            out_path = f"{base}_summary.json" if ext.lower() == '.json' else filepath
+        else:
+            out_path = f"summary_report_{timestamp}.json"
+
+        try:
+            os.makedirs(os.path.dirname(out_path) if os.path.dirname(out_path) else '.', exist_ok=True)
+            with open(out_path, 'w') as f:
+                json.dump(summary, f, indent=2, default=str)
+            print(f"\nSummary report saved to: {out_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to save summary report: {e}")
     
     def reset(self):
         """

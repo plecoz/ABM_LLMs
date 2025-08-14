@@ -86,7 +86,7 @@ class Resident(BaseAgent):
         self.age = self.attributes['age']
         self.parish = self.attributes['parish']
         
-
+        
         # Determine step size based on age for calculating travel times
         is_elderly = False
         if self.attributes['age_class']:
@@ -157,7 +157,7 @@ class Resident(BaseAgent):
         
         # Calculate daily income from monthly income (moved here to ensure it uses final income value)
         self.daily_income = self.attributes['income'] / 30
-
+        
         
         # Initialize logger if not provided
         if not hasattr(self, 'logger'):
@@ -745,7 +745,7 @@ class Resident(BaseAgent):
         Returns:
             List of path node lists
         """
-        try: 
+        try:
             paths = []
             graph = self.model.graph.copy()
             
@@ -1075,7 +1075,7 @@ class Resident(BaseAgent):
                     self.model.output_controller.track_travel_step(self.unique_id)
                 
                 self.travel_time_remaining -= 1
-
+                
                 if self.travel_time_remaining <= 0:
                     # Removed debug print
                     self.traveling = False
@@ -1109,11 +1109,11 @@ class Resident(BaseAgent):
                         if hasattr(self.model, 'output_controller'):
                             poi_category = getattr(visited_poi_agent, 'category', 'other')
                             self.model.output_controller.track_poi_visit(poi_category, self.unique_id)
-                        
+                    
                     # Reset travel attributes
                     self.destination_node = None
                     self.destination_geometry = None
-                    
+                
                     # Start pending action if we have one
                     if self.pending_action:
                         print(f"Arrived at destination! Starting pending action: {self.pending_action.name}")
@@ -1133,12 +1133,12 @@ class Resident(BaseAgent):
                     self._complete_action()
                     self.current_action = None
                 return
-            else:
+                else:
                 self._decide_next_action()
                 return  
             
         except Exception as e:
-                # Removed debug print
+            # Removed debug print
             if hasattr(self, 'logger'):
                 self.logger.error(f"Error in resident step: {e}")
             import traceback
@@ -1640,9 +1640,9 @@ class Resident(BaseAgent):
             
         # Compare the actual node lists
         return path1 == path2
-           
+            
     def get_parish_info(self):
-
+        
         if not self.parish:
             return None
             

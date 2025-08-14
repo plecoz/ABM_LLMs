@@ -575,10 +575,12 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # if hasattr(model, 'display_heatwave_statistics'):
         #     model.display_heatwave_statistics()
     
-    # Save JSON report if requested (works for both modes)
+    # Save JSON reports if requested (works for both modes)
     if save_json_report:
         print(f"\nSaving detailed JSON report to: {save_json_report}")
         model.output_controller.save_detailed_report(save_json_report)
+        # Also save concise summary next to it
+        model.output_controller.save_summary_report(save_json_report)
 
 if __name__ == "__main__":
     # Parse command line arguments
@@ -589,20 +591,17 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
     
     parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=150, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--steps', type=int, default=1440, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
-    parser.add_argument('--base-temperature', type=float, default=40.0, help='Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave conditions)')
+    parser.add_argument('--base-temperature', type=float, default=30.0, help='Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave conditions)')
     parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
     parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
-    
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
     #--parishes "Taipa" "Coloane" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
-    # Save/Load arguments for faster testing
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
-    #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
     parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
     #python main.py --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl
     #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl

@@ -800,8 +800,12 @@ class FifteenMinuteCity(Model):
                 ))
                 
                 resident = Resident(
-                    model=self, unique_id=agent_id, geometry=point_geometry,
-                    home_node=home_node, accessible_nodes=accessible_nodes, 
+                    model=self,
+                    unique_id=agent_id,
+                    geometry=point_geometry,
+                    home_node=home_node,
+                    accessible_nodes=accessible_nodes,
+                    parish=parish,
                     access_distance=access_distance_meters,
                     **agent_props
                 )
