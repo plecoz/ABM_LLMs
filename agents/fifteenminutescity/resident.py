@@ -1133,7 +1133,7 @@ class Resident(BaseAgent):
                     self._complete_action()
                     self.current_action = None
                 return
-                else:
+            else:
                 self._decide_next_action()
                 return  
             
@@ -1383,6 +1383,13 @@ class Resident(BaseAgent):
                         
                 elif location_type == "entertainment":
                     if any(x in poi_type for x in ['cinema', 'theater', 'museum', 'entertainment', 'casino']):
+                        matching_pois.append(poi)
+                elif location_type == "pharmacy":
+                    if any(x in poi_type for x in ['pharmacy', 'drugstore', 'chemist']):
+                        matching_pois.append(poi)
+
+                elif location_type == "hospital":
+                    if any(x in poi_type for x in ['hospital', 'clinic', 'medical', 'healthcare']):
                         matching_pois.append(poi)
             
             # Debug logging for POI search

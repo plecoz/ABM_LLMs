@@ -50,7 +50,7 @@ EVERYDAY_ACTIONS = {
     "buy_groceries": Action(
         name="buy_groceries",
         location_type="supermarket",
-        duration_minutes=45,
+        duration_minutes=30,
         cost=50.0,
         description="Shop for groceries"
     ),
@@ -101,8 +101,15 @@ EVERYDAY_ACTIONS = {
         name="visit_doctor",
         location_type="hospital",
         duration_minutes=60,  
-        cost=10,  
+        cost=50,  
         description="Visit a doctor"
+    ),
+    "go_pharmacy": Action(
+        name="go_pharmacy",
+        location_type="pharmacy",
+        duration_minutes=15,
+        cost=40,
+        description="Go to a pharmacy"
     )
 
 
@@ -144,6 +151,8 @@ def get_available_actions(hour: int, is_employed: bool, money: float) -> Dict[st
     # Shopping during business hours
     if 10 <= hour < 22 and money > 50:
         available["buy_groceries"] = EVERYDAY_ACTIONS["buy_groceries"]
+        available["go_pharmacy"] = EVERYDAY_ACTIONS["go_pharmacy"]  
+        available["visit_doctor"] = EVERYDAY_ACTIONS["visit_doctor"]
     
     # Exercise in morning or evening
     if (6 <= hour < 9 or 17 <= hour < 20) :
