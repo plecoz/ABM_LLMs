@@ -1220,19 +1220,40 @@ class Resident(BaseAgent):
                     f"- {action_name}: {action.description} | cost=${action.cost:.1f} | duration={action.duration_minutes} min | location={action.location_type}"
                 )
             actions_text = "\n".join(action_list)
+            
+            # Build demographic profile
+            demographic_info = []
+            demographic_info.append(f"Age: {self.attributes.get('age', 'unknown')}")
+            demographic_info.append(f"Gender: {self.attributes.get('gender', 'unknown')}")
+            demographic_info.append(f"Education: {self.attributes.get('education', 'unknown')}")
+            demographic_info.append(f"Occupation: {self.attributes.get('occupation', 'unemployed' if not self.attributes.get('occupation') else self.attributes['occupation'])}")
+            demographic_info.append(f"Industry: {self.attributes.get('industry', 'none' if not self.attributes.get('industry') else self.attributes['industry'])}")
+            demographic_info.append(f"Employment Status: {self.economic_status}")
+            demographic_info.append(f"Household Type: {self.household_type}")
+            demographic_info.append(f"Parish: {self.attributes.get('parish', 'unknown')}")
+            
+            demographics_text = ", ".join(demographic_info)
+            
             prompt = (
-                f"You are a resident of Macau, China. You must choose ONE action from the list below, considering your current situation:\n"
+                f"You are a resident of Macau, China with the following profile:\n"
+                f"{demographics_text}\n\n"
+                f"Current Situation:\n"
                 f"Money: ${self.money:.0f}\n"
                 f"Health Status: {self.health_status} (your personal health condition)\n"
                 f"Current Time: {self.model.hour_of_day}:00\n"
                 f"Outside Weather Temperature: {temperature:.1f}°C (this is the outdoor air temperature, not your body temperature)\n"
                 f"{memory_summary}\n\n"
+                f"You must choose ONE action from the list below, considering your demographic profile and current situation:\n"
                 f"AVAILABLE ACTIONS:\n{actions_text}\n\n"
-                f"Consider the cost of each action relative to your available Money.\n"
-                f"Consider the temperature of the outside weather (Especially if it's hot) and the time of the day.\n"
+                f"Consider:\n"
+                f"- Your education level and occupation when choosing activities\n"
+                f"- The cost of each action relative to your available money\n"
+                f"- The temperature of the outside weather (especially if it's hot) and the time of day\n"
+                f"- Your age and household situation\n"
+                f"- Your employment status and work requirements\n\n"
                 f"Respond in this exact format:\n"
                 f"Action: [action_name]\n"
-                f"Reason: [brief explanation why you chose this action]\n\n"
+                f"Reason: [brief explanation why you chose this action based on your profile]\n\n"
                 f"Choose ONLY from the actions listed above."
             )
             
@@ -1562,18 +1583,7 @@ class Resident(BaseAgent):
                 "For example: steep uphill may be difficult for elderly, high car speeds may be dangerous, "
                 "weather conditions may affect slope difficulty. "
             )
-            
-            # Add temperature-specific path selection advice
-            if env_data.get('temperature_recommendations'):
-                recommendations = env_data['temperature_recommendations']
-                temp_advice = (
-                    f"TEMPERATURE CONSIDERATIONS: Current temperature is {env_data['temperature']:.1f}°C. "
-                    f"Health warning: {recommendations['health_warning']}. "
-                    f"Movement advice: {recommendations['movement']}. "
-                    f"Consider shorter routes if temperature is high to minimize heat exposure. "
-                    f"Avoid steep uphill paths in extreme heat. "
-                )
-                decision_prompt += temp_advice
+
             
             decision_prompt += "Respond with just the number, nothing else."
             
