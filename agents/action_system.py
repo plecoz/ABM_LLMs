@@ -30,28 +30,28 @@ EVERYDAY_ACTIONS = {
         name="eat_breakfast",
         location_type="home",
         duration_minutes=30,
-        cost=5.0,
+        cost=50.0,
         description="Have breakfast at home"
     ),
     "eat_lunch": Action(
         name="eat_lunch",
         location_type="restaurant",
         duration_minutes=60,
-        cost=10.0,
+        cost=100.0,
         description="Have lunch at a restaurant"
     ),
     "eat_dinner": Action(
         name="eat_dinner",
         location_type="restaurant",
         duration_minutes=90,
-        cost=15.0,
+        cost=150.0,
         description="Have dinner at a restaurant"
     ),
     "buy_groceries": Action(
         name="buy_groceries",
         location_type="supermarket",
         duration_minutes=30,
-        cost=50.0,
+        cost=300.0,
         description="Shop for groceries"
     ),
     "shower": Action(
@@ -86,7 +86,7 @@ EVERYDAY_ACTIONS = {
         name="entertainment",
         location_type="entertainment",
         duration_minutes=120,
-        cost=20.0,
+        cost=200.0,
         description="Enjoy entertainment activities"
     ),
     "work": Action(
@@ -101,14 +101,14 @@ EVERYDAY_ACTIONS = {
         name="visit_doctor",
         location_type="hospital",
         duration_minutes=60,  
-        cost=50,  
-        description="Visit a doctor"
+        cost=500,  
+        description="go to the hospital to visit a doctor"
     ),
     "go_pharmacy": Action(
         name="go_pharmacy",
         location_type="pharmacy",
         duration_minutes=15,
-        cost=40,
+        cost=150,
         description="Go to a pharmacy"
     )
 
@@ -149,7 +149,8 @@ def get_available_actions(hour: int, is_employed: bool, money: float) -> Dict[st
         available["eat_dinner"] = EVERYDAY_ACTIONS["eat_dinner"]
     
     # Shopping during business hours
-    if 10 <= hour < 22 and money > 50:
+    if 10 <= hour < 22:
+        # Expose actions, but affordability will be enforced at decision/start time
         available["buy_groceries"] = EVERYDAY_ACTIONS["buy_groceries"]
         available["go_pharmacy"] = EVERYDAY_ACTIONS["go_pharmacy"]  
         available["visit_doctor"] = EVERYDAY_ACTIONS["visit_doctor"]

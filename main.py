@@ -587,7 +587,9 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         # Display heatwave statistics for visualization mode too (removed - functionality not implemented)
         # if hasattr(model, 'display_heatwave_statistics'):
         #     model.display_heatwave_statistics()
-    
+        
+    hc_points_path = (save_json_report.replace(".json", "_hc.json") if save_json_report else "reports/healthcare_points.json")
+    model.output_controller.save_healthcare_access_points(hc_points_path)
     # Save JSON reports if requested (works for both modes)
     if save_json_report:
         print(f"\nSaving detailed JSON report to: {save_json_report}")
@@ -601,10 +603,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
     
     # Add seed argument at the top for visibility
-    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducible results (default: 42)')
+    parser.add_argument('--seed', type=int, default=56, help='Random seed for reproducible results (default: 42)')
     
-    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=1440, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--residents', type=int, default=15, help='Number of resident agents')
+    parser.add_argument('--steps', type=int, default=960, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
     parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
     parser.add_argument('--base-temperature', type=float, default=30.0, help='Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave conditions)')
     parser.add_argument('--percent-sick', type=float, default=100.0, help='Percentage of residents initialized as sick (0-100)')

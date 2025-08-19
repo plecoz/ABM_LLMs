@@ -73,7 +73,7 @@ class PersonaMemoryManager:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.info("Simplified Persona Memory Manager initialized")
     
-    def create_agent_persona(self, agent_id: str, demographics: Dict[str, Any]) -> Tuple[SimplePersona]:
+    def create_agent_persona(self, agent_id: str, demographics: Dict[str, Any]) -> SimplePersona:
         """Create a simple persona profile for an agent."""
         
         # Generate simple persona

@@ -79,6 +79,10 @@ class POI(GeoAgent):
         # Initialize logger
         self.logger = logging.getLogger(f"Agent-{unique_id}")
 
+        # Simple hourly capacity tracking
+        self._served_hour = -1
+        self._served_count = 0
+
 
 
     def _has_waiting_time(self):
@@ -202,6 +206,12 @@ class POI(GeoAgent):
         """
         POIs are mostly static but can update their internal state, like waiting time.
         """
+        # Reset hourly served counter if hour changed
+        current_hour = self.model.hour_of_day if hasattr(self.model, 'hour_of_day') else None
+        if current_hour is not None and current_hour != self._served_hour:
+            self._served_hour = current_hour
+            self._served_count = 0
+
         # Update waiting time based on the current number of visitors
         self._update_waiting_time()
         
@@ -262,6 +272,21 @@ class POI(GeoAgent):
             Boolean indicating if the POI is open
         """
         return self.open_hours['start'] <= hour < self.open_hours['end']
+
+    def try_admit(self, hour: int) -> bool:
+        """
+        Attempt to admit one patient this hour against capacity.
+        Returns True if admitted, False if capacity reached or closed.
+        """
+        if not self.is_open(hour):
+            return False
+        if hour != self._served_hour:
+            self._served_hour = hour
+            self._served_count = 0
+        if self._served_count < max(0, int(self.capacity)):
+            self._served_count += 1
+            return True
+        return False
     
     def get_waiting_time(self):
         """

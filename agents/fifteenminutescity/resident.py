@@ -125,6 +125,8 @@ class Resident(BaseAgent):
         self.pending_action: Optional[Action] = None  # Action to start after arriving at POI
         # Tracking for healthcare accessibility across runs
         self.healthcare_access_success = None
+        # Track reasons for healthcare access failures
+        self.failure_counts = {"distance": 0, "capacity": 0, "cost": 0}
         # Check employment status (case-insensitive)
         economic_status = kwargs.get('economic_status', 'unemployed')
         self.is_employed = str(economic_status).lower() == 'employed'
@@ -1214,16 +1216,20 @@ class Resident(BaseAgent):
             self.brain.observe(observation)
             action_list = []
             for action_name, action in available_actions.items():
-                action_list.append(f"- {action_name}: {action.description}")            
-            actions_text = "\n".join(action_list)           
+                action_list.append(
+                    f"- {action_name}: {action.description} | cost=${action.cost:.1f} | duration={action.duration_minutes} min | location={action.location_type}"
+                )
+            actions_text = "\n".join(action_list)
             prompt = (
-                f"You must choose ONE action from the list below, considering your current situation:\n"
+                f"You are a resident of Macau, China. You must choose ONE action from the list below, considering your current situation:\n"
                 f"Money: ${self.money:.0f}\n"
                 f"Health Status: {self.health_status} (your personal health condition)\n"
                 f"Current Time: {self.model.hour_of_day}:00\n"
                 f"Outside Weather Temperature: {temperature:.1f}°C (this is the outdoor air temperature, not your body temperature)\n"
                 f"{memory_summary}\n\n"
                 f"AVAILABLE ACTIONS:\n{actions_text}\n\n"
+                f"Consider the cost of each action relative to your available Money.\n"
+                f"Consider the temperature of the outside weather (Especially if it's hot) and the time of the day.\n"
                 f"Respond in this exact format:\n"
                 f"Action: [action_name]\n"
                 f"Reason: [brief explanation why you chose this action]\n\n"
@@ -1275,6 +1281,13 @@ class Resident(BaseAgent):
 
     def _start_action(self, action: Action):
         """Start executing an action."""
+        # Enforce affordability for healthcare
+        if action.name in ("visit_doctor", "go_pharmacy") and self.money < float(action.cost):
+            # Cannot afford
+            self.failure_counts["cost"] += 1
+            self.healthcare_access_success = False
+            return False
+
         target_poi = self._find_poi_for_action(action.location_type)
         print(f" POI Search: action='{action.name}', location_type='{action.location_type}', found_poi={target_poi is not None}")
         
@@ -1296,6 +1309,10 @@ class Resident(BaseAgent):
         elif action.location_type != "home":
             agent_parish = getattr(self, 'parish', 'unknown')
             self.model.track_unmet_demand(agent_parish, action.location_type)
+            # If this was a healthcare attempt, mark failure
+            if action.name in ("visit_doctor", "go_pharmacy"):
+                self.failure_counts["distance"] += 1
+                self.healthcare_access_success = False
             self.current_action = None
             return False  # Return False to indicate failure
         else:
@@ -1324,7 +1341,11 @@ class Resident(BaseAgent):
         
         if not self.current_action:
             return
-        self.money += self.current_action.cost
+        # Deduct cost when completing the action
+        try:
+            self.money -= float(self.current_action.cost)
+        except Exception:
+            pass
         current_time = f"Day {self.model.day_count + 1} {self.model.hour_of_day:02d}:{self.model.step_count % 60:02d}"
         self.action_memory.append((self.current_action.name, current_time))
         # Mark healthcare access success if applicable
@@ -1350,12 +1371,27 @@ class Resident(BaseAgent):
             # Fallback: use a random accessible node as workplace
             if self.accessible_nodes:
                 work_node = random.choice(list(self.accessible_nodes.keys()))
-                # Create a simple POI-like object
-                class WorkplacePOI:
-                    def __init__(self, node_id):
-                        self.unique_id = f"workplace_{node_id}"
-                        self.node_id = node_id
-                return WorkplacePOI(work_node)
+                # Create a proper workplace POI and add it to the model
+                from agents.fifteenminutescity.poi import POI
+                from shapely.geometry import Point
+                
+                # Get node coordinates
+                node_coords = self.model.graph.nodes[work_node]
+                work_geometry = Point(node_coords['x'], node_coords['y'])
+                
+                # Create workplace POI
+                workplace_poi = POI(
+                    model=self.model,
+                    unique_id=f"workplace_{work_node}",
+                    geometry=work_geometry,
+                    node_id=work_node,
+                    poi_type="office",
+                    category="daily_living"
+                )
+                
+                # Add to model's POI agents list so move_to_poi can find it
+                self.model.poi_agents.append(workplace_poi)
+                return workplace_poi
         
         # For other locations, find matching POI type
         if hasattr(self.model, 'poi_agents'):
@@ -1391,11 +1427,11 @@ class Resident(BaseAgent):
                     if any(x in poi_type for x in ['cinema', 'theater', 'museum', 'entertainment', 'casino']):
                         matching_pois.append(poi)
                 elif location_type == "pharmacy":
-                    if any(x in poi_type for x in ['pharmacy', 'drugstore', 'chemist']):
+                    if any(x in poi_type for x in ['pharmacy']):
                         matching_pois.append(poi)
 
                 elif location_type == "hospital":
-                    if any(x in poi_type for x in ['hospital', 'clinic', 'medical', 'healthcare']):
+                    if any(x in poi_type for x in ['hospital']):
                         matching_pois.append(poi)
             
             # Debug logging for POI search
