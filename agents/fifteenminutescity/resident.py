@@ -130,7 +130,7 @@ class Resident(BaseAgent):
         # Check employment status (case-insensitive)
         economic_status = kwargs.get('economic_status', 'unemployed')
         self.is_employed = str(economic_status).lower() == 'employed'
-        print(f"Agent {unique_id}: economic_status='{economic_status}' -> is_employed={self.is_employed}")
+        print(f"Agent {unique_id}: age={self.attributes.get('age', 'unknown')}, economic_status='{economic_status}' -> is_employed={self.is_employed}")
         
         # Energy and money
         
@@ -315,7 +315,12 @@ class Resident(BaseAgent):
             # Map age to age group used in economic_status.json
             economic_age_group = None
             age = props['age']
-            if 16 <= age <= 24:
+            
+            # Children under 16 are not employed
+            if age < 18:
+                economic_status = "Student"  # Children are students, not employed
+                economic_age_group = None  # Skip the rest of the logic
+            elif 18 <= age <= 24:
                 economic_age_group = "16-24"
             elif 25 <= age <= 29:
                 economic_age_group = "25-29"
