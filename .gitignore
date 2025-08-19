@@ -8,3 +8,8 @@ __pycache__/
 *.bmp
 *.tiff
 *.ico
+
+# MacOS
+.DS_Store
+
+ref_Concordia_repo/

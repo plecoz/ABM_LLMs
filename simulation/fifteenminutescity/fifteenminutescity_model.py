@@ -1,0 +1,1378 @@
+from mesa import Model
+from mesa.space import NetworkGrid     
+import re
+import unicodedata
+import random
+from agents.fifteenminutescity.resident import Resident
+from agents.fifteenminutescity.poi import POI
+import networkx as nx
+import osmnx as ox
+from shapely.geometry import Point
+from shapely.geometry.base import BaseGeometry
+import json
+import math
+import random       
+import logging
+import numpy as np
+from mesa_geo import GeoSpace
+from mesa.datacollection import DataCollector
+from outputs import OutputController
+import os  
+
+# Add imports for LLM integration
+from agents.fifteenminutescity.persona_memory_modules import PersonaMemoryManager
+
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Custom scheduler implementation to replace RandomActivation
+class CustomRandomActivation:
+    def __init__(self, model):
+        self.model = model
+        self.agents = []
+        self.steps = 0
+    
+    def add(self, agent):
+        """Add an agent to the scheduler"""
+        self.agents.append(agent)
+    
+    def remove(self, agent):
+        """Remove an agent from the scheduler"""
+        self.agents.remove(agent)
+    
+    def step(self):
+        """Execute the step of all agents, one at a time, in random order"""
+        random.shuffle(self.agents)
+        # Print less frequently with 1-minute time steps - only every hour
+        # if self.steps % 60 == 0:
+        #     print(f"Activating {len(self.agents)} agents at step {self.steps} (Hour {self.steps // 60})")
+        for agent in self.agents:
+            agent.step()
+        self.steps += 1
+
+class GeometryEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that can handle Shapely geometry objects.
+    """
+    def default(self, obj):
+        if isinstance(obj, BaseGeometry):
+            # Convert Shapely geometry to a dictionary representation
+            if hasattr(obj, 'x') and hasattr(obj, 'y'):  # Point objects
+                return {'type': 'Point', 'coordinates': [obj.x, obj.y]}
+            elif hasattr(obj, '__geo_interface__'):  # Use the __geo_interface__ if available
+                return obj.__geo_interface__
+            else:  # Fallback for other geometry types
+                try:
+                    return {'type': obj.geom_type, 'wkt': obj.wkt}
+                except:
+                    return str(obj)
+        # Handle tuples with geometry objects (like in location_history)
+        elif isinstance(obj, tuple) and len(obj) == 2 and isinstance(obj[1], BaseGeometry):
+            # This handles (step, geometry) tuples in location_history
+            return [obj[0], self.default(obj[1])]
+        return super().default(obj)
+
+class FifteenMinuteCity(Model):
+    def __init__(self, graph, pois, num_residents, **kwargs):
+        """
+        Initialize the model.
+        
+        Args:
+            graph: NetworkX graph representing the street network
+            pois: Dictionary of POIs by category
+            num_residents: Number of resident agents to create
+            **kwargs: Additional arguments:
+                - parishes_gdf: GeoDataFrame with parish boundaries
+                - parish_demographics: Dictionary of parish-specific demographics
+                - parish_distribution: Dictionary mapping parishes to number of residents
+                - random_distribution: Whether to distribute residents randomly
+                
+                - movement_behavior: Agent movement behavior ('need-based' or 'random')
+                - threshold: Time threshold in minutes for accessibility (default: 15 for 15-minute city)
+                - base_temperature: Base temperature in Celsius (default: 25°C)
+                - seed: Random seed for reproducible results (default: 42)
+        """
+        # Get random seed from kwargs
+        seed = kwargs.get('seed', 42)
+        
+        # Initialize Mesa's Model with the seed
+        super().__init__(seed=seed)
+        
+        # Seed all random number generators consistently
+        random.seed(seed)  # Python's random
+        np.random.seed(seed)  # NumPy's random
+        
+        # Initialize logger
+        self.logger = logging.getLogger("FifteenMinuteCity")
+        self.logger.info(f"Initializing model with seed: {seed}")
+        
+        # Store city name
+        self.city = kwargs.get('city', 'Macau, China')
+        
+        # Store accessibility threshold (in minutes)
+        self.threshold = kwargs.get('threshold', 15)
+        self.logger.info(f"Using accessibility threshold: {self.threshold} minutes")
+        
+        # Store base temperature (in Celsius)
+        self.base_temperature = kwargs.get('base_temperature', 25.0)
+        self.logger.info(f"Base temperature: {self.base_temperature}°C" + 
+                        (" - HEATWAVE CONDITIONS" if self.base_temperature >= 35 else ""))
+        
+        self.graph = graph
+        self.pois = pois
+        self.grid = NetworkGrid(graph)
+        
+        # Add a step counter and interaction counter
+        self.step_count = 0
+
+        
+        # Add time simulation
+        self.hour_of_day = kwargs.get('start_hour', 8)  # Start at 8 AM by default
+        self.day_of_week = kwargs.get('start_day', 0)  # Start on Monday (0) by default
+        self.day_count = 0
+        
+        # Initialize lists to track agents
+        self.residents = []
+        self.poi_agents = []  # List to store POI agents
+        self.all_agents = []
+        self.communications = []  # Store communications
+
+        # Initialize demographics with default values
+        self.demographics = {
+            "age_distribution": {"0-18": 0.2, "19-35": 0.3, "36-65": 0.4, "65+": 0.1},
+            "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
+            "income_distribution": {"low": 0.3, "medium": 0.5, "high": 0.2},
+            "education_distribution": {
+                "no_education": 0.1,
+                "primary": 0.2,
+                "high_school": 0.4,
+                "bachelor": 0.2,
+                "master": 0.08,
+                "phd": 0.02
+            }
+        }
+        
+        # Load demographics if path is provided
+        demographics_path = kwargs.get('demographics_path')
+        if demographics_path:
+            self._load_demographics(demographics_path)
+
+        # Load parish-specific demographics if provided
+        self.parish_demographics = kwargs.get('parish_demographics', {})
+        
+        # Load parishes GeoDataFrame if provided
+        self.parishes_gdf = kwargs.get('parishes_gdf', None)
+        
+        # Load residential buildings GeoDataFrame if provided
+        self.residential_buildings = kwargs.get('residential_buildings', None)
+        
+        # Load environment data if provided
+        self.water_bodies = kwargs.get('water_bodies', None)
+        self.cliffs = kwargs.get('cliffs', None)
+        self.forests = kwargs.get('forests', None)  # Green areas data
+        
+        # Get parish distribution and random distribution settings
+        self.parish_distribution = kwargs.get('parish_distribution', None)
+        self.random_distribution = kwargs.get('random_distribution', False)
+        
+        # Get needs selection method
+        
+        
+        # Get movement behavior setting
+        
+        
+        # Initialize LLM components if needed
+        
+        
+        self.logger.info("Initializing LLM components for persona-driven behavior")
+        self.persona_memory_manager = PersonaMemoryManager()
+            
+        
+        # Create a mapping of nodes to parishes if parishes data is available
+        self.node_to_parish = {}
+        if self.parishes_gdf is not None:
+            self._map_nodes_to_parishes()
+        
+        self.random = random.Random(seed)
+        #self.random = random.Random(0)
+        # Set up scheduler and spatial environment
+        self.schedule = CustomRandomActivation(self)
+        self.space = GeoSpace()
+        
+        # Set up data collection
+        self.datacollector = DataCollector(
+            model_reporters={
+                "Total Agents": lambda m: m.get_agent_count(),
+                "Person Agents": lambda m: m.get_agent_count(agent_type=Resident),
+                "POI Agents": lambda m: m.get_agent_count(agent_type=POI),
+            },
+            agent_reporters={
+                "Position": lambda a: (a.geometry.x, a.geometry.y),
+                "Type": lambda a: a.__class__.__name__,
+                "Parish": lambda a: getattr(a, 'parish', None),
+                "Age": lambda a: getattr(a, 'age', None),
+                "Age_Class": lambda a: getattr(a, 'age_class', None),
+                "Income": lambda a: getattr(a, 'income', None),
+                "Occupation": lambda a: getattr(a, 'occupation', None),
+                "Household": lambda a: getattr(a, 'household_type', None),
+                #"Energy": lambda a: getattr(a, 'energy', None),
+                "Speed": lambda a: getattr(a, 'speed', None),
+                "Traveling": lambda a: getattr(a, 'traveling', False),
+                "Travel_Time_Remaining": lambda a: getattr(a, 'travel_time_remaining', 0)
+            }
+        )
+        
+        # Initialize output controller for tracking metrics
+        self.output_controller = OutputController(self)
+        
+        # Track path selection statistics
+        self.path_selection_stats = {
+            'total_multi_path_decisions': 0,
+            'shortest_path_not_selected': 0,
+            'concordia_decisions': 0,
+            'fallback_decisions': 0
+        }
+        
+        # Unmet demand tracking - tracks when agents want to access POI types that aren't available
+        self.unmet_demand_by_parish = {}  # parish -> {poi_type: count}
+        
+        # Initialize current temperature from base temperature
+        self.temperature = self.base_temperature  # Current temperature in Celsius, will be updated by the model in step()
+        self.time_period = "daytime"  # Default time period
+        self._auto_update_time_period()  # Set initial time period based on hour
+        
+        # Debug: Show initial environmental setup
+        print(f"DEBUG Environmental Setup:")
+        print(f"  - Base temperature: {self.base_temperature}°C")
+        print(f"  - Initial temperature: {self.temperature}°C")
+        print(f"  - Initial time period: {self.time_period}")
+        print(f"  - Initial hour: {self.hour_of_day}")
+        # Temperature modeling parameters
+        self.daily_temperature_amplitude = 6.0  # Daily temperature variation (±6°C from base)
+        self.daily_random_epsilon = 2.0  # Random daily variation amplitude
+        self.hourly_noise_std = 0.5  # Standard deviation for hourly noise
+        self.daily_random_offset = 0.0  # Random offset for the current day
+        self.last_temperature_update_hour = -1  # Track when temperature was last updated
+        
+        # Temperature statistics tracking
+        self.temperature_history = []  # Store all temperature readings with timestamps
+        self.daily_temperature_stats = {}  # Store daily temperature statistics
+        self.nighttime_temperature_stats = {}  # Store nighttime temperature statistics
+        
+        # --- Load demographic distribution data BEFORE creating residents ---
+        # --- Load industry distribution data (education -> industry probabilities) ---
+        industry_path = kwargs.get('industry_path', 'data/demographics_macau/industry.json')
+        self.industry_distribution = {}
+        if self.city == "Macau, China" and industry_path and os.path.exists(industry_path):
+            self._load_industry_distribution(industry_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Industry distribution file not found at {industry_path}. 'industry' attribute will default to None.")
+
+        # --- Load occupation distribution data (age -> occupation probabilities) ---
+        occupation_path = kwargs.get('occupation_path', 'data/demographics_macau/occupation.json')
+        self.occupation_distribution = {}
+        if self.city == "Macau, China" and occupation_path and os.path.exists(occupation_path):
+            self._load_occupation_distribution(occupation_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Occupation distribution file not found at {occupation_path}. 'occupation' attribute will default to None.")
+
+        # --- Load income distribution data (occupation -> income probabilities) ---
+        income_path = kwargs.get('income_path', 'data/demographics_macau/income.json')
+        self.income_distribution = {}
+        if self.city == "Macau, China" and income_path and os.path.exists(income_path):
+            self._load_income_distribution(income_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Income distribution file not found at {income_path}. Income will be assigned using default ranges.")
+        
+        # --- Load economic status distribution data (age -> gender -> status probabilities) ---
+        economic_status_path = kwargs.get('economic_status_path', 'data/demographics_macau/economic_status.json')
+        self.economic_status_distribution = {}
+        
+        if self.city == "Macau, China" and economic_status_path and os.path.exists(economic_status_path):
+            self._load_economic_status_distribution(economic_status_path)
+        else:
+            if self.city == "Macau, China":
+                self.logger.warning(f"Economic status distribution file not found at {economic_status_path}. 'economic_status' attribute will default to None.")
+
+        # Create resident agents with proportional distribution (NOW with distributions loaded)
+        self._create_residents_with_distribution(num_residents)
+
+        # Print demographic statistics after all residents are created
+        self.print_demographic_statistics()
+
+        # Create POI agents from the pois dictionary
+        poi_id = num_residents  # Start POI IDs after resident IDs
+        print("\nCreating POI agents from POI dictionary:")
+        poi_counts_by_category = {}  # Track counts by category
+        
+        for category, poi_list in pois.items():
+            print(f"Category: {category} - {len(poi_list)} POIs")
+            category_count = 0
+            for poi_data in poi_list:
+                if isinstance(poi_data, tuple):
+                    node_id, poi_type = poi_data  # Unpack node and type
+                else:
+                    node_id = poi_data  # If it's just a node ID
+                    poi_type = category
+                
+                # Get coordinates from the node
+                node_coords = self.graph.nodes[node_id]
+                
+                # Create a Point geometry from the coordinates
+                point_geometry = Point(node_coords['x'], node_coords['y'])
+                
+                # Determine the parish this POI belongs to
+                parish = self._get_parish_for_node(node_id)
+                
+                # Create the POI agent with explicit category
+                poi_agent = POI(
+                    model=self,
+                    unique_id=poi_id,
+                    geometry=point_geometry,
+                    node_id=node_id,
+                    poi_type=poi_type,
+                    category=category,  # Explicitly pass the category
+                    parish=parish
+                )
+                
+                # Comment out detailed debug message
+                # print(f"  Created POI {poi_id}: type={poi_type}, category={category}")
+                
+                self.grid.place_agent(poi_agent, node_id)
+                self.schedule.add(poi_agent)
+                self.poi_agents.append(poi_agent)
+                self.all_agents.append(poi_agent)
+                poi_id += 1
+                category_count += 1
+            
+            # Track count for this category
+            poi_counts_by_category[category] = category_count
+        
+        # Print summary of POIs created by category
+        print(f"\nPOI Creation Summary:")
+        for category, count in poi_counts_by_category.items():
+            print(f"  {category}: {count} POIs created")
+        print(f"Total POIs created: {sum(poi_counts_by_category.values())}")
+        print()
+        self.logger.info(f"Generated {num_residents} resident agents and {len(self.poi_agents)} POI agents")
+
+    def _map_nodes_to_parishes(self):
+        """
+        Create a mapping from graph nodes to parishes.
+        This allows quick lookup of which parish a node belongs to.
+        """
+        if self.parishes_gdf is None:
+            self.logger.warning("No parishes data provided. Parish mapping not created.")
+            return
+            
+        self.logger.info("Mapping network nodes to parishes...")
+        nodes_count = len(self.graph.nodes())
+        mapped_count = 0
+        
+        # Convert nodes to Points and check which parish they fall within
+        for node_id, node_attrs in self.graph.nodes(data=True):
+            if 'x' in node_attrs and 'y' in node_attrs:
+                point = Point(node_attrs['x'], node_attrs['y'])
+                
+                # Check which parish contains this point
+                for idx, parish in self.parishes_gdf.iterrows():
+                    if parish.geometry.contains(point):
+                        self.node_to_parish[node_id] = parish['name']
+                        mapped_count += 1
+                        break
+        
+        self.logger.info(f"Mapped {mapped_count} out of {nodes_count} nodes to parishes")
+        
+        # Check if we have too few mapped nodes
+        if mapped_count < nodes_count * 0.5:  # If less than 50% mapped
+            self.logger.warning("Many nodes could not be mapped to parishes. Check coordinate systems.")
+    
+    def _get_parish_for_node(self, node_id):
+        """
+        Get the parish name for a given node ID.
+        """
+        return self.node_to_parish.get(node_id, None)
+    
+    def get_agent_by_id(self, agent_id):
+        """Get an agent by its unique_id from the model's agent list."""
+        # The CustomRandomActivation scheduler uses a simple list `agents`
+        for agent in self.schedule.agents:
+            if agent.unique_id == agent_id:
+                return agent
+        return None
+
+    def get_agent_count(self, agent_type=None):
+        """Get the count of agents matching a specific type"""
+        if agent_type is None:
+            return len(self.all_agents)
+        return sum(1 for agent in self.all_agents if isinstance(agent, agent_type))
+    
+    def get_agents_by_parish(self, parish_name):
+
+        return [agent for agent in self.all_agents if getattr(agent, 'parish', None) == parish_name]
+
+    def get_current_time(self):
+
+        minutes_elapsed = self.step_count
+        total_hours = minutes_elapsed // 60
+        current_minute = minutes_elapsed % 60
+        
+        # Calculate current hour and day
+        hour = (8 + total_hours) % 24  # Start at 8 AM
+        current_day = total_hours // 24
+        day_of_week = current_day % 7
+        
+        day_names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        return {
+            'step': self.step_count,
+            'minute': current_minute,
+            'hour': hour,
+            'day': current_day + 1,
+            'day_of_week': day_names[day_of_week],
+            'time_string': f"Day {current_day + 1} ({day_names[day_of_week]}) {hour:02d}:{current_minute:02d}"
+        }
+
+    def step(self):
+        """Advance the model by one step"""
+
+        self.step_count += 1
+        
+        # Advance time (each step is 1 minute)
+        minutes_elapsed = self.step_count
+        total_hours = minutes_elapsed // 60
+        current_minute = minutes_elapsed % 60
+        
+        # Calculate current hour and day
+        self.hour_of_day = (8 + total_hours) % 24  # Start at 8 AM
+        current_day = total_hours // 24
+        self.day_of_week = current_day % 7
+        self.day_count = current_day
+        
+        # Log new day transitions
+        if self.step_count > 1 and current_minute == 0 and self.hour_of_day == 0:
+            self.logger.info(f"Day {self.day_count + 1}, {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][self.day_of_week]}")
+        
+        # Update environmental context based on current time
+        self._auto_update_time_period()
+        self._update_temperature()
+
+        self.schedule.step()
+
+        
+        self.datacollector.collect(self)
+        
+        # Process any global model dynamics
+        self._process_model_dynamics()
+        
+        print(f"Model step {self.step_count}: Completed successfully")
+
+    def _process_model_dynamics(self):
+        """
+        Process any global model dynamics.
+        This can include environmental changes, global events, etc.
+        """
+        # This is a placeholder. You can add model-wide dynamics here.
+        pass 
+
+    def _load_industry_distribution(self, industry_path):  # NEW METHOD
+        """
+        Load industry distribution probabilities from a JSON file.
+        Expected format: {education_level: {industry_name: probability, ...}, ...}
+        """
+        try:
+            with open(industry_path, 'r') as f:
+                self.industry_distribution = json.load(f)
+            # Normalise keys to facilitate matching (lowercase, stripped)
+            self.industry_distribution = {
+                self._normalise_string(k): v for k, v in self.industry_distribution.items()
+            }
+            self.logger.info("Loaded industry distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading industry distribution data: {e}")
+            self.industry_distribution = {}
+
+    def _load_occupation_distribution(self, occupation_path):
+        """
+        Load occupation distribution probabilities from a JSON file.
+        Expected format: {age_group: {occupation_name: probability, ...}, ...}
+        """
+        try:
+            with open(occupation_path, 'r') as f:
+                self.occupation_distribution = json.load(f)
+            self.logger.info("Loaded occupation distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading occupation distribution data: {e}")
+            self.occupation_distribution = {}
+
+    def _load_income_distribution(self, income_path):
+        """
+        Load income distribution probabilities from a JSON file.
+        Expected format: {occupation: {income_level: probability, ...}, ...}
+        """
+        try:
+            with open(income_path, 'r') as f:
+                self.income_distribution = json.load(f)
+            self.logger.info("Loaded income distribution data")
+        except Exception as e:
+            self.logger.error(f"Error loading income distribution data: {e}")
+            self.income_distribution = {}
+
+    def _load_economic_status_distribution(self, economic_status_path):
+        """
+        Load economic status distribution probabilities from a JSON file.
+        Expected format: {age_group: {gender: {status: probability, ...}, ...}, ...}
+        """
+        # print(f"DEBUG: _load_economic_status_distribution called with path: {economic_status_path}")
+        try:
+            with open(economic_status_path, 'r') as f:
+                self.economic_status_distribution = json.load(f)
+            # print(f"DEBUG: Successfully loaded economic status data with {len(self.economic_status_distribution)} age groups")
+            # print(f"DEBUG: Sample age groups: {list(self.economic_status_distribution.keys())[:3]}")
+            self.logger.info("Loaded economic status distribution data")
+        except Exception as e:
+            # print(f"DEBUG: Exception during economic status loading: {e}")
+            self.logger.error(f"Error loading economic status distribution data: {e}")
+            self.economic_status_distribution = {}
+
+    def _load_demographics(self, demographics_path):
+        """
+        Load demographic distribution data from a JSON file.
+        Expected format: {
+            "age_distribution": {...},
+            "gender_distribution": {...},
+            "income_distribution": {...},
+            "education_distribution": {...}
+        }
+        """
+        try:
+            with open(demographics_path, 'r') as f:
+                loaded_demographics = json.load(f)
+            self.demographics.update(loaded_demographics)
+            self.logger.info(f"Loaded demographics from {demographics_path}")
+        except Exception as e:
+            self.logger.error(f"Error loading demographics from {demographics_path}: {e}")
+
+    def _normalise_string(self, s):  # NEW HELPER
+        import re
+        return re.sub(r"[^a-z0-9]", "", str(s).lower()) if s else ""
+
+    def _convert_income_bracket_to_value(self, income_bracket):
+
+        if not income_bracket or income_bracket == "Unpaid family worker":
+            return 0
+        
+        # Handle different bracket formats
+        if "≧" in income_bracket:  # e.g., "≧60 000"
+            min_income = int(income_bracket.replace("≧", "").replace(" ", ""))
+            # For open-ended high brackets, use min + reasonable range
+            return self.random.randint(min_income, min_income + 40000)
+        elif "<" in income_bracket:  # e.g., "< 3 500"
+            max_income = int(income_bracket.replace("<", "").replace(" ", ""))
+            # For open-ended low brackets, use reasonable minimum
+            return self.random.randint(max(1000, max_income - 1000), max_income - 1)
+        elif "-" in income_bracket:  # e.g., "20 000 - 29 999"
+            parts = income_bracket.split("-")
+            if len(parts) == 2:
+                min_income = int(parts[0].strip().replace(" ", ""))
+                max_income = int(parts[1].strip().replace(" ", ""))
+                return self.random.randint(min_income, max_income)
+        
+        # Fallback for unrecognized formats
+        return None
+
+    def print_demographic_statistics(self):
+
+        print("\n" + "="*60)
+        print("DEMOGRAPHIC STATISTICS")
+        print("="*60)
+        
+        total_residents = len(self.residents)
+        print(f"Total Residents: {total_residents}")
+        print("-" * 60)
+        
+        # Helper function to print category statistics
+        def print_category_stats(category_name, attribute_name):
+            print(f"\n{category_name.upper()} DISTRIBUTION:")
+            print("-" * 40)
+            
+            # Count occurrences
+            counts = {}
+            for resident in self.residents:
+                value = resident.attributes.get(attribute_name, 'N/A')
+                if value is None:
+                    value = 'N/A'
+                counts[value] = counts.get(value, 0) + 1
+            
+            # Sort by count (descending)
+            sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)
+            
+            for value, count in sorted_counts:
+                percentage = (count / total_residents) * 100
+                print(f"  {value:<35} {count:>6} ({percentage:>5.1f}%)")
+        
+        # Print statistics for each category
+        print_category_stats("Age Class", "age_class")
+        print_category_stats("Gender", "gender")
+        print_category_stats("Education", "education")
+        print_category_stats("Occupation", "occupation")
+        print_category_stats("Industry", "industry")
+        
+        # Additional employment statistics
+        print(f"\nEMPLOYMENT STATUS:")
+        print("-" * 40)
+        employment_counts = {}
+        for resident in self.residents:
+            status = resident.economic_status
+            employment_counts[status] = employment_counts.get(status, 0) + 1
+        
+        for status, count in sorted(employment_counts.items(), key=lambda x: x[1], reverse=True):
+            percentage = (count / total_residents) * 100
+            print(f"  {status.title():<35} {count:>6} ({percentage:>5.1f}%)")
+        
+        # Income statistics
+        print(f"\nINCOME STATISTICS:")
+        print("-" * 40)
+        daily_incomes = [resident.daily_income for resident in self.residents if hasattr(resident, 'daily_income')]
+        if daily_incomes:
+            avg_daily_income = sum(daily_incomes) / len(daily_incomes)
+            min_daily_income = min(daily_incomes)
+            max_daily_income = max(daily_incomes)
+            print(f"  Average Daily Income: ${avg_daily_income:,.2f}")
+            print(f"  Minimum Daily Income: ${min_daily_income:,.2f}")
+            print(f"  Maximum Daily Income: ${max_daily_income:,.2f}")
+        else:
+            print("  No daily income data available")
+        
+        print("="*60)
+        print("END DEMOGRAPHIC STATISTICS")
+        print("="*60 + "\n")
+
+
+    def get_nearby_agents(self, agent, distance=1.0):
+        """
+        Get agents within a certain distance of the given agent.
+        
+        Args:
+            agent: The agent to find nearby agents for
+            distance: The maximum distance to search
+            
+        Returns:
+            List of agents within the specified distance
+        """
+        nearby_agents = []
+        
+        # Check all agents
+        for other in self.all_agents:
+            if other.unique_id != agent.unique_id:
+                if agent.geometry.distance(other.geometry) <= distance:
+                    nearby_agents.append(other)
+        
+        return nearby_agents
+
+
+    def _create_residents_with_distribution(self, num_residents):
+        """
+        Create resident agents with proportional distribution across parishes.
+        If residential building data is available, residents are placed at building
+        locations. Otherwise, they are placed at random nodes within the parish.
+        
+        Args:
+            num_residents: Total number of residents to create
+        """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+        
+        # Handle case where parish_distribution is None (fallback to random distribution)
+        if self.parish_distribution is None:
+            self.logger.info("No parish distribution provided. Using random distribution.")
+            self._create_residents_randomly(num_residents)
+            return
+            
+        agent_id = 0
+        
+        # Check if we should use buildings for placement
+        use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
+        
+        if use_buildings:
+            self.logger.info("Initializing residents at residential building locations.")
+        else:
+            self.logger.info("No residential building data. Initializing residents at random network nodes.")
+
+        for parish_name, num_parish_residents in self.parish_distribution.items():
+            if num_parish_residents <= 0:
+                continue
+            
+            # --- Home Location Selection ---
+            home_locations = []
+            
+            if use_buildings and self.parishes_gdf is not None:
+                # Get the geometry for the current parish
+                parish_geom_series = self.parishes_gdf[self.parishes_gdf['name'].apply(
+                    self._clean_parish_name_for_matching) == parish_name].geometry
+                
+                if not parish_geom_series.empty:
+                    parish_geom = parish_geom_series.iloc[0]
+                    # Find buildings within this parish
+                    buildings_in_parish = self.residential_buildings[self.residential_buildings.within(parish_geom)]
+                    
+                    if not buildings_in_parish.empty:
+                        # Calculate building areas for proportional sampling using projected coordinates
+                        buildings_in_parish = self._calculate_building_areas(buildings_in_parish)
+                        
+                        # Remove buildings with zero or negative area
+                        buildings_in_parish = buildings_in_parish[buildings_in_parish['area'] > 0]
+                        
+                        if not buildings_in_parish.empty:
+                            # Sample buildings proportionally to their area
+                            weights = buildings_in_parish['area'] / buildings_in_parish['area'].sum()
+                            selected_buildings = buildings_in_parish.sample(
+                                n=num_parish_residents, 
+                                replace=True, 
+                                weights=weights,
+                                random_state=self.random.randint(0, 1000000)
+                            )
+                            
+                            self.logger.info(f"Parish {parish_name}: Selected {num_parish_residents} residents from {len(buildings_in_parish)} buildings (area-weighted)")
+                            
+                            for _, building in selected_buildings.iterrows():
+                                # Use centroid for agent geometry
+                                point_geometry = building.geometry.centroid
+                                # Find nearest network node for travel
+                                home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                                home_locations.append({'geometry': point_geometry, 'node': home_node})
+                        else:
+                            self.logger.warning(f"No residential buildings with valid area found in parish {parish_name}. Falling back to random nodes for this parish.")
+                    else:
+                        self.logger.warning(f"No residential buildings found in parish {parish_name}. Falling back to random nodes for this parish.")
+            
+            # Fallback or default behavior: use random nodes
+            if not home_locations:
+                parish_nodes = [node_id for node_id, parish in self.node_to_parish.items() 
+                              if parish and self._clean_parish_name_for_matching(parish) == parish_name]
+                
+                if not parish_nodes:
+                    self.logger.warning(f"No network nodes found for parish {parish_name}. Skipping residents for this parish.")
+                    continue
+                
+                for _ in range(num_parish_residents):
+                    home_node = random.choice(parish_nodes)
+                    node_coords = self.graph.nodes[home_node]
+                    point_geometry = Point(node_coords['x'], node_coords['y'])
+                    home_locations.append({'geometry': point_geometry, 'node': home_node})
+
+            # --- Residents Creation ---
+            for i, location in enumerate(home_locations):
+                home_node = location['node']
+                point_geometry = location['geometry']
+                
+                # Calculate access distance from building centroid to nearest network node
+                home_node_geom = self.graph.nodes[home_node]
+                access_distance_meters = ox.distance.great_circle(
+                    lat1=point_geometry.y, lon1=point_geometry.x,
+                    lat2=home_node_geom['y'], lon2=home_node_geom['x']
+                )
+                parish = self._get_parish_for_node(home_node)
+                agent_props = Resident._generate_agent_properties(
+                    parish=parish,
+                    demographics=self.demographics,
+                    parish_demographics=getattr(self, 'parish_demographics', {}),
+                    city=getattr(self, 'city', None),
+                    industry_distribution=self.industry_distribution,
+                    occupation_distribution=self.occupation_distribution,
+                    income_distribution=self.income_distribution,
+                    economic_status_distribution=self.economic_status_distribution
+                )
+                
+                
+                is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
+                step_size = 60.0 if is_elderly else 80.0
+                accessibility_radius = self.threshold * step_size
+
+                accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                    self.graph, home_node, cutoff=accessibility_radius, weight='length'
+                ))
+                
+                resident = Resident(
+                    model=self,
+                    unique_id=agent_id,
+                    geometry=point_geometry,
+                    home_node=home_node,
+                    accessible_nodes=accessible_nodes,
+                    parish=parish,
+                    access_distance=access_distance_meters,
+                    **agent_props
+                )
+                
+                # Assign persona if LLM behavior is enabled
+                
+                self._assign_persona_to_resident(resident)
+                
+                self.grid.place_agent(resident, home_node)
+                self.schedule.add(resident)
+                self.residents.append(resident)
+                self.all_agents.append(resident)
+                agent_id += 1
+
+    def _create_residents_randomly(self, num_residents):
+        """
+        Create residents with random distribution.
+        If residential building data is available, residents are placed at random
+        building locations. Otherwise, they are placed at random nodes.
+        
+        Args:
+            num_residents: Total number of residents to create
+        """
+        # Handle case where no residents are requested (for visualization-only mode)
+        if num_residents <= 0:
+            self.logger.info("No residents requested. Skipping resident creation.")
+            return
+            
+        home_locations = []
+        use_buildings = self.residential_buildings is not None and not self.residential_buildings.empty
+
+        if use_buildings:
+            self.logger.info("Initializing residents at random residential building locations.")
+            
+            # Calculate building areas for proportional sampling using projected coordinates
+            residential_buildings_copy = self._calculate_building_areas(self.residential_buildings)
+            
+            # Remove buildings with zero or negative area
+            residential_buildings_copy = residential_buildings_copy[residential_buildings_copy['area'] > 0]
+            
+            if not residential_buildings_copy.empty:
+                # Sample buildings proportionally to their area
+                weights = residential_buildings_copy['area'] / residential_buildings_copy['area'].sum()
+                selected_buildings = residential_buildings_copy.sample(
+                    n=num_residents, 
+                    replace=True, 
+                    weights=weights,
+                    random_state=self.random.randint(0, 1000000)
+                )
+                
+                self.logger.info(f"Selected {num_residents} residents from {len(residential_buildings_copy)} buildings (area-weighted)")
+                
+                for _, building in selected_buildings.iterrows():
+                    point_geometry = building.geometry.centroid
+                    home_node = ox.distance.nearest_nodes(self.graph, point_geometry.x, point_geometry.y)
+                    home_locations.append({'geometry': point_geometry, 'node': home_node})
+            else:
+                self.logger.warning("No residential buildings with valid area found. Falling back to random network nodes.")
+                use_buildings = False
+        else:
+            self.logger.info("No residential building data. Initializing residents at random network nodes.")
+            random_nodes = random.choices(list(self.graph.nodes()), k=num_residents)
+            for home_node in random_nodes:
+                node_coords = self.graph.nodes[home_node]
+                point_geometry = Point(node_coords['x'], node_coords['y'])
+                home_locations.append({'geometry': point_geometry, 'node': home_node})
+
+        for i, location in enumerate(home_locations):
+            home_node = location['node']
+            point_geometry = location['geometry']
+            
+            # Calculate access distance
+            home_node_geom = self.graph.nodes[home_node]
+            access_distance_meters = ox.distance.great_circle(
+                lat1=point_geometry.y, lon1=point_geometry.x,
+                lat2=home_node_geom['y'], lon2=home_node_geom['x']
+            )
+            # Determine parish before generating properties
+            parish = self._get_parish_for_node(home_node)
+            # print(f"DEBUG: Agent {i} has an access distance of {access_distance_meters:.2f} meters.")
+            
+            agent_props = Resident._generate_agent_properties(
+                parish=parish,
+                demographics=self.demographics,
+                parish_demographics=getattr(self, 'parish_demographics', {}),
+                city=getattr(self, 'city', None),
+                industry_distribution=self.industry_distribution,
+                occupation_distribution=self.occupation_distribution,
+                income_distribution=self.income_distribution,
+                economic_status_distribution=self.economic_status_distribution
+            )
+
+            # Determine step size and accessibility radius based on agent's age
+            is_elderly = '65+' in agent_props.get('age_class', '') or agent_props.get('age', 0) >= 65
+            step_size = 60.0 if is_elderly else 80.0
+            accessibility_radius = self.threshold * step_size
+
+            accessible_nodes = dict(nx.single_source_dijkstra_path_length(
+                self.graph, home_node, cutoff=accessibility_radius, weight='length'
+            ))
+            
+            resident = Resident(
+                model=self, unique_id=i, geometry=point_geometry,
+                home_node=home_node, accessible_nodes=accessible_nodes,
+                parish=parish, needs_selection=self.needs_selection,
+                movement_behavior=self.movement_behavior, 
+                access_distance=access_distance_meters,
+                **agent_props
+            )
+            
+            # Assign persona if LLM behavior is enabled
+            
+            self._assign_persona_to_resident(resident)
+            
+            self.grid.place_agent(resident, home_node)
+            self.schedule.add(resident)
+            self.residents.append(resident)
+            self.all_agents.append(resident)
+
+    def _clean_parish_name_for_matching(self, parish_name):
+        """
+        Clean parish name for matching with distribution dictionary.
+        This should match the cleaning function in main.py.
+        
+        Args:
+            parish_name: Original parish name
+            
+        Returns:
+            Cleaned parish name
+        """
+        if not parish_name:
+            return parish_name
+
+        
+        # Remove Chinese characters (keep only Latin characters, numbers, spaces, and basic punctuation)
+        cleaned = re.sub(r'[^\w\s\-\.\(\)]', '', parish_name, flags=re.ASCII)
+        
+        # Remove accents from letters using Unicode normalization
+        normalized = unicodedata.normalize('NFD', cleaned)
+        without_accents = ''.join(char for char in normalized if unicodedata.category(char) != 'Mn')
+        
+        # Clean up extra spaces
+        final_cleaned = ' '.join(without_accents.split())
+        
+        return final_cleaned.strip()
+
+    def _assign_persona_to_resident(self, resident):
+        """
+        Assign a persona to a resident based on their demographic characteristics.
+        
+        Args:
+            resident: The resident agent to assign a persona to
+        """
+        if not self.persona_memory_manager:
+            return
+
+        persona = self.persona_memory_manager.create_agent_persona(
+            agent_id=str(resident.unique_id),
+            demographics={
+                'age': getattr(resident, 'age', 30),
+                'economic_status': getattr(resident, 'economic_status', 'employed'),
+                'household_type': getattr(resident, 'household_type', 'single'),
+                'parish': getattr(resident, 'parish', 'unknown')
+            }
+        )
+        
+        resident.persona = persona
+        
+        # Sync persona with Concordia brain
+        if getattr(resident, "brain", None) is not None:
+            # Convert simple persona to string for the brain
+            persona_str = f"{persona.name}: {persona.description}"
+            resident.brain.set_persona(persona_str)
+        self.logger.debug(f"Assigned dynamic persona to resident {resident.unique_id}")
+    
+
+
+    def _calculate_building_areas(self, buildings_gdf):
+
+        if buildings_gdf.empty:
+            return buildings_gdf
+        
+        # Make a copy to avoid modifying the original
+        buildings_copy = buildings_gdf.copy()
+        
+        # Check if we're in a geographic CRS (lat/lon)
+        if buildings_copy.crs and buildings_copy.crs.is_geographic:
+            # For Macau, use UTM Zone 49N (EPSG:32649) which is appropriate for the region
+            # For other cities, we could use a more general approach like Web Mercator (EPSG:3857)
+            if 'Macau' in self.city:
+                projected_crs = 'EPSG:32649'  # UTM Zone 49N for Macau
+            else:
+                # Default to Web Mercator for other cities
+                projected_crs = 'EPSG:3857'
+            
+            # Project to appropriate UTM zone and calculate area
+            buildings_projected = buildings_copy.to_crs(projected_crs)
+            buildings_copy['area'] = buildings_projected.geometry.area
+            
+            self.logger.debug(f"Calculated building areas using projected CRS: {projected_crs}")
+        else:
+            # Already in projected coordinates, calculate area directly
+            buildings_copy['area'] = buildings_copy.geometry.area
+            self.logger.debug("Calculated building areas using existing projected CRS")
+        
+        return buildings_copy
+    
+    def aggregate_path_selection_stats(self):
+
+        # Reset aggregated stats
+        self.path_selection_stats = {
+            'total_multi_path_decisions': 0,
+            'shortest_path_not_selected': 0,
+            'concordia_decisions': 0,
+            'fallback_decisions': 0
+        }
+        
+        # Aggregate from all residents
+        for resident in self.residents:
+            if hasattr(resident, 'path_selection_stats'):
+                for key in self.path_selection_stats:
+                    self.path_selection_stats[key] += resident.path_selection_stats[key]
+        
+        return self.path_selection_stats.copy()
+    
+    def display_path_selection_summary(self):
+        """
+        Display a summary of path selection statistics.
+        """
+        # Aggregate current stats
+        stats = self.aggregate_path_selection_stats()
+        
+        print("\n" + "="*60)
+        print("PATH SELECTION ANALYSIS")
+        print("="*60)
+        
+        if stats['total_multi_path_decisions'] == 0:
+            print("No multi-path decisions were made during the simulation.")
+            print("This could mean:")
+            print("- No agents used LLM path selection (movement_behavior != 'llms')")
+            print("- All path selections had only one available path")
+            print("- Path selection was not triggered")
+            return
+        
+        # Calculate percentage
+        percentage = (stats['shortest_path_not_selected'] / stats['total_multi_path_decisions']) * 100
+        
+        print(f"Total multi-path decisions: {stats['total_multi_path_decisions']}")
+        print(f"Times shortest path NOT selected: {stats['shortest_path_not_selected']}")
+        print(f"Percentage of non-shortest path selection: {percentage:.1f}%")
+        print()
+        
+        # Decision breakdown
+        print("Decision maker breakdown:")
+        print(f"- Concordia brain decisions: {stats['concordia_decisions']} ({stats['concordia_decisions']/stats['total_multi_path_decisions']*100:.1f}%)")
+        print(f"- Fallback decisions: {stats['fallback_decisions']} ({stats['fallback_decisions']/stats['total_multi_path_decisions']*100:.1f}%)")
+        print()
+        
+        # Detailed analysis
+        if stats['concordia_decisions'] > 0:
+            print("Behavioral insights:")
+            if percentage > 50:
+                print("- Agents frequently chose alternative paths over the shortest route")
+                print("- This suggests decision factors beyond simple distance/time optimization")
+            elif percentage > 20:
+                print("- Agents occasionally chose alternative paths")
+                print("- Mix of efficiency and other behavioral factors")
+            else:
+                print("- Agents mostly chose the shortest path")
+                print("- Behavior is primarily efficiency-driven")
+        
+        print("="*60)
+    
+    def track_unmet_demand(self, agent_parish: str, poi_type: str):
+        """
+        Track when an agent wants to access a POI type that isn't available within 15 minutes.
+        
+        Args:
+            agent_parish (str): The parish where the agent lives
+            poi_type (str): The type of POI that couldn't be accessed
+        """
+        if agent_parish not in self.unmet_demand_by_parish:
+            self.unmet_demand_by_parish[agent_parish] = {}
+        
+        if poi_type not in self.unmet_demand_by_parish[agent_parish]:
+            self.unmet_demand_by_parish[agent_parish][poi_type] = 0
+        
+        self.unmet_demand_by_parish[agent_parish][poi_type] += 1
+        
+        print(f"UNMET DEMAND: Parish '{agent_parish}' needs more '{poi_type}' POIs (total requests: {self.unmet_demand_by_parish[agent_parish][poi_type]})")
+
+    def display_unmet_demand_summary(self):
+        """
+        Display a comprehensive summary of unmet demand by parish.
+        
+        Returns:
+            str: Formatted summary of unmet POI demand
+        """
+        if not self.unmet_demand_by_parish:
+            print("\nUNMET DEMAND ANALYSIS")
+            print("="*60)
+            print("No unmet demand recorded during this simulation.")
+            return
+        
+        print("\nUNMET DEMAND ANALYSIS")
+        print("="*60)
+        print("This shows POI types that agents wanted to access but couldn't find within 15 minutes.\n")
+        
+        total_unmet_requests = 0
+        
+        for parish, demands in self.unmet_demand_by_parish.items():
+            parish_total = sum(demands.values())
+            total_unmet_requests += parish_total
+            
+            print(f" PARISH: {parish} (Total unmet requests: {parish_total})")
+            
+            # Sort POI types by demand (highest first)
+            sorted_demands = sorted(demands.items(), key=lambda x: x[1], reverse=True)
+            
+            for poi_type, count in sorted_demands:
+                percentage = (count / parish_total) * 100
+                print(f"   • {poi_type}: {count} requests ({percentage:.1f}%)")
+            
+            print()
+        
+        print(f" TOTAL UNMET REQUESTS ACROSS ALL PARISHES: {total_unmet_requests}")
+        print("="*60)
+    
+    def set_temperature(self, temperature_celsius):
+
+        self.base_temperature = float(temperature_celsius)
+        # Also update current temperature immediately
+        self._update_temperature()
+        self.logger.info(f"Base environmental temperature set to {self.base_temperature}°C")
+    
+    def set_time_period(self, time_period):
+
+        valid_periods = ["night", "dawn", "sunrise", "daytime"]
+        if time_period not in valid_periods:
+            raise ValueError(f"Invalid time period '{time_period}'. Must be one of: {valid_periods}")
+        
+        self.time_period = time_period
+        self.logger.info(f"Time period set to '{self.time_period}'")
+    
+    def _auto_update_time_period(self):
+
+        hour = self.hour_of_day
+        
+        if 22 <= hour <= 23 or 0 <= hour <= 5:
+            self.time_period = "night"
+        elif hour == 6:
+            self.time_period = "dawn"
+        elif hour == 7:
+            self.time_period = "sunrise"
+        else:  # 8-21
+            self.time_period = "daytime"
+    
+    def _update_temperature(self):
+        """
+        Update temperature using a stochastic model based on daily cycles.
+        
+        Temperature model:
+        - Sinusoidal daily cycle peaking at 2:30 PM, minimum at 6:30 AM
+        - Base temperature as the daily average
+        - Random daily variation (epsilon) that changes each day
+        - Small hourly noise for realistic fluctuations
+        - Updates only when the hour changes
+        """
+
+        current_hour = self.hour_of_day
+        
+        # Only update temperature when the hour changes
+        if current_hour == self.last_temperature_update_hour:
+            return
+        
+        # Check if it's a new day (reset daily random offset)
+        if current_hour == 0 or self.last_temperature_update_hour == -1:
+            # New day - generate new daily random offset
+            self.daily_random_offset = random.gauss(0, self.daily_random_epsilon)
+            self.logger.debug(f"New day: daily temperature offset = {self.daily_random_offset:.2f}°C")
+        
+        # Calculate time-based temperature using sinusoidal model
+        # Peak at 14.5 hours (2:30 PM), minimum at 6.5 hours (6:30 AM)
+        peak_hour = 14.5
+        hour_angle = 2 * math.pi * (current_hour - peak_hour) / 24
+        
+        # Cosine wave: +1 at peak, -1 at minimum
+        daily_variation = math.cos(hour_angle)
+        
+        # Calculate temperature components
+        base_temp = self.base_temperature
+        daily_cycle = self.daily_temperature_amplitude * daily_variation
+        daily_random = self.daily_random_offset
+        hourly_noise = random.gauss(0, self.hourly_noise_std)
+        
+        # Final temperature
+        self.temperature = base_temp + daily_cycle + daily_random + hourly_noise
+        
+        # Update tracking
+        self.last_temperature_update_hour = current_hour
+        
+        # Record temperature reading for statistics
+        self.temperature_history.append({
+            'step': self.step_count,
+            'hour': current_hour,
+            'day': self.day_count,
+            'time_period': self.time_period,
+            'temperature': self.temperature
+        })
+        
+        # Log temperature changes (debug output)
+        if self.step_count % 60 == 0:  # Log every hour
+            print(f"DEBUG Temperature - Hour {current_hour:02d}: {self.temperature:.1f}°C "
+                  f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "
+                  f"daily_offset={daily_random:.1f}, noise={hourly_noise:.1f})")
+            print(f"DEBUG Time Period: '{self.time_period}' ")
+            
+            # Also log with logger for file output
+            self.logger.debug(
+                f"Hour {current_hour:02d}: T={self.temperature:.1f}°C "
+                f"(base={base_temp:.1f}, cycle={daily_cycle:.1f}, "
+                f"daily_offset={daily_random:.1f}, noise={hourly_noise:.1f})"
+            )
+    
+    def get_environmental_context(self):
+
+        context = {
+            'temperature': self.temperature,
+            'time_period': self.time_period,
+            'hour': self.hour_of_day,
+        }
+        return context
+    
+
+    
+    def set_temperature_model_parameters(self, daily_amplitude=6.0, daily_epsilon=2.0, hourly_noise=0.5):
+        """
+        Configure the stochastic temperature model parameters.
+        
+        Args:
+            daily_amplitude (float): Daily temperature variation amplitude (±°C from base)
+            daily_epsilon (float): Random daily variation amplitude (standard deviation)
+            hourly_noise (float): Hourly random noise standard deviation
+        """
+        self.daily_temperature_amplitude = daily_amplitude
+        self.daily_random_epsilon = daily_epsilon
+        self.hourly_noise_std = hourly_noise
+        self.logger.info(f"Temperature model updated: amplitude=±{daily_amplitude}°C, "
+                        f"daily_variation=±{daily_epsilon}°C, hourly_noise=±{hourly_noise}°C")
+    
+    def get_temperature_info(self):
+        """
+        Get detailed information about current temperature and model parameters.
+        
+        Returns:
+            dict: Temperature information including current, base, and model parameters
+        """
+        return {
+            'current_temperature': self.temperature,
+            'base_temperature': self.base_temperature,
+            'daily_amplitude': self.daily_temperature_amplitude,
+            'daily_epsilon': self.daily_random_epsilon,
+            'hourly_noise_std': self.hourly_noise_std,
+            'daily_random_offset': self.daily_random_offset,
+            'current_hour': self.hour_of_day,
+        }
+    
+    def calculate_temperature_statistics(self):
+        """
+        Calculate temperature statistics for individual day and night periods.
+        
+        Returns:
+            dict: Temperature statistics including individual daily and nightly averages
+        """
+        if not self.temperature_history:
+            return None
+        
+        # Group temperatures by individual day and night cycles
+        daily_periods = {}  # day_num -> {'day': [temps], 'night': [temps]}
+        
+        for record in self.temperature_history:
+            day_num = record['day'] + 1  # Convert 0-based to 1-based for display
+            
+            if day_num not in daily_periods:
+                daily_periods[day_num] = {'day': [], 'night': []}
+            
+            if record['time_period'] in ['daytime', 'dawn', 'sunrise']:
+                daily_periods[day_num]['day'].append(record['temperature'])
+            else:  # night
+                daily_periods[day_num]['night'].append(record['temperature'])
+        
+        # Calculate overall statistics
+        stats = {
+            'overall': {
+                'mean': sum(r['temperature'] for r in self.temperature_history) / len(self.temperature_history),
+                'min': min(r['temperature'] for r in self.temperature_history),
+                'max': max(r['temperature'] for r in self.temperature_history),
+                'count': len(self.temperature_history)
+            },
+            'daily_periods': {}
+        }
+        
+        # Calculate statistics for each day/night period
+        for day_num in sorted(daily_periods.keys()):
+            day_temps = daily_periods[day_num]['day']
+            night_temps = daily_periods[day_num]['night']
+            
+            stats['daily_periods'][day_num] = {}
+            
+            if day_temps:
+                stats['daily_periods'][day_num]['day'] = {
+                    'mean': sum(day_temps) / len(day_temps),
+                    'min': min(day_temps),
+                    'max': max(day_temps),
+                    'count': len(day_temps)
+                }
+            
+            if night_temps:
+                stats['daily_periods'][day_num]['night'] = {
+                    'mean': sum(night_temps) / len(night_temps),
+                    'min': min(night_temps),
+                    'max': max(night_temps),
+                    'count': len(night_temps)
+                }
+        
+        return stats
+    
+    def display_temperature_statistics(self):
+        """
+        Display temperature statistics for the simulation.
+        """
+        stats = self.calculate_temperature_statistics()
+        
+        if not stats:
+            print("No temperature data available for statistics.")
+            return
+        
+        print("\n" + "="*60)
+        print("TEMPERATURE STATISTICS")
+        print("="*60)
+        
+        # Overall statistics
+        overall = stats['overall']
+        print(f"Overall simulation:")
+        print(f"  Mean temperature: {overall['mean']:.1f}°C")
+        print(f"  Temperature range: {overall['min']:.1f}°C to {overall['max']:.1f}°C")
+        print(f"  Total readings: {overall['count']}")
+        print()
+        
+        # Individual day and night period statistics
+        if 'daily_periods' in stats and stats['daily_periods']:
+            print("Day and Night Period Averages:")
+            print("-" * 40)
+            
+            for day_num in sorted(stats['daily_periods'].keys()):
+                periods = stats['daily_periods'][day_num]
+                
+                if 'day' in periods:
+                    day_avg = periods['day']['mean']
+                    print(f"  Day {day_num} average temperature: {day_avg:.1f}°C")
+                
+                if 'night' in periods:
+                    night_avg = periods['night']['mean']
+                    print(f"  Night {day_num} average temperature: {night_avg:.1f}°C")
+                
+                # Add spacing between days for readability
+                if day_num < max(stats['daily_periods'].keys()):
+                    print()
+        
+        print("="*60)

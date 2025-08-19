@@ -1,27 +1,22 @@
-from environment.city_network import load_city_network, get_or_load_city_network
-from environment.pois import fetch_pois, filter_pois, create_dummy_pois, get_or_fetch_pois
-from simulation.model import FifteenMinuteCity
-from visualization import SimulationAnimator
 import matplotlib.pyplot as plt
-import sys
-import os
 import geopandas as gpd
 import json
+import os
+from config.poi_config import get_active_poi_config
+
+from environment.fifteenminutescity.city_network import load_city_network, get_or_load_city_network
+from environment.fifteenminutescity.pois import fetch_pois, filter_pois, get_or_fetch_pois, get_or_fetch_environment_data, get_or_fetch_3d_buildings
+from simulation.fifteenminutescity.fifteenminutescity_model import FifteenMinuteCity
+from visualization import SimulationAnimator
 import re
 import unicodedata
 
-# Import POI configuration
-try:
-    from config.poi_config import get_active_poi_config
-except ImportError:
-    # Create config directory if it doesn't exist
-    if not os.path.exists('config'):
-        os.makedirs('config')
-    print("POI configuration not found. Using default configuration (all POIs).")
-    get_active_poi_config = lambda: None
-
 # Shapefile path for Macau parishes
-DEFAULT_PARISHES_PATH = "./data/hongkong_shapefiles/hongkong_districts.gpkg"
+CITY_PARISHES_PATHS = {
+    "Macau, China": "./data/macau_shapefiles/macau_new_districts.gpkg",
+    "Barcelona, Spain": "./data/barcelona_shapefiles/barcelona_districts_clean.gpkg",
+    "Hong Kong, China": "./data/hongkong_shapefiles/hongkong_districts.gpkg"
+}
 
 # Macau parish population proportions (based on real demographics)
 MACAU_PARISH_PROPORTIONS = {
@@ -30,17 +25,28 @@ MACAU_PARISH_PROPORTIONS = {
     "So Loureno": 0.082,       # 8.2%
     "S": 0.083,                 # 8.3%
     "Nossa Senhora de Ftima": 0.368,  # 36.8%
-    "Nossa Senhora do Carmo": 0.155,   # 15.5%
-    "So Francisco Xavier": 0.054,     # 5.4%
-    "Zona do Aterro de Cotai": 0.005   # 0.5%
+    "Taipa": 0.160,            # 16.0% 
+    "Coloane": 0.054,          # 5.4% (formerly So Francisco Xavier)
 }
 
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
+
+def get_parishes_path(city):
+    """
+    Get the parishes shapefile path for a given city.
+    
+    Args:
+        city: Name of the city (e.g., 'Macau, China')
+        
+    Returns:
+        Path to the parishes shapefile or None if not available
+    """
+    return CITY_PARISHES_PATHS.get(city)
 
 def load_parishes(shapefile_path=None):
     """
-    Load Macau parishes from shapefile.
+    Load parishes from shapefile.
     
     Args:
         shapefile_path: Path to the shapefile containing parish data
@@ -48,9 +54,12 @@ def load_parishes(shapefile_path=None):
     Returns:
         GeoDataFrame with parishes data or None if file not found
     """
+    if shapefile_path is None:
+        print("No parishes shapefile path provided. Simulation will run without parish visualization.")
+        return None
+        
     try:
-        path = shapefile_path or DEFAULT_PARISHES_PATH
-        districts = gpd.read_file(path)
+        districts = gpd.read_file(shapefile_path)
         print(f"Successfully loaded parishes data!")
         print(f"Number of parishes/districts: {len(districts)}")
         return districts
@@ -82,84 +91,6 @@ def load_parish_demographics(demographics_path=None):
     except Exception as e:
         print(f"Warning: Could not load parish demographics: {e}")
         return {}
-
-def create_example_parish_demographics(parishes_gdf, output_path='config/parish_demographics.json'):
-    """
-    Create an example parish demographics file with different income distributions per parish.
-    
-    Args:
-        parishes_gdf: GeoDataFrame with parishes
-        output_path: Path to save the example demographics file
-        
-    Returns:
-        Dictionary with the created demographics
-    """
-    if parishes_gdf is None:
-        print("No parishes data available. Cannot create example demographics.")
-        return {}
-        
-    parish_demographics = {}
-    
-    # Create varying demographics for each parish
-    for i, parish in parishes_gdf.iterrows():
-        parish_name = parish['name']
-        
-        # Create different income distributions based on parish index
-        # This is just an example - in a real scenario, you'd use actual data
-        if i % 3 == 0:  # Wealthy parishes
-            income_dist = {"low": 0.1, "medium": 0.3, "high": 0.6}
-            income_ranges = {
-                "low": (30000, 50000),
-                "medium": (50001, 150000),
-                "high": (150001, 1000000)
-            }
-        elif i % 3 == 1:  # Middle-class parishes
-            income_dist = {"low": 0.2, "medium": 0.6, "high": 0.2}
-            income_ranges = {
-                "low": (15000, 40000),
-                "medium": (40001, 120000),
-                "high": (120001, 500000)
-            }
-        else:  # Working-class parishes
-            income_dist = {"low": 0.6, "medium": 0.3, "high": 0.1}
-            income_ranges = {
-                "low": (8000, 25000),
-                "medium": (25001, 80000),
-                "high": (80001, 300000)
-            }
-            
-        # Also vary age distributions
-        if i % 2 == 0:  # Younger parishes
-            age_dist = {"0-18": 0.3, "19-35": 0.4, "36-65": 0.2, "65+": 0.1}
-        else:  # Older parishes
-            age_dist = {"0-18": 0.1, "19-35": 0.2, "36-65": 0.4, "65+": 0.3}
-            
-        parish_demographics[parish_name] = {
-            "income_distribution": income_dist,
-            "income_ranges": income_ranges,
-            "age_distribution": age_dist,
-            # Keep the same gender and education distributions as global
-            "gender_distribution": {"male": 0.49, "female": 0.49, "other": 0.02},
-            "education_distribution": {
-                "no_education": 0.1,
-                "primary": 0.2,
-                "high_school": 0.4,
-                "bachelor": 0.2,
-                "master": 0.08,
-                "phd": 0.02
-            }
-        }
-    
-    # Save the example demographics to a file
-    try:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, 'w') as f:
-            json.dump(parish_demographics, f, indent=4)
-        print(f"Example parish demographics saved to {output_path}")
-    except Exception as e:
-        print(f"Warning: Could not save example demographics: {e}")
-    
-    return parish_demographics
 
 def clean_parish_name(name):
     """
@@ -384,7 +315,7 @@ def calculate_proportional_distribution(selected_parishes, total_residents, rand
     
     return distribution
 
-def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, create_example_demographics=False, use_dummy_pois=False, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None):
+def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None, parish_demographics_path=None, selected_parishes=None, list_parishes=False, random_distribution=False, needs_selection='random', movement_behavior='need-based', save_network=None, load_network=None, save_pois=None, load_pois=None, save_json_report=None, city='Macau, China', save_environment=None, load_environment=None, seed=42, threshold=15, no_visualization=False, interactive=False, save_buildings=None, load_buildings=None, base_temperature=25, percent_sick=0.0):
     """
     Run the 15-minute city simulation.
     
@@ -393,12 +324,34 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
         load_network: Path to load the network from (instead of OSM)
         save_pois: Path to save the POIs after fetching from OSM
         load_pois: Path to load the POIs from (instead of OSM)
+        save_environment: Path to save the environment data (buildings, water, cliffs) after fetching from OSM
+        load_environment: Path to load the environment data from (instead of OSM)
+        save_json_report: Path to save the detailed JSON report (optional)
+        city: Name of the city for the simulation (default: 'Macau, China')
+        threshold: Time threshold in minutes for accessibility (default: 15)
+        no_visualization: If True, run simulation without visualization for faster execution
+        interactive: If True, enable enhanced visualization with 3D buildings and interactive features
+        save_buildings: Path to save the 3D buildings after fetching from OSM
+        load_buildings: Path to load the 3D buildings from (instead of OSM)
+        base_temperature: Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave simulation)
     """
-    print("Loading Macau's street network...")
+    # Get parishes path based on city if not explicitly provided
+    if parishes_path is None:
+        parishes_path = get_parishes_path(city)
+        if parishes_path is None:
+            print(f"No parishes data available for {city}. Simulation will run without parish visualization.")
+    
+    # If user just wants to list parishes, do that and exit early
+    if list_parishes:
+        parishes_gdf = load_parishes(parishes_path)
+        print_available_parishes(parishes_gdf)
+        return
+    
+    print(f"Loading {city}'s street network...")
     
     # Use the new save/load functionality for the network
     graph = get_or_load_city_network(
-        place_name="Hong Kong, China",
+        place_name=city,
         mode="walk",
         save_path=save_network,
         load_path=load_network
@@ -406,11 +359,6 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     
     # Load parishes data
     parishes_gdf = load_parishes(parishes_path)
-    
-    # If user wants to list parishes, do that and exit
-    if list_parishes:
-        print_available_parishes(parishes_gdf)
-        return
     
     # Filter graph by selected parishes if specified
     if selected_parishes and parishes_gdf is not None:
@@ -440,12 +388,8 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
                     all_parish_names, num_residents, random_distribution
                 )
     
-    # Load or create parish-specific demographics
-    parish_demographics = {}
-    if create_example_demographics and parishes_gdf is not None:
-        parish_demographics = create_example_parish_demographics(parishes_gdf)
-    else:
-        parish_demographics = load_parish_demographics(parish_demographics_path)
+    # Load parish-specific demographics
+    parish_demographics = load_parish_demographics(parish_demographics_path)
     
     # Get POI configuration from config file if not explicitly provided
     if selected_pois is None:
@@ -456,101 +400,255 @@ def run_simulation(num_residents, steps, selected_pois=None, parishes_path=None,
     else:
         print("Using all available POI types")
     
-    # Fetch POIs - either dummy, from file, or from OSM
-    if use_dummy_pois:
-        print("Using dummy POIs for testing...")
-        pois = create_dummy_pois(graph, num_per_category=5)
-    else:
-        # Use the new save/load functionality for POIs
-        pois = get_or_fetch_pois(
-            graph=graph,
-            place_name="Hong Kong, China",
-            selected_pois=selected_pois,
-            save_path=save_pois,
-            load_path=load_pois
+    # Use the new save/load functionality for POIs
+    pois = get_or_fetch_pois(
+        graph=graph,
+        place_name=city,
+        selected_pois=selected_pois,
+        save_path=save_pois,
+        load_path=load_pois
+    )
+    
+    # Fetch or load environment data (buildings, water bodies, cliffs)
+    environment_data = get_or_fetch_environment_data(
+        place_name=city,
+        save_path=save_environment,
+        load_path=load_environment
+    )
+    
+    # Extract components from environment data
+    residential_buildings = environment_data.get('residential_buildings', gpd.GeoDataFrame())
+    water_bodies = environment_data.get('water_bodies', gpd.GeoDataFrame())
+    cliffs = environment_data.get('cliffs', gpd.GeoDataFrame())
+    forests = environment_data.get('forests', gpd.GeoDataFrame())
+    
+    # Load 3D buildings only if explicitly requested (not automatically in interactive mode)
+    buildings_3d = None
+    if (save_buildings or load_buildings) and not no_visualization:
+        print("Loading 3D buildings for enhanced visualization...")
+        buildings_3d = get_or_fetch_3d_buildings(
+            place_name=city,
+            save_path=save_buildings,
+            load_path=load_buildings
         )
+        if buildings_3d is not None:
+            print(f"✅ Loaded {len(buildings_3d)} 3D buildings")
+        else:
+            print("⚠️  No 3D buildings found - will continue without building heights")
+    elif interactive and not no_visualization:
+        print("💡 Interactive mode enabled without 3D buildings")
+        print("   To add 3D buildings, use --save-buildings or --load-buildings")
+        print("   Features available: zoom, pan, layer controls")
+    
+    if not residential_buildings.empty:
+        print(f"Found {len(residential_buildings)} residential buildings.")
+    else:
+        print("No residential buildings found or loaded.")
+        
+    if not water_bodies.empty:
+        print(f"Found {len(water_bodies)} water bodies.")
+    else:
+        print("No water bodies found or loaded.")
+        
+    if not cliffs.empty:
+        print(f"Found {len(cliffs)} cliffs and barriers.")
+    else:
+        print("No cliffs and barriers found or loaded.")
+        
+    if not forests.empty:
+        print(f"Found {len(forests)} forests and green areas.")
+    else:
+        print("No forests and green areas found or loaded.")
     
     # Filter POIs by selected parishes
     if selected_parishes and parishes_gdf is not None:
         pois = filter_pois_by_parishes(pois, graph, parishes_gdf, selected_parishes)
     
     print(f"Spawning {num_residents} residents...")
+    print(f"Base temperature: {base_temperature}°C" + (" (HEATWAVE CONDITIONS)" if base_temperature >= 35 else ""))
     model = FifteenMinuteCity(
-        graph, 
-        pois, 
+        graph=graph,
+        pois=pois,
         num_residents=num_residents,
         parishes_gdf=parishes_gdf,
         parish_demographics=parish_demographics,
         parish_distribution=parish_distribution,
         random_distribution=random_distribution,
-        needs_selection=needs_selection,
-        movement_behavior=movement_behavior
+        city=city,
+        residential_buildings=residential_buildings,
+        seed=seed,
+        threshold=threshold,
+        base_temperature=base_temperature
     )
+
+    # Initialize a percentage of residents as sick (for behavior studies)
+    try:
+        pct = max(0.0, min(100.0, float(percent_sick)))
+    except Exception:
+        pct = 0.0
+    if pct > 0 and len(model.residents) > 0:
+        num_sick = max(1, int(len(model.residents) * pct / 100.0))
+        # Use model's RNG for reproducibility
+        selected = model.random.sample(model.residents, k=min(num_sick, len(model.residents)))
+        for r in selected:
+            setattr(r, 'health_status', 'sick')
+        print(f"Initialized {len(selected)} sick residents out of {len(model.residents)} ({pct:.1f}%)")
     
     print("Starting simulation...")
-    # Set up interactive mode
-    plt.ion()  # Turn on interactive mode
-    fig, ax = plt.subplots(figsize=(12, 10))
     
-    # Initialize animator with parishes data
-    animator = SimulationAnimator(model, graph, ax=ax, parishes_gdf=parishes_gdf)
-    
-    # Configure animator to use specific styling for selected POIs
-    if selected_pois:
-        animator.use_specific_poi_styling = True
-    
-    animator.initialize()  # Draw initial state
-    
-    # Start the animation loop
-    animator.start_animation(steps, interval=50)  # 50ms between frames
-    
-    plt.ioff()  # Turn off interactive mode
-    plt.show()  # Keep window open at end
+    if no_visualization:
+        # Run simulation without visualization (headless mode) - much faster
+        print("Running in headless mode (no visualization)...")
+        print(f"Simulating {steps} time steps...")
+        
+        # Run the simulation steps directly
+        for step in range(steps):
+            model.step()
+            
+            # Print progress every 60 steps (1 hour in simulation time)
+            if step % 60 == 0 or step == steps - 1:
+                time_info = model.get_current_time()
+                print(f"Step {step + 1}/{steps} - {time_info['time_string']}")
+        
+        print("Simulation completed!")
+        
+        # Print final statistics
+        if hasattr(model, 'output_controller'):
+            model.output_controller.print_travel_summary()
+        
+        # Display path selection analysis
+        if hasattr(model, 'display_path_selection_summary'):
+            model.display_path_selection_summary()
+        
+        # Display unmet demand analysis
+        if hasattr(model, 'display_unmet_demand_summary'):
+            model.display_unmet_demand_summary()
+        
+        # Display temperature statistics
+        if hasattr(model, 'display_temperature_statistics'):
+            model.display_temperature_statistics()
+        
+        # Display heatwave statistics (removed - functionality not implemented)
+        # if hasattr(model, 'display_heatwave_statistics'):
+        #     model.display_heatwave_statistics()
+    else:
+        # Run simulation with visualization
+        if interactive:
+            print("🎮 Running with INTERACTIVE visualization...")
+            if buildings_3d is not None:
+                print("   Features: 3D buildings, zoom, pan, layer controls")
+            else:
+                print("   Features: zoom, pan, layer controls")
+        else:
+            print("📊 Running with standard visualization...")
+        
+        # Set up interactive mode
+        plt.ion()  # Turn on interactive mode
+        fig, ax = plt.subplots(figsize=(12, 10))
+        
+        # Initialize animator with parishes data, environment components, and interactive features
+        animator = SimulationAnimator(
+            model, 
+            graph, 
+            ax=ax, 
+            parishes_gdf=parishes_gdf,
+            residential_buildings=residential_buildings,
+            water_bodies=water_bodies,
+            cliffs=cliffs,
+            forests=forests,
+            buildings_3d=buildings_3d,
+            interactive=interactive
+        )
+        
+        # Configure animator to use specific styling for selected POIs
+        if selected_pois:
+            animator.use_specific_poi_styling = True
+        
+        animator.initialize()  # Draw initial state
+        
+        # Start the animation loop
+        animator.start_animation(steps, interval=25)  # 50ms between frames
+        
+        plt.ioff()  # Turn off interactive mode
+        plt.show()  # Keep window open at end
+        
+        # Display path selection analysis for visualization mode too
+        if hasattr(model, 'display_path_selection_summary'):
+            model.display_path_selection_summary()
+        
+        # Display unmet demand analysis
+        if hasattr(model, 'display_unmet_demand_summary'):
+            model.display_unmet_demand_summary()
+        
+        # Display temperature statistics for visualization mode too
+        if hasattr(model, 'display_temperature_statistics'):
+            model.display_temperature_statistics()
+        
+        # Display heatwave statistics for visualization mode too (removed - functionality not implemented)
+        # if hasattr(model, 'display_heatwave_statistics'):
+        #     model.display_heatwave_statistics()
+        
+    hc_points_path = (save_json_report.replace(".json", "_hc.json") if save_json_report else "reports/healthcare_points.json")
+    model.output_controller.save_healthcare_access_points(hc_points_path)
+    # Save JSON reports if requested (works for both modes)
+    if save_json_report:
+        print(f"\nSaving detailed JSON report to: {save_json_report}")
+        model.output_controller.save_detailed_report(save_json_report)
+        # Also save concise summary next to it
+        model.output_controller.save_summary_report(save_json_report)
 
 if __name__ == "__main__":
     # Parse command line arguments
     import argparse
     parser = argparse.ArgumentParser(description='Run the 15-minute city simulation with Macau parishes')
-    parser.add_argument('--essential-only', action='store_true', help='Only use essential services POIs')
-    parser.add_argument('--all-pois', action='store_true', help='Use all available POI types')
-    parser.add_argument('--residents', type=int, default=1, help='Number of resident agents')
-    parser.add_argument('--steps', type=int, default=50, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
-    parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
-    parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file')
-    parser.add_argument('--create-example-demographics', action='store_true', help='Create example parish demographics')
-    parser.add_argument('--use-dummy-pois', action='store_true', help='Use dummy POIs for testing')
     
+    # Add seed argument at the top for visibility
+    parser.add_argument('--seed', type=int, default=56, help='Random seed for reproducible results (default: 42)')
+    
+    parser.add_argument('--residents', type=int, default=15, help='Number of resident agents')
+    parser.add_argument('--steps', type=int, default=960, help='Number of simulation steps (1 step = 1 minute, default: 480 = 8 hours)')
+    parser.add_argument('--threshold', type=int, default=15, help='Time threshold in minutes for accessibility (default: 15 for 15-minute city, use 10 for 10-minute city, etc.)')
+    parser.add_argument('--base-temperature', type=float, default=30.0, help='Base temperature in Celsius for the simulation (default: 25°C, use 35+ for heatwave conditions)')
+    parser.add_argument('--percent-sick', type=float, default=100.0, help='Percentage of residents initialized as sick (0-100)')
+    parser.add_argument('--parishes-path', type=str, help='Path to parishes/districts shapefile')
+    parser.add_argument('--parish-demographics', type=str, help='Path to parish-specific demographics JSON file', default=r"C:\Users\pierr\UNU_macau\ABM_LLMs\data\demographics_macau\parish_demographic.json")
     parser.add_argument('--parishes', nargs='+', help='List of parish names to include in simulation (e.g., --parishes "Parish A" "Parish B")')
     #--parishes "S" "Nossa Senhora de Ftima" "So Lzaro" "Santo Antnio" "So Loureno" for the old town of macau
-    #--parishes "So Francisco Xavier" "Nossa Senhora do Carmo" "Zona do Aterro de Cotai" for the new city of macau
+    #--parishes "Taipa" "Coloane" for the new city of macau
     parser.add_argument('--list-parishes', action='store_true', help='List all available parish names and exit')
     parser.add_argument('--random-distribution', action='store_true', help='Distribute residents randomly across parishes instead of using proportional distribution (default: False)')
-    parser.add_argument('--needs-selection', type=str, choices=['random', 'maslow', 'capability', 'llms'], default='random', help='Method for generating resident needs (default: random)')
-    parser.add_argument('--movement-behavior', type=str, choices=['need-based', 'random'], default='random', help='Agent movement behavior: need-based (agents go to POIs to satisfy needs) or random (agents move randomly) (default: need-based)')
-    
-    # Save/Load arguments for faster testing
     parser.add_argument('--save-network', type=str, help='Path to save the city network after loading from OSM (e.g., data/macau_network.pkl)')
-    #python main.py --save-network data/macau_network.pkl --save-pois data/macau_pois.pkl
     parser.add_argument('--load-network', type=str, help='Path to load the city network from file instead of OSM (e.g., data/macau_network.pkl)')
-    #python main.py --load-network data/macau_network.pkl --load-pois data/macau_pois.pkl
+    #python main.py --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl
     parser.add_argument('--save-pois', type=str, help='Path to save the POIs after fetching from OSM (e.g., data/macau_pois.pkl)')
     parser.add_argument('--load-pois', type=str, help='Path to load the POIs from file instead of OSM (e.g., data/macau_pois.pkl)')
+    parser.add_argument('--save-environment', type=str, help='Path to save the environment data (buildings, water, cliffs) after fetching from OSM (e.g., data/macau_environment.pkl)')
+    parser.add_argument('--load-environment', type=str, help='Path to load the environment data from file instead of OSM (e.g., data/macau_environment.pkl)')
     
+    # JSON report argument
+    parser.add_argument('--save-json-report', type=str, help='Path to save the detailed JSON simulation report (e.g., reports/simulation_report.json)')
+    
+    # City argument
+    parser.add_argument('--city', type=str, default='Macau, China', help='City name for the simulation (default: Macau, China)')
+    
+    # No visualization argument
+    parser.add_argument('--no-visualization', action='store_true', help='Run simulation without visualization for faster execution')
+    
+    # Interactive visualization argument
+    parser.add_argument('--interactive', action='store_true', help='Enable enhanced visualization with zoom, pan, and layer controls (3D buildings optional - use --save-buildings or --load-buildings to include them)')
+    parser.add_argument('--save-buildings', type=str, help='Path to save the 3D buildings after fetching from OSM (e.g., data/macau_buildings.gpkg)')
+    parser.add_argument('--load-buildings', type=str, help='Path to load the 3D buildings from file instead of OSM (e.g., data/macau_buildings.gpkg)')
+    
+
+    #python main.py --city "Macau, China" --load-environment data/macau_shapefiles/macau_environment.pkl --parishes "Taipa" "Coloane" --load-network data/macau_shapefiles/macau_network.pkl --load-pois data/macau_shapefiles/macau_pois.pkl --interactive 
+
     args = parser.parse_args()
+    #Good simulations :
+    #python main.py --load-network data/barcelona_shapefiles/barcelona_network.pkl --load-pois data/barcelona_shapefiles/barcelona_pois.pkl --parishes "Ciutat Vella"
     
-    # Get POI configuration
-    if args.essential_only:
-        try:
-            from config.poi_config import ESSENTIAL_SERVICES_ONLY
-            selected_pois = ESSENTIAL_SERVICES_ONLY
-        except ImportError:
-            print("Essential services configuration not found. Using all POIs.")
-            selected_pois = None
-    elif args.all_pois:
-        selected_pois = None
-    else:
-        # Use configuration from config file
-        selected_pois = get_active_poi_config()
+    # Use configuration from config file
+    selected_pois = get_active_poi_config()
     
     run_simulation(
         num_residents=args.residents, 
@@ -558,15 +656,23 @@ if __name__ == "__main__":
         selected_pois=selected_pois,
         parishes_path=args.parishes_path,
         parish_demographics_path=args.parish_demographics,
-        create_example_demographics=args.create_example_demographics,
-        use_dummy_pois=args.use_dummy_pois,
         selected_parishes=args.parishes,
         list_parishes=args.list_parishes,
         random_distribution=args.random_distribution,
-        needs_selection=args.needs_selection,
-        movement_behavior=args.movement_behavior,
         save_network=args.save_network,
         load_network=args.load_network,
         save_pois=args.save_pois,
-        load_pois=args.load_pois
+        load_pois=args.load_pois,
+        save_json_report=args.save_json_report,
+        city=args.city,
+        save_environment=args.save_environment,
+        load_environment=args.load_environment,
+        seed=args.seed,
+        threshold=args.threshold,
+        no_visualization=args.no_visualization,
+        interactive=args.interactive,
+        save_buildings=args.save_buildings,
+        load_buildings=args.load_buildings,
+        base_temperature=args.base_temperature,
+        percent_sick=args.percent_sick
     )

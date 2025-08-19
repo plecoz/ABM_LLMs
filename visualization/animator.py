@@ -1,22 +1,38 @@
 from matplotlib.animation import FuncAnimation
 import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
+from matplotlib.patches import FancyArrowPatch
+from matplotlib import patheffects
 import osmnx as ox
-from .base_plot import BaseMap  # Relative import from same package
-from .agent_plot import AgentPlotter
+from .interactive_matplotlib import InteractiveEnhancer, Enhanced3DBuildings
 import numpy as np
-import geopandas as gpd
-import os
 import networkx as nx
 
 
+
 class SimulationAnimator:
-    def __init__(self, model, graph, ax=None, parishes_gdf=None):
+    def __init__(self, model, graph, ax=None, parishes_gdf=None, residential_buildings=None, water_bodies=None, cliffs=None, forests=None, buildings_3d=None, interactive=False):
         self.model = model
         self.graph = graph
         self.fig = ax.figure if ax else plt.figure(figsize=(12, 10))
         self.ax = ax if ax else self.fig.add_subplot(111)
         self.parishes_gdf = parishes_gdf  # GeoDataFrame containing parishes
+        self.residential_buildings = residential_buildings
+        self.water_bodies = water_bodies  # GeoDataFrame containing water bodies
+        self.cliffs = cliffs  # GeoDataFrame containing cliffs and barriers
+        self.forests = forests  # GeoDataFrame containing forests and green areas
+        self.buildings_3d = buildings_3d  # GeoDataFrame containing 3D buildings
+        
+        # Interactive features
+        self.interactive = interactive
+        self.interactive_enhancer = None
+        self.building_plotter = None
+        
+        # Set font to support Chinese characters if available
+        try:
+            plt.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'Arial Unicode MS']
+            plt.rcParams['axes.unicode_minus'] = False  # Ensure minus sign is displayed correctly
+        except Exception:
+            print("Warning: CJK-compatible font not found. Chinese characters in plot may not display correctly.")
         
         # Initialize plot elements
         self.base_plot = self._create_base_plot()
@@ -36,6 +52,7 @@ class SimulationAnimator:
             "education": "#2196F3",      # Blue
             "entertainment": "#4CAF50",  # Green
             "transportation": "#000000", # Black
+            "casino": "#9C27B0",         # Purple
             "other": "#9E9E9E"           # Gray
         }
         
@@ -46,11 +63,16 @@ class SimulationAnimator:
             "education": "^",            # Triangle up
             "entertainment": "*",        # Star
             "transportation": "d",       # Diamond
+            "casino": "D",               # Large diamond
             "other": "o"                 # Circle
         }
         
         # Flag to determine whether to use specific POI styling
         self.use_specific_poi_styling = True
+        
+        # Setup interactive features if requested
+        if self.interactive:
+            self._setup_interactive_features()
     
     def _create_base_plot(self):
         """Draw the static map background with parishes if available"""
@@ -66,13 +88,24 @@ class SimulationAnimator:
                 legend_kwds={'title': 'Parishes', 'loc': 'lower left'}
             )
             
-            # Add parish labels
-            for x, y, label in zip(
-                self.parishes_gdf.geometry.centroid.x,
-                self.parishes_gdf.geometry.centroid.y,
-                self.parishes_gdf['name']
-            ):
-                self.ax.text(x, y, label, fontsize=8, ha='center')
+            # For accurate centroid calculation, project to a local UTM zone
+            try:
+                # Estimate the UTM CRS for the geometries, which is more robust
+                utm_crs = self.parishes_gdf.estimate_utm_crs()
+                # Project to the estimated UTM CRS
+                projected_parishes = self.parishes_gdf.to_crs(utm_crs)
+                
+                # Calculate centroids in projected space
+                projected_centroids = projected_parishes.geometry.centroid
+                # Convert centroids back to the original CRS for plotting
+                centroids_geo = projected_centroids.to_crs(self.parishes_gdf.crs)
+
+                # Add parish labels at the accurate centroid
+                for geom, label in zip(centroids_geo, self.parishes_gdf['name']):
+                    self.ax.text(geom.x, geom.y, label, fontsize=8, ha='center',
+                                 path_effects=[patheffects.withStroke(linewidth=2, foreground='white')])
+            except Exception as e:
+                print(f"Warning: Could not plot parish labels due to projection error: {e}")
         
         # Then plot the street network on top
         return ox.plot_graph(
@@ -86,17 +119,119 @@ class SimulationAnimator:
             edge_linewidth=0.7
         )
     
+    def _setup_interactive_features(self):
+        """Setup interactive features for the plot."""
+        print("Setting up interactive features...")
+        
+        # Create interactive enhancer
+        self.interactive_enhancer = InteractiveEnhancer(self.ax, self.fig)
+        
+        # Create building plotter if 3D buildings are available
+        if self.buildings_3d is not None:
+            self.building_plotter = Enhanced3DBuildings(self.ax)
+            
+        # Add layer controls
+        self.interactive_enhancer.add_layer_controls()
+        
+        # Update figure layout for controls
+        self.fig.subplots_adjust(bottom=0.1)
+        
+        # Add instructions
+        instructions = "🖱️ Scroll: Zoom | Drag: Pan | R: Reset | H: Help | Left Panel: Toggle Layers"
+        self.fig.text(0.5, 0.02, instructions, ha='center', fontsize=10, 
+                     style='italic', bbox=dict(boxstyle="round,pad=0.3", 
+                     facecolor="lightblue", alpha=0.7))
+        
+        print("✅ Interactive features ready!")
+    
     def initialize(self):
-        """Draw initial state"""
+        """Initialize the plot with the static elements."""
+        self.ax.clear()
+        
+        # Plot water bodies first (lowest layer)
+        if self.water_bodies is not None and not self.water_bodies.empty:
+            collections_before = len(self.ax.collections)
+            water_artist = self.water_bodies.plot(ax=self.ax, facecolor='#4FC3F7', edgecolor='#0277BD', linewidth=0.5, alpha=0.7, zorder=0)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
+        
+        # Plot forests and green areas
+        if self.forests is not None and not self.forests.empty:
+            collections_before = len(self.ax.collections)
+            forest_artist = self.forests.plot(ax=self.ax, facecolor='#66BB6A', edgecolor='#2E7D32', linewidth=0.5, alpha=0.6, zorder=1)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
+        
+        # Plot cliffs and barriers
+        if self.cliffs is not None and not self.cliffs.empty:
+            collections_before = len(self.ax.collections)
+            cliff_artist = self.cliffs.plot(ax=self.ax, facecolor='#8D6E63', edgecolor='#5D4037', linewidth=0.8, alpha=0.8, zorder=2)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
+        
+        # Plot residential buildings
+        if self.residential_buildings is not None and not self.residential_buildings.empty:
+            collections_before = len(self.ax.collections)
+            residential_artist = self.residential_buildings.plot(ax=self.ax, facecolor='#d3d3d3', edgecolor='gray', linewidth=0.5, zorder=3)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'buildings')
+        
+        # Plot 3D buildings with enhanced visualization
+        if self.buildings_3d is not None and not self.buildings_3d.empty and self.building_plotter:
+            self.building_plotter.plot_3d_buildings(self.buildings_3d, self.interactive_enhancer)
+            self.building_plotter.add_building_info_on_click(self.buildings_3d)
+        
+        # Plot the street network
+        lines_before = len(self.ax.lines)
+        street_plot = ox.plot_graph(self.graph, ax=self.ax, node_size=0, edge_color='gray', edge_linewidth=0.5, show=False, close=False)
+        if self.interactive_enhancer:
+            # Register the new lines that were added
+            for line in self.ax.lines[lines_before:]:
+                self.interactive_enhancer.register_layer_artist(line, 'streets')
+        
+        # Plot parishes if available (on top of everything else)
+        if self.parishes_gdf is not None:
+            collections_before = len(self.ax.collections)
+            parish_artist = self.parishes_gdf.plot(ax=self.ax, edgecolor='black', facecolor='none', linewidth=1.5, zorder=5)
+            if self.interactive_enhancer:
+                # Register the new collections that were added
+                for collection in self.ax.collections[collections_before:]:
+                    self.interactive_enhancer.register_layer_artist(collection, 'streets')
+
+        # Plot POIs
         self._plot_poi_agents()
+        
+        # Plot initial resident positions
         self._plot_residents()
+        
+        self._add_scale_bar()
+        self._add_north_arrow()
         self._create_legend()
         
-        # Set title with parishes information
+        # Set title with environment information
+        title_parts = ["Macau 15-Minute City"]
+        if self.interactive:
+            title_parts.append("(Interactive)")
         if self.parishes_gdf is not None:
-            self.ax.set_title("Macau 15-Minute City with Parishes", fontsize=16)
-        else:
-            self.ax.set_title("Macau 15-Minute City", fontsize=16)
+            title_parts.append("with Parishes")
+        if (self.water_bodies is not None and not self.water_bodies.empty) or (self.cliffs is not None and not self.cliffs.empty) or (self.forests is not None and not self.forests.empty):
+            title_parts.append("and Environment")
+        if self.buildings_3d is not None:
+            title_parts.append("+ 3D Buildings")
+        
+        self.ax.set_title(" ".join(title_parts), fontsize=16)
+        
+        # Re-setup interactive features after clearing
+        if self.interactive and self.interactive_enhancer:
+            self.interactive_enhancer._setup_interaction()
             
         plt.draw()
     
@@ -168,6 +303,7 @@ class SimulationAnimator:
     def _get_interpolated_position(self, resident, progress):
         """
         Calculate the interpolated position of a traveling resident along the path.
+        Now works with 80-meter steps where each step = 80 meters of travel.
         
         Args:
             resident: The resident agent that is traveling
@@ -196,65 +332,70 @@ class SimulationAnimator:
             if len(path) <= 1:
                 return self.graph.nodes[start_node]['x'], self.graph.nodes[start_node]['y']
                 
-            # Calculate total travel time and remaining time
-            total_time = resident.travel_time_remaining + 1  # +1 because we've already decremented by 1
-            # Adjust progress to account for both the step progress and the interpolation progress
-            continuous_progress = 1 - ((resident.travel_time_remaining - progress) / total_time)
-            continuous_progress = max(0, min(1, continuous_progress))  # Clamp between 0 and 1
-            
-            # Calculate cumulative distances along the path
-            distances = [0]  # Start with 0 distance
+            # Calculate total path distance
             total_distance = 0
-            
             for i in range(len(path) - 1):
                 node1, node2 = path[i], path[i + 1]
-                # Get edge data
-                edge_data = self.graph.get_edge_data(node1, node2, 0)  # 0 is the default key for MultiDiGraph
-                # Get length or calculate Euclidean distance
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 if 'length' in edge_data:
-                    distance = edge_data['length']
+                    total_distance += edge_data['length']
                 else:
                     x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
                     x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
-                    distance = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                    total_distance += ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+            
+            # Calculate how far the agent should be along the path
+            # We need to know the original travel time to calculate progress correctly
+            # Since we don't store the original travel time, we'll calculate it from the path
+            original_travel_time = max(1, int(np.ceil(total_distance / 80.0)))
+            
+            # Calculate how many steps have been completed
+            steps_completed = original_travel_time - resident.travel_time_remaining
+            
+            # Add progress within the current step (0 to 1)
+            total_progress = steps_completed + progress
+            
+            # Calculate distance traveled so far (80 meters per step)
+            distance_traveled = total_progress * 80.0
+            
+            # Clamp to total distance to avoid overshooting
+            distance_traveled = min(distance_traveled, total_distance)
+            
+            # Find position along the path
+            current_distance = 0
+            for i in range(len(path) - 1):
+                node1, node2 = path[i], path[i + 1]
+                edge_data = self.graph.get_edge_data(node1, node2, 0)
                 
-                total_distance += distance
-                distances.append(total_distance)
-            
-            # Normalize distances to 0-1 range
-            if total_distance > 0:
-                distances = [d / total_distance for d in distances]
-            
-            # Find which segment the agent is on
-            target_distance = continuous_progress
-            segment_idx = 0
-            while segment_idx < len(distances) - 1 and distances[segment_idx + 1] < target_distance:
-                segment_idx += 1
+                if 'length' in edge_data:
+                    segment_length = edge_data['length']
+                else:
+                    x1, y1 = self.graph.nodes[node1]['x'], self.graph.nodes[node1]['y']
+                    x2, y2 = self.graph.nodes[node2]['x'], self.graph.nodes[node2]['y']
+                    segment_length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
                 
-            # If we're at the last node
-            if segment_idx >= len(distances) - 1:
-                return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
+                # Check if the target distance is within this segment
+                if current_distance + segment_length >= distance_traveled:
+                    # Interpolate within this segment
+                    segment_progress = (distance_traveled - current_distance) / segment_length
+                    segment_progress = max(0, min(1, segment_progress))  # Clamp to [0,1]
+                    
+                    # Get segment start and end positions
+                    start_x = self.graph.nodes[node1]['x']
+                    start_y = self.graph.nodes[node1]['y']
+                    end_x = self.graph.nodes[node2]['x']
+                    end_y = self.graph.nodes[node2]['y']
+                    
+                    # Interpolate position
+                    x = start_x + segment_progress * (end_x - start_x)
+                    y = start_y + segment_progress * (end_y - start_y)
+                    
+                    return x, y
                 
-            # Calculate interpolation within the segment
-            start_dist = distances[segment_idx]
-            end_dist = distances[segment_idx + 1]
+                current_distance += segment_length
             
-            if end_dist == start_dist:  # Avoid division by zero
-                segment_progress = 0
-            else:
-                segment_progress = (target_distance - start_dist) / (end_dist - start_dist)
-                
-            # Get segment start and end positions
-            start_x = self.graph.nodes[path[segment_idx]]['x']
-            start_y = self.graph.nodes[path[segment_idx]]['y']
-            end_x = self.graph.nodes[path[segment_idx + 1]]['x']
-            end_y = self.graph.nodes[path[segment_idx + 1]]['y']
-            
-            # Interpolate position
-            x = start_x + segment_progress * (end_x - start_x)
-            y = start_y + segment_progress * (end_y - start_y)
-            
-            return x, y
+            # If we've gone through all segments, return the end position
+            return self.graph.nodes[path[-1]]['x'], self.graph.nodes[path[-1]]['y']
             
         except Exception as e:
             # If there's any error, return the current position
@@ -273,27 +414,36 @@ class SimulationAnimator:
         """
         for resident in self.model.residents:
             try:
+
+                
                 if hasattr(resident, 'traveling') and resident.traveling:
                     # Get interpolated position for traveling agents
                     # Use progress to show position along the path within the current travel step
                     x, y = self._get_interpolated_position(resident, progress)
                     
-                    # Use a different color for traveling agents
-                    #Option to change the color of the traveling agents
-                    dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4, markeredgecolor='black',
+                    
+                    color = '#00BFFF'  
+                    dot = self.ax.plot(x, y, 'o', color=color, markersize=4, markeredgecolor='black',
                                         markeredgewidth=0.5, alpha=0.8)[0]  
                 else:
                     # For stationary agents, use the current node position
                     if hasattr(resident, 'current_node'):
                         x, y = self.graph.nodes[resident.current_node]['x'], self.graph.nodes[resident.current_node]['y']
-                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=4,
-                                           markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]  # Blue for stationary
+                        
+                        
+                        color =  '#00BFFF'  
+                        dot = self.ax.plot(x, y, 'o', color=color, markersize=4,
+                                           markeredgecolor='black', markeredgewidth=0.5, alpha=0.8)[0]
                     else:
                         # Use geometry if available
                         x, y = resident.geometry.x, resident.geometry.y
-                        dot = self.ax.plot(x, y, 'o', color='#00BFFF', markersize=3, alpha=0.7)[0]
                 
                 self.agent_dots.append(dot)
+                
+                # Register with interactive enhancer if available
+                if self.interactive_enhancer:
+                    self.interactive_enhancer.register_layer_artist(dot, 'agents')
+                    
             except Exception as e:
                 print(f"Error plotting resident {resident.unique_id}: {e}")
     
@@ -306,6 +456,7 @@ class SimulationAnimator:
             "education": 0,
             "entertainment": 0,
             "transportation": 0,
+            "casino": 0,
             "other": 0
         }
         
@@ -337,6 +488,11 @@ class SimulationAnimator:
                                      markersize=size, alpha=0.8)[0]
                 
                 self.poi_markers.append(marker)
+                
+                # Register with interactive enhancer if available
+                if self.interactive_enhancer:
+                    self.interactive_enhancer.register_layer_artist(marker, 'pois')
+                    
             except Exception as e:
                 print(f"Error plotting POI agent {poi.unique_id}: {e}")
         
@@ -358,6 +514,7 @@ class SimulationAnimator:
             "education": "Education",
             "entertainment": "Entertainment",
             "transportation": "Bus Stops",
+            "casino": "Casinos",
             "other": "Other POIs"
         }
         
@@ -378,6 +535,32 @@ class SimulationAnimator:
                       label='Residents')
         )
         
+
+        
+        # Add environment elements to legend if they exist
+        if self.residential_buildings is not None and not self.residential_buildings.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#d3d3d3', edgecolor='gray',
+                             label='Residential Buildings')
+            )
+        
+        if self.water_bodies is not None and not self.water_bodies.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#4FC3F7', edgecolor='#0277BD',
+                             alpha=0.7, label='Water Bodies')
+            )
+        
+        if self.forests is not None and not self.forests.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#66BB6A', edgecolor='#2E7D32',
+                             alpha=0.6, label='Forests & Green Areas')
+            )
+        
+        if self.cliffs is not None and not self.cliffs.empty:
+            legend_elements.append(
+                plt.Rectangle((0, 0), 1, 1, facecolor='#8D6E63', edgecolor='#5D4037',
+                             alpha=0.8, label='Cliffs & Barriers')
+            )
         
         # Create the legend
         self.ax.legend(handles=legend_elements, 
@@ -387,3 +570,98 @@ class SimulationAnimator:
         
         # Adjust figure to make room for legend
         self.fig.tight_layout()
+    
+    def _add_scale_bar(self):
+        """Add a scale bar to the bottom left of the map"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Calculate a reasonable scale bar length (about 10% of map width)
+        map_width = xlim[1] - xlim[0]
+        scale_length_deg = map_width * 0.1
+        
+        # Get the center latitude of the current map for accurate conversion
+        center_lat = (ylim[0] + ylim[1]) / 2
+        
+        # Convert to meters using the actual latitude
+        # At any latitude, 1 degree longitude ≈ 111,000 * cos(latitude) meters
+        scale_length_m = scale_length_deg * 111000 * np.cos(np.radians(center_lat))
+        
+        # Round to a nice number
+        if scale_length_m > 5000:
+            scale_length_m = round(scale_length_m / 1000) * 1000  # Round to nearest km
+            scale_text = f"{int(scale_length_m/1000)} km"
+        elif scale_length_m > 1000:
+            scale_length_m = round(scale_length_m / 500) * 500   # Round to nearest 500m
+            scale_text = f"{int(scale_length_m)} m"
+        else:
+            scale_length_m = round(scale_length_m / 100) * 100   # Round to nearest 100m
+            scale_text = f"{int(scale_length_m)} m"
+        
+        # Convert back to degrees for plotting using the same latitude
+        scale_length_deg = scale_length_m / (111000 * np.cos(np.radians(center_lat)))
+        
+        # Position the scale bar (bottom left corner with margins)
+        scale_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        scale_y = ylim[0] + (ylim[1] - ylim[0]) * 0.05
+        
+        # Draw the scale bar
+        scale_bar = self.ax.plot([scale_x, scale_x + scale_length_deg], 
+                                [scale_y, scale_y], 
+                                'k-', linewidth=3)[0]
+        
+        # Add tick marks at the ends
+        tick_height = (ylim[1] - ylim[0]) * 0.005
+        left_tick = self.ax.plot([scale_x, scale_x], 
+                                [scale_y - tick_height, scale_y + tick_height], 
+                                'k-', linewidth=2)[0]
+        right_tick = self.ax.plot([scale_x + scale_length_deg, scale_x + scale_length_deg], 
+                                 [scale_y - tick_height, scale_y + tick_height], 
+                                 'k-', linewidth=2)[0]
+        
+        # Add scale text
+        text_y = scale_y + (ylim[1] - ylim[0]) * 0.01
+        scale_label = self.ax.text(scale_x + scale_length_deg/2, text_y, scale_text,
+                                  ha='center', va='bottom', fontsize=10, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        scale_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+    
+    def _add_north_arrow(self):
+        """Add a north arrow above the scale bar in the bottom left area"""
+        # Get the current axis limits
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        
+        # Position the north arrow above the scale bar (bottom left area)
+        # Scale bar is at 5% from edges, so place arrow at same x but higher y
+        arrow_x = xlim[0] + (xlim[1] - xlim[0]) * 0.05
+        arrow_y = ylim[0] + (ylim[1] - ylim[0]) * 0.12  # Above scale bar area
+        
+        # Calculate arrow size
+        arrow_length = (ylim[1] - ylim[0]) * 0.04
+        arrow_width = (xlim[1] - xlim[0]) * 0.01
+        
+        # Create north arrow using FancyArrowPatch
+        arrow = FancyArrowPatch((arrow_x, arrow_y - arrow_length/2),
+                               (arrow_x, arrow_y + arrow_length/2),
+                               arrowstyle='-|>', 
+                               mutation_scale=20,
+                               color='black',
+                               linewidth=2)
+        self.ax.add_patch(arrow)
+        
+        # Add 'N' label
+        n_label = self.ax.text(arrow_x, arrow_y + arrow_length/2 + (ylim[1] - ylim[0]) * 0.015, 
+                              'N',
+                              ha='center', va='bottom', fontsize=12, fontweight='bold')
+        
+        # Add white outline to text for better visibility
+        n_label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='white')])
+        
+        # Add a background circle for better visibility
+        circle = plt.Circle((arrow_x, arrow_y), arrow_length * 0.7, 
+                          fill=True, facecolor='white', edgecolor='black', 
+                          alpha=0.8, linewidth=1)
+        self.ax.add_patch(circle)

@@ -29,6 +29,9 @@ POI_TYPES = {
     "transportation": [
         'bus_stop', 'bus_station', 'transit_stop', 'public_transport',
         'transport', 'station', 'transit', 'platform', 'stop_position'
+    ],
+    "casino": [
+        'casino', 'gambling', 'gaming'
     ]
 }
 
